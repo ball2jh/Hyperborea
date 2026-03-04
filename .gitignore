@@ -1,0 +1,36 @@
+# Gradle
+.gradle/
+build/
+!gradle/wrapper/gradle-wrapper.jar
+
+# IDE
+.idea/
+*.iml
+captures/
+
+# Android
+local.properties
+*.apk
+*.aab
+*.ap_
+*.dex
+
+# Signing keys
+iFit/firmware/keys/*
+!iFit/firmware/keys/README.md
+
+# Large binary assets (firmware images, stock APKs, backups)
+iFit/firmware/repack/
+iFit/firmware/backups/
+iFit/firmware/downloads/
+iFit/ifit_apps/
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+.venv/
+
+# OS
+.DS_Store
+Thumbs.db
