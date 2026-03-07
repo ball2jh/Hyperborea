@@ -3,6 +3,7 @@ package com.nettarion.hyperborea.broadcast.wftnp
 import com.nettarion.hyperborea.core.AppLogger
 import com.nettarion.hyperborea.core.ClientInfo
 import com.nettarion.hyperborea.core.DeviceCommand
+import com.nettarion.hyperborea.core.DeviceType
 import com.nettarion.hyperborea.core.ExerciseData
 import java.net.ServerSocket
 import java.util.concurrent.ConcurrentHashMap
@@ -16,6 +17,8 @@ import kotlinx.coroutines.withContext
 class WftnpServer(
     private val logger: AppLogger,
     private val scope: CoroutineScope,
+    private val deviceType: DeviceType,
+    private val serviceDef: WftnpServiceDefinition,
     private val onClientChange: (Set<ClientInfo>) -> Unit,
     private val onCommand: (DeviceCommand) -> Unit,
 ) {
@@ -42,6 +45,8 @@ class WftnpServer(
                             clientId = clientId,
                             input = clientSocket.getInputStream(),
                             output = clientSocket.getOutputStream(),
+                            deviceType = deviceType,
+                            serviceDef = serviceDef,
                             onCommand = onCommand,
                             logger = logger,
                         )

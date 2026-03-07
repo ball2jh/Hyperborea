@@ -3,6 +3,9 @@ package com.nettarion.hyperborea.broadcast.ftms
 import android.bluetooth.BluetoothGattCharacteristic
 import android.bluetooth.BluetoothGattDescriptor
 import android.bluetooth.BluetoothGattService
+import com.nettarion.hyperborea.core.DeviceInfo
+import com.nettarion.hyperborea.core.DeviceType
+import com.nettarion.hyperborea.core.FtmsDataEncoder
 import java.util.UUID
 
 object FtmsServiceBuilder {
@@ -18,9 +21,11 @@ object FtmsServiceBuilder {
     // FTMS characteristic UUIDs
     val FTMS_FEATURE_UUID: UUID = bleUuid(0x2ACC)
     val SUPPORTED_RESISTANCE_UUID: UUID = bleUuid(0x2AD6)
+    val SUPPORTED_INCLINATION_UUID: UUID = bleUuid(0x2AD5)
+    val SUPPORTED_POWER_UUID: UUID = bleUuid(0x2AD7)
     val FTMS_CONTROL_POINT_UUID: UUID = bleUuid(0x2AD9)
-    val INDOOR_BIKE_DATA_UUID: UUID = bleUuid(0x2AD2)
     val TRAINING_STATUS_UUID: UUID = bleUuid(0x2AD3)
+    val FITNESS_MACHINE_STATUS_UUID: UUID = bleUuid(0x2ADA)
 
     // CPS characteristic UUIDs
     val CPS_FEATURE_UUID: UUID = bleUuid(0x2A65)
@@ -31,10 +36,6 @@ object FtmsServiceBuilder {
     val CCCD_UUID: UUID = bleUuid(0x2902)
 
     // Static read values
-    val FTMS_FEATURE_VALUE = byteArrayOf(
-        0x83.toByte(), 0x14, 0x00, 0x00, 0x0C, 0xE0.toByte(), 0x00, 0x00,
-    )
-    val RESISTANCE_RANGE_VALUE = byteArrayOf(0x0A, 0x00, 0x96.toByte(), 0x00, 0x0A, 0x00)
     val TRAINING_STATUS_VALUE = byteArrayOf(0x00, 0x01)
     val CPS_FEATURE_VALUE = byteArrayOf(0x0C, 0x00, 0x00, 0x00)
     val SENSOR_LOCATION_VALUE = byteArrayOf(0x0D)
@@ -42,7 +43,30 @@ object FtmsServiceBuilder {
     // Default CCCD value (notifications/indications disabled)
     val CCCD_DISABLED = byteArrayOf(0x00, 0x00)
 
-    fun buildFtmsService(): BluetoothGattService {
+    fun dataCharacteristicUuid(deviceType: DeviceType): UUID =
+        bleUuid(FtmsDataEncoder.dataCharacteristicShortUuid(deviceType))
+
+    // Both BLE and WFTNP paths advertise the same feature set.
+    fun ftmsFeatureValue(deviceType: DeviceType): ByteArray = when (deviceType) {
+        DeviceType.BIKE -> byteArrayOf(
+            0x8F.toByte(), 0x56, 0x00, 0x00, 0x0E, 0xE0.toByte(), 0x00, 0x00,
+        )
+        DeviceType.TREADMILL -> TODO("Treadmill FTMS feature value")
+        DeviceType.ROWER -> TODO("Rower FTMS feature value")
+        DeviceType.ELLIPTICAL -> TODO("Cross Trainer FTMS feature value")
+    }
+
+    // Service Data AD Type (Section 3.1): Flags + Fitness Machine Type
+    // Flags: bit 0 = Fitness Machine Available (1 = true)
+    // Machine Type bits: 0=Treadmill, 1=Cross Trainer, 4=Rower, 5=Indoor Bike
+    fun serviceDataAdValue(deviceType: DeviceType): ByteArray = when (deviceType) {
+        DeviceType.BIKE -> byteArrayOf(0x01, 0x20, 0x00)       // bit 5
+        DeviceType.TREADMILL -> byteArrayOf(0x01, 0x01, 0x00)  // bit 0
+        DeviceType.ROWER -> byteArrayOf(0x01, 0x10, 0x00)      // bit 4
+        DeviceType.ELLIPTICAL -> byteArrayOf(0x01, 0x02, 0x00) // bit 1
+    }
+
+    fun buildFtmsService(deviceType: DeviceType): BluetoothGattService {
         val service = BluetoothGattService(
             FTMS_SERVICE_UUID,
             BluetoothGattService.SERVICE_TYPE_PRIMARY,
@@ -53,6 +77,12 @@ object FtmsServiceBuilder {
 
         // Supported Resistance Range — READ
         service.addCharacteristic(readCharacteristic(SUPPORTED_RESISTANCE_UUID))
+
+        // Supported Inclination Range — READ
+        service.addCharacteristic(readCharacteristic(SUPPORTED_INCLINATION_UUID))
+
+        // Supported Power Range — READ
+        service.addCharacteristic(readCharacteristic(SUPPORTED_POWER_UUID))
 
         // FTMS Control Point — WRITE | INDICATE
         service.addCharacteristic(
@@ -66,11 +96,23 @@ object FtmsServiceBuilder {
             },
         )
 
-        // Indoor Bike Data — NOTIFY
-        service.addCharacteristic(notifyCharacteristic(INDOOR_BIKE_DATA_UUID))
+        // Data characteristic (device-type-specific) — NOTIFY
+        service.addCharacteristic(notifyCharacteristic(dataCharacteristicUuid(deviceType)))
 
-        // Training Status — READ
-        service.addCharacteristic(readCharacteristic(TRAINING_STATUS_UUID))
+        // Training Status — READ + NOTIFY
+        service.addCharacteristic(
+            BluetoothGattCharacteristic(
+                TRAINING_STATUS_UUID,
+                BluetoothGattCharacteristic.PROPERTY_READ or
+                    BluetoothGattCharacteristic.PROPERTY_NOTIFY,
+                BluetoothGattCharacteristic.PERMISSION_READ,
+            ).apply {
+                addDescriptor(cccdDescriptor())
+            },
+        )
+
+        // Fitness Machine Status — NOTIFY
+        service.addCharacteristic(notifyCharacteristic(FITNESS_MACHINE_STATUS_UUID))
 
         return service
     }
@@ -93,13 +135,32 @@ object FtmsServiceBuilder {
         return service
     }
 
-    fun staticValueFor(charUuid: UUID): ByteArray? = when (charUuid) {
-        FTMS_FEATURE_UUID -> FTMS_FEATURE_VALUE.copyOf()
-        SUPPORTED_RESISTANCE_UUID -> RESISTANCE_RANGE_VALUE.copyOf()
+    fun resistanceRangeValue(info: DeviceInfo): ByteArray =
+        sint16LE(info.minResistance * 10) + sint16LE(info.maxResistance * 10) + uint16LE(10)
+
+    fun inclinationRangeValue(info: DeviceInfo): ByteArray =
+        sint16LE((info.minIncline * 10).toInt()) + sint16LE((info.maxIncline * 10).toInt()) + uint16LE(5)
+
+    fun powerRangeValue(info: DeviceInfo): ByteArray =
+        sint16LE(0) + sint16LE(info.maxPower) + uint16LE(1)
+
+    fun staticValueFor(charUuid: UUID, deviceInfo: DeviceInfo): ByteArray? = when (charUuid) {
+        FTMS_FEATURE_UUID -> ftmsFeatureValue(deviceInfo.type)
+        SUPPORTED_RESISTANCE_UUID -> resistanceRangeValue(deviceInfo)
+        SUPPORTED_INCLINATION_UUID -> inclinationRangeValue(deviceInfo)
+        SUPPORTED_POWER_UUID -> powerRangeValue(deviceInfo)
         TRAINING_STATUS_UUID -> TRAINING_STATUS_VALUE.copyOf()
         CPS_FEATURE_UUID -> CPS_FEATURE_VALUE.copyOf()
         SENSOR_LOCATION_UUID -> SENSOR_LOCATION_VALUE.copyOf()
         else -> null
+    }
+
+    private fun uint16LE(value: Int): ByteArray =
+        byteArrayOf((value and 0xFF).toByte(), (value shr 8).toByte())
+
+    private fun sint16LE(value: Int): ByteArray {
+        val clamped = value.coerceIn(-32768, 32767)
+        return byteArrayOf((clamped and 0xFF).toByte(), (clamped shr 8).toByte())
     }
 
     private fun readCharacteristic(uuid: UUID) = BluetoothGattCharacteristic(

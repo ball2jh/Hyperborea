@@ -6,10 +6,12 @@ import android.hardware.usb.UsbInterface
 import com.nettarion.hyperborea.core.AppLogger
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.isActive
+import kotlinx.coroutines.withContext
 
 class UsbHidTransport(
     private val connection: UsbDeviceConnection,
@@ -44,6 +46,7 @@ class UsbHidTransport(
 
     override suspend fun write(data: ByteArray) {
         if (!_isOpen) throw IllegalStateException("Transport not open")
+        require(data.size <= MAX_PACKET_SIZE) { "Packet too large: ${data.size} > $MAX_PACKET_SIZE" }
         // Pad to 64 bytes — the MCU expects full-size USB packets
         val padded = if (data.size < MAX_PACKET_SIZE) data.copyOf(MAX_PACKET_SIZE) else data
         val transferred = connection.bulkTransfer(outEndpoint, padded, padded.size, WRITE_TIMEOUT_MS)
@@ -64,16 +67,18 @@ class UsbHidTransport(
         var consecutiveFf = 0
         var attempts = 0
 
-        while (consecutiveFf < 2 && attempts < MAX_CLEAR_ATTEMPTS) {
-            connection.bulkTransfer(outEndpoint, clearCmd, clearCmd.size, 500)
-            Thread.sleep(50)
-            val n = connection.bulkTransfer(inEndpoint, readBuf, readBuf.size, 500)
-            if (n > 0 && readBuf[0] == 0xFF.toByte()) {
-                consecutiveFf++
-            } else {
-                consecutiveFf = 0
+        withContext(Dispatchers.IO) {
+            while (consecutiveFf < 2 && attempts < MAX_CLEAR_ATTEMPTS) {
+                connection.bulkTransfer(outEndpoint, clearCmd, clearCmd.size, 500)
+                delay(50)
+                val n = connection.bulkTransfer(inEndpoint, readBuf, readBuf.size, 500)
+                if (n > 0 && readBuf[0] == 0xFF.toByte()) {
+                    consecutiveFf++
+                } else {
+                    consecutiveFf = 0
+                }
+                attempts++
             }
-            attempts++
         }
 
         logger.i(TAG, "Buffer cleared after $attempts attempts (ff=$consecutiveFf)")

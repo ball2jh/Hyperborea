@@ -4,7 +4,15 @@ import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
+import com.nettarion.hyperborea.ui.AppScreen
 import com.nettarion.hyperborea.ui.dashboard.DashboardScreen
+import com.nettarion.hyperborea.ui.profile.ProfileEditScreen
+import com.nettarion.hyperborea.ui.profile.ProfilePickerScreen
+import com.nettarion.hyperborea.ui.profile.ProfileStatsScreen
 import com.nettarion.hyperborea.ui.theme.HyperboreaTheme
 import dagger.hilt.android.AndroidEntryPoint
 
@@ -16,7 +24,31 @@ class MainActivity : ComponentActivity() {
         enableEdgeToEdge()
         setContent {
             HyperboreaTheme {
-                DashboardScreen()
+                var currentScreen by remember { mutableStateOf<AppScreen>(AppScreen.ProfilePicker) }
+
+                when (val screen = currentScreen) {
+                    is AppScreen.ProfilePicker -> ProfilePickerScreen(
+                        onProfileSelected = { currentScreen = AppScreen.Dashboard },
+                        onCreateProfile = { currentScreen = AppScreen.ProfileEdit(null) },
+                        onGuest = { currentScreen = AppScreen.Dashboard },
+                    )
+                    is AppScreen.Dashboard -> DashboardScreen(
+                        onProfileClick = {
+                            currentScreen = AppScreen.ProfileStats(it)
+                        },
+                    )
+                    is AppScreen.ProfileEdit -> ProfileEditScreen(
+                        profileId = screen.profileId,
+                        onSaved = { currentScreen = AppScreen.Dashboard },
+                        onBack = { currentScreen = AppScreen.ProfilePicker },
+                    )
+                    is AppScreen.ProfileStats -> ProfileStatsScreen(
+                        profileId = screen.profileId,
+                        onBack = { currentScreen = AppScreen.Dashboard },
+                        onEditProfile = { currentScreen = AppScreen.ProfileEdit(screen.profileId) },
+                        onSwitchProfile = { currentScreen = AppScreen.ProfilePicker },
+                    )
+                }
             }
         }
     }

@@ -11,6 +11,7 @@ import com.nettarion.hyperborea.core.HardwareAdapter
 import com.nettarion.hyperborea.core.Prerequisite
 import com.nettarion.hyperborea.core.SystemSnapshot
 import com.nettarion.hyperborea.hardware.fitpro.session.DeviceDatabase
+import com.nettarion.hyperborea.hardware.fitpro.session.DeviceCapabilities
 import com.nettarion.hyperborea.hardware.fitpro.session.EquipmentProfiles
 import com.nettarion.hyperborea.hardware.fitpro.session.FitProSession
 import com.nettarion.hyperborea.hardware.fitpro.session.SessionState
@@ -66,6 +67,7 @@ class FitProAdapter @Inject constructor(
     override val state: StateFlow<AdapterState> = _state.asStateFlow()
 
     private var session: FitProSession? = null
+    private var activeCapabilities: DeviceCapabilities? = null
     private var dataForwardJob: Job? = null
     private var identityForwardJob: Job? = null
     private var stateMonitorJob: Job? = null
@@ -79,21 +81,22 @@ class FitProAdapter @Inject constructor(
             val transport = result.transport
             val productId = result.productId
 
-            val equipmentProfile = EquipmentProfiles.fromProductId(productId)
-            if (equipmentProfile == null) {
+            val capabilities = EquipmentProfiles.fromProductId(productId)
+            if (capabilities == null) {
                 logger.e(TAG, "Unknown product ID: $productId")
                 _state.value = AdapterState.Error("Unknown FitPro product ID: $productId")
                 return
             }
+            activeCapabilities = capabilities
 
             val newSession = when (productId) {
                 FITPRO_PRODUCT_ID_V1 -> {
                     logger.i(TAG, "FitPro V1 protocol (product ID $productId)")
-                    V1Session(transport, logger, scope, equipmentProfile)
+                    V1Session(transport, logger, scope, capabilities)
                 }
                 FITPRO_PRODUCT_ID_V2, FITPRO_PRODUCT_ID_V2_FTDI -> {
                     logger.i(TAG, "FitPro V2 protocol (product ID $productId)")
-                    V2Session(transport, logger, scope)
+                    V2Session(transport, logger, scope, capabilities)
                 }
                 else -> {
                     logger.e(TAG, "Unknown product ID: $productId")
@@ -116,33 +119,51 @@ class FitProAdapter @Inject constructor(
 
             // Forward exercise data from session
             dataForwardJob = scope.launch {
-                newSession.exerciseData.collect { data ->
-                    _exerciseData.value = data
+                try {
+                    newSession.exerciseData.collect { data ->
+                        _exerciseData.value = data
+                    }
+                } catch (e: CancellationException) { throw e }
+                catch (e: Exception) {
+                    logger.e(TAG, "Data forwarding failed", e)
+                    _state.value = AdapterState.Error("Data forwarding failed: ${e.message}", e)
                 }
             }
 
             // Forward device identity changes and derive DeviceInfo
             identityForwardJob = scope.launch {
-                newSession.deviceIdentity.collect { identity ->
-                    updateIdentity(identity)
+                try {
+                    newSession.deviceIdentity.collect { identity ->
+                        updateIdentity(identity)
+                    }
+                } catch (e: CancellationException) { throw e }
+                catch (e: Exception) {
+                    logger.e(TAG, "Identity forwarding failed", e)
+                    _state.value = AdapterState.Error("Identity forwarding failed: ${e.message}", e)
                 }
             }
 
             // Monitor session state for disconnects/errors
             stateMonitorJob = scope.launch {
-                newSession.sessionState.collect { sessionState ->
-                    when (sessionState) {
-                        is SessionState.Streaming -> _state.value = AdapterState.Active
-                        is SessionState.Error -> {
-                            _state.value = AdapterState.Error(sessionState.message, sessionState.cause)
-                        }
-                        is SessionState.Disconnected -> {
-                            if (_state.value is AdapterState.Active) {
-                                _state.value = AdapterState.Error("Device disconnected")
+                try {
+                    newSession.sessionState.collect { sessionState ->
+                        when (sessionState) {
+                            is SessionState.Streaming -> _state.value = AdapterState.Active
+                            is SessionState.Error -> {
+                                _state.value = AdapterState.Error(sessionState.message, sessionState.cause)
                             }
+                            is SessionState.Disconnected -> {
+                                if (_state.value is AdapterState.Active) {
+                                    _state.value = AdapterState.Error("Device disconnected")
+                                }
+                            }
+                            is SessionState.Connecting, is SessionState.Handshaking -> { /* Activating already set */ }
                         }
-                        is SessionState.Connecting, is SessionState.Handshaking -> { /* Activating already set */ }
                     }
+                } catch (e: CancellationException) { throw e }
+                catch (e: Exception) {
+                    logger.e(TAG, "State monitoring failed", e)
+                    _state.value = AdapterState.Error("State monitoring failed: ${e.message}", e)
                 }
             }
         } catch (e: CancellationException) {
@@ -166,6 +187,7 @@ class FitProAdapter @Inject constructor(
 
         session?.stop()
         session = null
+        activeCapabilities = null
 
         _exerciseData.value = null
         _deviceIdentity.value = null
@@ -180,15 +202,22 @@ class FitProAdapter @Inject constructor(
             else -> {
                 val model = identity.model
                 val modelNumber = model?.toIntOrNull()
-                if (modelNumber != null) DeviceDatabase.fromModel(modelNumber)
-                else DeviceDatabase.fallback()
+                val info = if (modelNumber != null) DeviceDatabase.fromModel(modelNumber)
+                    else DeviceDatabase.fallback()
+                val caps = activeCapabilities
+                if (caps != null) info.copy(maxResistance = caps.maxResistance) else info
             }
         }
     }
 
     override suspend fun sendCommand(command: DeviceCommand) {
-        logger.d(TAG, "Sending command: $command")
-        session?.writeFeature(command)
+        try {
+            logger.d(TAG, "Sending command: $command")
+            session?.writeFeature(command)
+        } catch (e: CancellationException) { throw e }
+        catch (e: Exception) {
+            logger.e(TAG, "Failed to send command: $command", e)
+        }
     }
 
     private companion object {

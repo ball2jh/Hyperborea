@@ -3,6 +3,7 @@ package com.nettarion.hyperborea.broadcast.wftnp
 import com.google.common.truth.Truth.assertThat
 import com.nettarion.hyperborea.core.AdapterState
 import com.nettarion.hyperborea.core.AppLogger
+import com.nettarion.hyperborea.core.test.buildDeviceInfo
 import com.nettarion.hyperborea.core.test.buildSystemSnapshot
 import io.mockk.mockk
 import io.mockk.verify
@@ -64,22 +65,22 @@ class WftnpAdapterTest {
 
     @Test
     fun `start transitions to Active`() = runTest {
-        adapter.start(emptyFlow())
+        adapter.start(emptyFlow(), buildDeviceInfo())
         assertThat(adapter.state.value).isEqualTo(AdapterState.Active)
     }
 
     @Test
     fun `stop transitions to Inactive`() = runTest {
-        adapter.start(emptyFlow())
+        adapter.start(emptyFlow(), buildDeviceInfo())
         adapter.stop()
         assertThat(adapter.state.value).isEqualTo(AdapterState.Inactive)
     }
 
     @Test
     fun `double start is a no-op`() = runTest {
-        adapter.start(emptyFlow())
+        adapter.start(emptyFlow(), buildDeviceInfo())
         assertThat(adapter.state.value).isEqualTo(AdapterState.Active)
-        adapter.start(emptyFlow())
+        adapter.start(emptyFlow(), buildDeviceInfo())
         assertThat(adapter.state.value).isEqualTo(AdapterState.Active)
     }
 
@@ -99,7 +100,7 @@ class WftnpAdapterTest {
 
     @Test
     fun `connectedClients resets to empty on stop`() = runTest {
-        adapter.start(emptyFlow())
+        adapter.start(emptyFlow(), buildDeviceInfo())
         adapter.stop()
         assertThat(adapter.connectedClients.value).isEmpty()
     }
@@ -108,13 +109,13 @@ class WftnpAdapterTest {
 
     @Test
     fun `start registers mDNS`() = runTest {
-        adapter.start(emptyFlow())
+        adapter.start(emptyFlow(), buildDeviceInfo())
         verify { nsdRegistrar.register(WftnpServer.PORT, "Test Bike") }
     }
 
     @Test
     fun `stop unregisters mDNS`() = runTest {
-        adapter.start(emptyFlow())
+        adapter.start(emptyFlow(), buildDeviceInfo())
         adapter.stop()
         verify { nsdRegistrar.unregister() }
     }

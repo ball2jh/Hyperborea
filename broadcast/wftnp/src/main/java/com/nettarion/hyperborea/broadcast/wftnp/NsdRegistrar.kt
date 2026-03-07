@@ -9,6 +9,7 @@ import java.net.NetworkInterface
 class NsdRegistrar(
     private val context: Context,
     private val logger: AppLogger,
+    private val onRegistrationFailed: ((Int) -> Unit)? = null,
 ) {
     private var nsdManager: NsdManager? = null
     private var registrationListener: NsdManager.RegistrationListener? = null
@@ -37,6 +38,7 @@ class NsdRegistrar(
         val listener = object : NsdManager.RegistrationListener {
             override fun onRegistrationFailed(info: NsdServiceInfo, errorCode: Int) {
                 logger.e(TAG, "mDNS registration failed: error=$errorCode")
+                onRegistrationFailed?.invoke(errorCode)
             }
 
             override fun onUnregistrationFailed(info: NsdServiceInfo, errorCode: Int) {

@@ -86,17 +86,40 @@ class ExerciseDataAccumulatorTest {
     }
 
     @Test
-    fun `elapsedTime uses protocol value when set`() {
+    fun `elapsedTime is zero before first cadence`() {
         accumulator.start()
-        accumulator.updateElapsedTime(120)
-        assertThat(accumulator.snapshot().elapsedTime).isEqualTo(120)
+        fakeTime = 11000L
+        assertThat(accumulator.snapshot().elapsedTime).isEqualTo(0)
     }
 
     @Test
-    fun `elapsedTime falls back to clock when not set`() {
-        accumulator.start() // startTime = 1000
-        fakeTime = 11000L   // 10 seconds later
+    fun `elapsedTime starts from first non-zero cadence`() {
+        accumulator.start()
+        accumulator.updateCadence(60) // starts clock at fakeTime=1000
+        fakeTime = 11000L              // 10 seconds later
         assertThat(accumulator.snapshot().elapsedTime).isEqualTo(10)
+    }
+
+    @Test
+    fun `pause freezes elapsed time`() {
+        accumulator.start()
+        accumulator.updateCadence(60) // starts clock at 1000
+        fakeTime = 11000L              // 10 seconds
+        accumulator.pause()
+        fakeTime = 21000L              // 10 more seconds while paused
+        assertThat(accumulator.snapshot().elapsedTime).isEqualTo(10)
+    }
+
+    @Test
+    fun `resume continues elapsed time after pause`() {
+        accumulator.start()
+        accumulator.updateCadence(60) // starts clock at 1000
+        fakeTime = 11000L              // 10 seconds
+        accumulator.pause()
+        fakeTime = 21000L              // paused for 10 seconds
+        accumulator.resume()           // resumes at 21000
+        fakeTime = 26000L              // 5 more seconds
+        assertThat(accumulator.snapshot().elapsedTime).isEqualTo(15)
     }
 
     @Test
@@ -134,6 +157,7 @@ class ExerciseDataAccumulatorTest {
         assertThat(snapshot.cadence).isNull()
         assertThat(snapshot.speed).isNull()
         assertThat(snapshot.resistance).isNull()
+        assertThat(snapshot.elapsedTime).isEqualTo(0)
     }
 
     @Test
@@ -186,6 +210,36 @@ class ExerciseDataAccumulatorTest {
         assertThat(snapshot.lifetimeRunningTime).isNull()
         assertThat(snapshot.lifetimeDistance).isNull()
         assertThat(snapshot.lifetimeCalories).isNull()
+    }
+
+    @Test
+    fun `pause during snapshot does not produce invalid elapsed time`() {
+        accumulator.start()
+        accumulator.updateCadence(60) // starts clock at 1000
+        fakeTime = 6000L              // 5 seconds
+        val snapshot = accumulator.snapshot()
+        assertThat(snapshot.elapsedTime).isEqualTo(5)
+
+        // Pause after snapshot — next snapshot should freeze time
+        accumulator.pause()
+        fakeTime = 16000L
+        assertThat(accumulator.snapshot().elapsedTime).isEqualTo(5)
+    }
+
+    @Test
+    fun `multiple pause resume cycles accumulate correctly`() {
+        accumulator.start()
+        accumulator.updateCadence(60) // starts clock at 1000
+        fakeTime = 6000L              // 5 seconds running
+        accumulator.pause()
+        fakeTime = 11000L             // 5 seconds paused
+        accumulator.resume()          // resumes at 11000
+        fakeTime = 14000L             // 3 more seconds running
+        accumulator.pause()
+        fakeTime = 20000L             // 6 seconds paused
+        accumulator.resume()          // resumes at 20000
+        fakeTime = 22000L             // 2 more seconds running
+        assertThat(accumulator.snapshot().elapsedTime).isEqualTo(10) // 5 + 3 + 2
     }
 
     @Test

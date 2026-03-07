@@ -53,6 +53,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.nettarion.hyperborea.core.AdapterState
 import com.nettarion.hyperborea.core.BroadcastId
 import com.nettarion.hyperborea.core.LogLevel
 import com.nettarion.hyperborea.ui.theme.LocalHyperboreaColors
@@ -311,11 +312,12 @@ private fun DiagnosticsSection(viewModel: AdminViewModel) {
     val exerciseData by viewModel.exerciseData.collectAsStateWithLifecycle()
     val trackState by viewModel.appTrackState.collectAsStateWithLifecycle()
     val checking by viewModel.checking.collectAsStateWithLifecycle()
+    val broadcastDiags by viewModel.broadcastDiagnostics.collectAsStateWithLifecycle(emptyList())
 
     CollapsibleSection("Diagnostics") {
         // Device identity
         identity?.let { id ->
-            Text("Device", style = MaterialTheme.typography.titleLarge, color = colors.textHigh,
+            Text("Device", style = MaterialTheme.typography.bodyLarge, color = colors.textHigh,
                 modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp))
             DiagRow("Serial", id.serialNumber ?: "\u2014")
             DiagRow("Firmware", id.firmwareVersion ?: "\u2014")
@@ -341,7 +343,7 @@ private fun DiagnosticsSection(viewModel: AdminViewModel) {
         }
 
         // System status
-        Text("System", style = MaterialTheme.typography.titleLarge, color = colors.textHigh,
+        Text("System", style = MaterialTheme.typography.bodyLarge, color = colors.textHigh,
             modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp))
         val status = snapshot.status
         StatusRow("BLE Advertising", status.isBluetoothLeAdvertisingSupported)
@@ -353,7 +355,7 @@ private fun DiagnosticsSection(viewModel: AdminViewModel) {
         // USB devices
         if (snapshot.usbDevices.isNotEmpty()) {
             Spacer(Modifier.height(8.dp))
-            Text("USB Devices", style = MaterialTheme.typography.titleLarge, color = colors.textHigh,
+            Text("USB Devices", style = MaterialTheme.typography.bodyLarge, color = colors.textHigh,
                 modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp))
             snapshot.usbDevices.forEach { device ->
                 Text(
@@ -365,9 +367,34 @@ private fun DiagnosticsSection(viewModel: AdminViewModel) {
             }
         }
 
+        // Broadcast connections
+        if (broadcastDiags.isNotEmpty()) {
+            Spacer(Modifier.height(8.dp))
+            Text("Broadcast Clients", style = MaterialTheme.typography.bodyLarge, color = colors.textHigh,
+                modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp))
+            broadcastDiags.forEach { diag ->
+                val stateLabel = when (diag.state) {
+                    is AdapterState.Active -> "active"
+                    is AdapterState.Activating -> "activating"
+                    is AdapterState.Error -> "error"
+                    is AdapterState.Inactive -> "inactive"
+                }
+                val clientLabel = if (diag.clients.isEmpty()) "no clients" else "${diag.clients.size} connected"
+                DiagRow(diag.id.displayName, "$stateLabel \u2014 $clientLabel")
+                diag.clients.forEach { client ->
+                    Text(
+                        text = client.id,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = colors.textLow,
+                        modifier = Modifier.padding(start = 40.dp, top = 1.dp, bottom = 1.dp),
+                    )
+                }
+            }
+        }
+
         // Update panel
         Spacer(Modifier.height(8.dp))
-        Text("Updates", style = MaterialTheme.typography.titleLarge, color = colors.textHigh,
+        Text("Updates", style = MaterialTheme.typography.bodyLarge, color = colors.textHigh,
             modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp))
         UpdatePanel(
             trackState = trackState,

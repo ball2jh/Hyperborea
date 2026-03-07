@@ -4,11 +4,12 @@ import com.nettarion.hyperborea.core.AppLogger
 import com.nettarion.hyperborea.core.DeviceCommand
 import com.nettarion.hyperborea.core.DeviceIdentity
 import com.nettarion.hyperborea.core.ExerciseData
-import com.nettarion.hyperborea.core.erg.EquipmentProfile
+import com.nettarion.hyperborea.hardware.fitpro.session.DeviceCapabilities
 import com.nettarion.hyperborea.hardware.fitpro.session.ExerciseDataAccumulator
 import com.nettarion.hyperborea.hardware.fitpro.session.FitProSession
 import com.nettarion.hyperborea.hardware.fitpro.session.SessionState
 import com.nettarion.hyperborea.hardware.fitpro.transport.HidTransport
+import kotlin.math.roundToInt
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
@@ -25,7 +26,7 @@ class V1Session(
     private val transport: HidTransport,
     private val logger: AppLogger,
     private val scope: CoroutineScope,
-    private val equipmentProfile: EquipmentProfile,
+    private val capabilities: DeviceCapabilities,
     private val accumulator: ExerciseDataAccumulator = ExerciseDataAccumulator(),
 ) : FitProSession {
 
@@ -42,6 +43,9 @@ class V1Session(
     private var pendingWriteFields: Map<V1DataField, Float> = emptyMap()
     private val pendingWriteMutex = Mutex()
     private var lastLogTimeMs = 0L
+    private var consecutivePollErrors = 0
+    private var lastSentGrade = 0f
+    private var lastSentSpeed = 0f
 
     // Security handshake state — stored for SECURITY_BLOCK re-verification
     private var softwareVersion: Int = 0
@@ -69,11 +73,14 @@ class V1Session(
 
             logger.i(TAG, "V1 session started")
 
-            // Enter RUNNING mode and disable idle lockout so the bike
-            // doesn't auto-pause/idle when pedaling stops
+            // Enter RUNNING mode, signal workout start, and disable idle
+            // lockout so the bike doesn't auto-pause when pedaling stops.
+            // REQUIRE_START_REQUESTED tells the MCU to begin its workout
+            // session so CURRENT_TIME/DISTANCE/CALORIES start counting.
             pendingWriteMutex.withLock {
                 pendingWriteFields = mapOf(
                     V1DataField.WORKOUT_MODE to WORKOUT_MODE_RUNNING,
+                    V1DataField.REQUIRE_START_REQUESTED to 1f,
                     V1DataField.IDLE_MODE_LOCKOUT to 1f,
                 )
             }
@@ -93,6 +100,9 @@ class V1Session(
 
         try {
             if (transport.isOpen) {
+                // TODO: Test whether MCU auto-resets incline/resistance on IDLE transition.
+                //  If not, explicitly write GRADE=0 and RESISTANCE=<default> here before IDLE.
+
                 // Write WORKOUT_MODE=IDLE before disconnecting — fire-and-forget,
                 // don't wait for responses since we're tearing down.
                 val idleMsg = V1Message.Outgoing.ReadWriteData(
@@ -126,11 +136,33 @@ class V1Session(
                 val raw = resistanceLevelToRaw(command.level)
                 mapOf(V1DataField.RESISTANCE to raw.toFloat())
             }
-            is DeviceCommand.SetIncline -> mapOf(V1DataField.GRADE to command.percent)
-            is DeviceCommand.SetTargetSpeed -> mapOf(V1DataField.KPH to command.kph)
+            is DeviceCommand.SetIncline -> {
+                lastSentGrade = roundToStep(command.percent, capabilities.inclineStep)
+                mapOf(V1DataField.GRADE to lastSentGrade)
+            }
+            is DeviceCommand.SetTargetSpeed -> {
+                lastSentSpeed = command.kph
+                mapOf(V1DataField.KPH to command.kph)
+            }
+            is DeviceCommand.AdjustIncline -> {
+                lastSentGrade += if (command.increase) capabilities.inclineStep else -capabilities.inclineStep
+                lastSentGrade = lastSentGrade.coerceIn(-10f, 40f)
+                mapOf(V1DataField.GRADE to lastSentGrade)
+            }
+            is DeviceCommand.AdjustSpeed -> {
+                lastSentSpeed += if (command.increase) 0.5f else -0.5f
+                lastSentSpeed = lastSentSpeed.coerceIn(0f, 60f)
+                mapOf(V1DataField.KPH to lastSentSpeed)
+            }
             is DeviceCommand.SetTargetPower -> {
                 // Native ERG: bike MCU adjusts resistance to maintain target watts
                 mapOf(V1DataField.WATT_GOAL to command.watts.toFloat())
+            }
+            is DeviceCommand.PauseWorkout -> {
+                mapOf(V1DataField.WORKOUT_MODE to WORKOUT_MODE_PAUSE)
+            }
+            is DeviceCommand.ResumeWorkout -> {
+                mapOf(V1DataField.WORKOUT_MODE to WORKOUT_MODE_RUNNING)
             }
         }
 
@@ -157,6 +189,8 @@ class V1Session(
             hardwareVersion = deviceInfo.hardwareVersion
             serialNumber = deviceInfo.serialNumber
             logger.d(TAG, "Device info: sw=$softwareVersion, hw=$hardwareVersion, serial=$serialNumber")
+        } else {
+            logger.w(TAG, "Expected DeviceInfoResponse, got: $deviceInfo")
         }
 
         delay(COMMAND_DELAY_MS)
@@ -167,6 +201,8 @@ class V1Session(
             partNumber = systemInfo.partNumber
             model = systemInfo.model
             logger.d(TAG, "System info: partNumber=$partNumber, model=$model")
+        } else {
+            logger.w(TAG, "Expected SystemInfoResponse, got: $systemInfo")
         }
 
         delay(COMMAND_DELAY_MS)
@@ -176,6 +212,8 @@ class V1Session(
         if (versionInfo is V1Message.Incoming.VersionInfoResponse) {
             masterLibraryVersion = versionInfo.masterLibraryVersion
             logger.d(TAG, "Version info: masterLib=$masterLibraryVersion, build=${versionInfo.masterLibraryBuild}")
+        } else {
+            logger.w(TAG, "Expected VersionInfoResponse, got: $versionInfo")
         }
 
         _deviceIdentity.value = DeviceIdentity(
@@ -219,7 +257,11 @@ class V1Session(
                 } catch (e: CancellationException) {
                     throw e
                 } catch (e: Exception) {
-                    logger.w(TAG, "Poll error: ${e.message}")
+                    consecutivePollErrors++
+                    logger.w(TAG, "Poll error ($consecutivePollErrors/$MAX_CONSECUTIVE_POLL_ERRORS): ${e.message}")
+                    if (consecutivePollErrors >= MAX_CONSECUTIVE_POLL_ERRORS) {
+                        _sessionState.value = SessionState.Error("Repeated poll failures", e)
+                    }
                 }
                 delay(POLL_INTERVAL_MS)
             }
@@ -251,9 +293,28 @@ class V1Session(
 
         delay(READ_DELAY_MS)
 
-        val response = transport.readPacket() ?: return
+        val response = transport.readPacket()
+        if (response == null) {
+            if (writeFields.isNotEmpty()) {
+                pendingWriteMutex.withLock {
+                    pendingWriteFields = writeFields + pendingWriteFields
+                }
+            }
+            return
+        }
 
-        val decoded = V1Codec.decodeSingle(response)
+        val decoded = try {
+            V1Codec.decodeSingle(response)
+        } catch (e: Exception) {
+            logger.w(TAG, "Malformed response (${response.size} bytes): ${e.message}")
+            // Re-queue write fields so commands aren't lost
+            if (writeFields.isNotEmpty()) {
+                pendingWriteMutex.withLock {
+                    pendingWriteFields = writeFields + pendingWriteFields
+                }
+            }
+            return
+        }
         if (decoded is V1Message.Incoming.DataResponse) {
             if (decoded.status == V1Message.STATUS_SECURITY_BLOCK) {
                 logger.w(TAG, "Security block — re-verifying")
@@ -264,7 +325,13 @@ class V1Session(
                 return
             }
 
+            if (decoded.fields.isEmpty()) {
+                logger.w(TAG, "DataResponse OK but empty fields (payload size mismatch)")
+                return
+            }
+
             applyDataResponse(decoded.fields)
+            consecutivePollErrors = 0
             _exerciseData.value = accumulator.snapshot()
 
             val now = System.currentTimeMillis()
@@ -295,7 +362,17 @@ class V1Session(
                 V1DataField.CURRENT_DISTANCE -> accumulator.updateDistance(value)
                 V1DataField.CURRENT_CALORIES -> accumulator.updateCalories(value.toInt())
                 V1DataField.CURRENT_TIME -> accumulator.updateElapsedTime(value.toLong())
-                V1DataField.WORKOUT_MODE -> accumulator.updateWorkoutMode(value.toInt())
+                V1DataField.WORKOUT_MODE -> {
+                    val mode = value.toInt()
+                    val previousMode = accumulator.snapshot().workoutMode
+                    if (previousMode != mode) {
+                        when (mode) {
+                            WORKOUT_MODE_PAUSE.toInt() -> accumulator.pause()
+                            WORKOUT_MODE_RUNNING.toInt() -> accumulator.resume()
+                        }
+                    }
+                    accumulator.updateWorkoutMode(mode)
+                }
                 V1DataField.RUNNING_TIME -> accumulator.updateLifetimeRunningTime(value.toLong())
                 V1DataField.DISTANCE -> accumulator.updateLifetimeDistance(value)
                 V1DataField.CALORIES -> accumulator.updateLifetimeCalories(value.toInt())
@@ -317,8 +394,11 @@ class V1Session(
         return response?.let { V1Codec.decodeSingle(it) }
     }
 
+    private fun roundToStep(value: Float, step: Float): Float =
+        (value / step).roundToInt() * step
+
     // GlassOS ResistanceConverter: raw = max(0, level * ratio - 1)
-    private val resistanceRatio = 10000 / equipmentProfile.maxResistance
+    private val resistanceRatio = 10000 / capabilities.maxResistance
 
     private fun resistanceLevelToRaw(level: Int): Int =
         maxOf(0, level * resistanceRatio - 1)
@@ -329,12 +409,15 @@ class V1Session(
         return raw / resistanceRatio + if (remainder != 0) 1 else 0
     }
 
+
     companion object {
         private const val TAG = "V1Session"
         private const val POLL_INTERVAL_MS = 100L
-        private const val COMMAND_DELAY_MS = 400L
-        private const val READ_DELAY_MS = 80L
+        private const val COMMAND_DELAY_MS = 100L
+        private const val READ_DELAY_MS = 0L
+        private const val MAX_CONSECUTIVE_POLL_ERRORS = 10
         private const val WORKOUT_MODE_IDLE = 1f
         private const val WORKOUT_MODE_RUNNING = 2f
+        private const val WORKOUT_MODE_PAUSE = 3f
     }
 }

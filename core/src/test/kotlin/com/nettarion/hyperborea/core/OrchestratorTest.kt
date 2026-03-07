@@ -1,9 +1,11 @@
 package com.nettarion.hyperborea.core
 
 import com.google.common.truth.Truth.assertThat
+import com.nettarion.hyperborea.core.test.buildDeviceInfo
 import com.nettarion.hyperborea.core.test.buildSystemSnapshot
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -11,6 +13,7 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.emptyFlow
 import kotlinx.coroutines.test.TestScope
 import kotlinx.coroutines.test.UnconfinedTestDispatcher
+import kotlinx.coroutines.test.advanceUntilIdle
 import kotlinx.coroutines.test.runTest
 import org.junit.Test
 
@@ -23,7 +26,7 @@ class OrchestratorTest {
     fun `start with all prerequisites met transitions to Running`() = runTest {
         val env = TestEnv(this)
         env.orchestrator.start()
-        assertThat(env.orchestrator.state.value).isEqualTo(OrchestratorState.Running)
+        assertThat(env.orchestrator.state.value).isEqualTo(OrchestratorState.Running())
     }
 
     @Test
@@ -60,7 +63,7 @@ class OrchestratorTest {
         )
         val env = TestEnv(this, ecosystemPrereqs = listOf(prereq))
         env.orchestrator.start()
-        assertThat(env.orchestrator.state.value).isEqualTo(OrchestratorState.Running)
+        assertThat(env.orchestrator.state.value).isEqualTo(OrchestratorState.Running())
     }
 
     @Test
@@ -103,7 +106,7 @@ class OrchestratorTest {
         )
         val env = TestEnv(this, hardwarePrereqs = listOf(prereq))
         env.orchestrator.start()
-        assertThat(env.orchestrator.state.value).isEqualTo(OrchestratorState.Running)
+        assertThat(env.orchestrator.state.value).isEqualTo(OrchestratorState.Running())
     }
 
     @Test
@@ -138,7 +141,7 @@ class OrchestratorTest {
         env.orchestrator.start()
         assertThat(env.broadcast1.startCalled).isFalse()
         assertThat(env.broadcast2.startCalled).isTrue()
-        assertThat(env.orchestrator.state.value).isEqualTo(OrchestratorState.Running)
+        assertThat(env.orchestrator.state.value).isEqualTo(OrchestratorState.Running())
     }
 
     @Test
@@ -185,7 +188,7 @@ class OrchestratorTest {
         env.hardware.connectCalled = false
         env.orchestrator.start()
         assertThat(env.hardware.connectCalled).isFalse()
-        assertThat(env.orchestrator.state.value).isEqualTo(OrchestratorState.Running)
+        assertThat(env.orchestrator.state.value).isEqualTo(OrchestratorState.Running())
     }
 
     @Test
@@ -201,36 +204,98 @@ class OrchestratorTest {
         env.orchestrator.start()
         env.orchestrator.stop()
         env.orchestrator.start()
-        assertThat(env.orchestrator.state.value).isEqualTo(OrchestratorState.Running)
+        assertThat(env.orchestrator.state.value).isEqualTo(OrchestratorState.Running())
     }
 
     // --- Hardware disconnect while running ---
 
     @Test
-    fun `hardware error while running stops broadcasts and transitions to Error`() = runTest {
+    fun `hardware error with reconnect failure stops broadcasts and transitions to Error`() = runTest {
         val env = TestEnv(this)
         env.orchestrator.start()
-        assertThat(env.orchestrator.state.value).isEqualTo(OrchestratorState.Running)
+        assertThat(env.orchestrator.state.value).isEqualTo(OrchestratorState.Running())
 
+        env.hardware.reconnectResult = AdapterState.Error("still broken")
         env.hardware.mutableState.value = AdapterState.Error("USB disconnected")
+        advanceUntilIdle()
 
         assertThat(env.orchestrator.state.value).isInstanceOf(OrchestratorState.Error::class.java)
-        assertThat((env.orchestrator.state.value as OrchestratorState.Error).message).contains("USB disconnected")
+        assertThat((env.orchestrator.state.value as OrchestratorState.Error).message).contains("reconnect failed")
         assertThat(env.broadcast1.stopCalled).isTrue()
         assertThat(env.broadcast2.stopCalled).isTrue()
     }
 
     @Test
-    fun `hardware going inactive while running stops broadcasts and transitions to Error`() = runTest {
+    fun `hardware going inactive with reconnect failure transitions to Error`() = runTest {
         val env = TestEnv(this)
         env.orchestrator.start()
-        assertThat(env.orchestrator.state.value).isEqualTo(OrchestratorState.Running)
+        assertThat(env.orchestrator.state.value).isEqualTo(OrchestratorState.Running())
 
+        env.hardware.reconnectResult = AdapterState.Error("still broken")
         env.hardware.mutableState.value = AdapterState.Inactive
+        advanceUntilIdle()
 
         assertThat(env.orchestrator.state.value).isInstanceOf(OrchestratorState.Error::class.java)
-        assertThat((env.orchestrator.state.value as OrchestratorState.Error).message).contains("disconnected")
+        assertThat((env.orchestrator.state.value as OrchestratorState.Error).message).contains("reconnect failed")
         assertThat(env.broadcast1.stopCalled).isTrue()
+    }
+
+    // --- Pause/Resume ---
+
+    @Test
+    fun `pause from Running transitions to Paused and sends PauseWorkout command`() = runTest {
+        val env = TestEnv(this)
+        env.orchestrator.start()
+        env.orchestrator.pause()
+        assertThat(env.orchestrator.state.value).isEqualTo(OrchestratorState.Paused)
+        assertThat(env.hardware.receivedCommands).contains(DeviceCommand.PauseWorkout)
+    }
+
+    @Test
+    fun `resume from Paused transitions to Running and sends ResumeWorkout command`() = runTest {
+        val env = TestEnv(this)
+        env.orchestrator.start()
+        env.orchestrator.pause()
+        env.orchestrator.resume()
+        assertThat(env.orchestrator.state.value).isEqualTo(OrchestratorState.Running())
+        assertThat(env.hardware.receivedCommands).contains(DeviceCommand.ResumeWorkout)
+    }
+
+    @Test
+    fun `pause when not Running is no-op`() = runTest {
+        val env = TestEnv(this)
+        env.orchestrator.pause()
+        assertThat(env.orchestrator.state.value).isEqualTo(OrchestratorState.Idle)
+        assertThat(env.hardware.receivedCommands).isEmpty()
+    }
+
+    @Test
+    fun `resume when not Paused is no-op`() = runTest {
+        val env = TestEnv(this)
+        env.orchestrator.start()
+        env.orchestrator.resume()
+        assertThat(env.orchestrator.state.value).isEqualTo(OrchestratorState.Running())
+        assertThat(env.hardware.receivedCommands).isEmpty()
+    }
+
+    @Test
+    fun `stop from Paused transitions to Idle`() = runTest {
+        val env = TestEnv(this)
+        env.orchestrator.start()
+        env.orchestrator.pause()
+        env.orchestrator.stop()
+        assertThat(env.orchestrator.state.value).isEqualTo(OrchestratorState.Idle)
+    }
+
+    @Test
+    fun `start when Paused is no-op`() = runTest {
+        val env = TestEnv(this)
+        env.orchestrator.start()
+        env.orchestrator.pause()
+        env.hardware.connectCalled = false
+        env.orchestrator.start()
+        assertThat(env.hardware.connectCalled).isFalse()
+        assertThat(env.orchestrator.state.value).isEqualTo(OrchestratorState.Paused)
     }
 
     // --- Command pipeline ---
@@ -252,7 +317,7 @@ class OrchestratorTest {
         env.orchestrator.start()
         assertThat(env.broadcast1.startCalled).isTrue()
         assertThat(env.broadcast2.startCalled).isFalse()
-        assertThat(env.orchestrator.state.value).isEqualTo(OrchestratorState.Running)
+        assertThat(env.orchestrator.state.value).isEqualTo(OrchestratorState.Running())
     }
 
     @Test
@@ -261,7 +326,7 @@ class OrchestratorTest {
         env.orchestrator.start()
         assertThat(env.broadcast1.startCalled).isFalse()
         assertThat(env.broadcast2.startCalled).isFalse()
-        assertThat(env.orchestrator.state.value).isEqualTo(OrchestratorState.Running)
+        assertThat(env.orchestrator.state.value).isEqualTo(OrchestratorState.Running())
     }
 
     @Test
@@ -271,6 +336,104 @@ class OrchestratorTest {
         env.orchestrator.stop()
         assertThat(env.broadcast1.stopCalled).isTrue()
         assertThat(env.broadcast2.stopCalled).isFalse()
+    }
+
+    // --- Command pipeline resilience ---
+
+    @Test
+    fun `command pipeline error does not crash orchestrator`() = runTest {
+        val env = TestEnv(this)
+        env.orchestrator.start()
+        env.hardware.shouldThrowOnSendCommand = true
+
+        val command = DeviceCommand.SetResistance(5)
+        env.broadcast1.emitCommand(command)
+
+        assertThat(env.orchestrator.state.value).isEqualTo(OrchestratorState.Running())
+    }
+
+    // --- Broadcast retry ---
+
+    @Test
+    fun `broadcast error triggers retry`() = runTest {
+        val env = TestEnv(this)
+        env.orchestrator.start()
+        assertThat(env.broadcast1.startCallCount).isEqualTo(1)
+
+        env.broadcast1.setError("BLE failed")
+        advanceUntilIdle()
+
+        assertThat(env.broadcast1.startCallCount).isGreaterThan(1)
+        assertThat(env.orchestrator.state.value).isEqualTo(OrchestratorState.Running())
+    }
+
+    @Test
+    fun `broadcast exhausts retries transitions to degraded`() = runTest {
+        val env = TestEnv(this)
+        env.orchestrator.start()
+
+        env.broadcast1.failOnStart = true
+        env.broadcast1.setError("BLE failed")
+        advanceUntilIdle()
+
+        val state = env.orchestrator.state.value
+        assertThat(state).isInstanceOf(OrchestratorState.Running::class.java)
+        assertThat((state as OrchestratorState.Running).degraded).isNotNull()
+    }
+
+    // --- Hardware reconnect ---
+
+    @Test
+    fun `hardware disconnect triggers reconnect attempts`() = runTest {
+        val env = TestEnv(this)
+        env.orchestrator.start()
+        val initialCount = env.hardware.connectCallCount
+
+        env.hardware.mutableState.value = AdapterState.Error("USB glitch")
+        advanceUntilIdle()
+
+        assertThat(env.hardware.connectCallCount).isGreaterThan(initialCount)
+    }
+
+    @Test
+    fun `hardware reconnect success returns to Running`() = runTest {
+        val env = TestEnv(this)
+        env.orchestrator.start()
+
+        env.hardware.mutableState.value = AdapterState.Error("USB glitch")
+        advanceUntilIdle()
+
+        assertThat(env.orchestrator.state.value).isEqualTo(OrchestratorState.Running())
+    }
+
+    @Test
+    fun `hardware reconnect exhausts retries transitions to Error`() = runTest {
+        val env = TestEnv(this)
+        env.orchestrator.start()
+
+        env.hardware.reconnectResult = AdapterState.Error("still broken")
+        env.hardware.mutableState.value = AdapterState.Error("USB broken")
+        advanceUntilIdle()
+
+        assertThat(env.orchestrator.state.value).isInstanceOf(OrchestratorState.Error::class.java)
+        assertThat((env.orchestrator.state.value as OrchestratorState.Error).message).contains("reconnect failed")
+    }
+
+    // --- Prerequisite timeout ---
+
+    @Test
+    fun `prerequisite timeout transitions to Error`() = runTest {
+        val prereq = Prerequisite(
+            id = "slow-prereq",
+            description = "hangs forever",
+            isMet = { false },
+            fulfill = { delay(Long.MAX_VALUE); FulfillResult.Success },
+        )
+        val env = TestEnv(this, ecosystemPrereqs = listOf(prereq))
+        env.orchestrator.start()
+
+        assertThat(env.orchestrator.state.value).isInstanceOf(OrchestratorState.Error::class.java)
+        assertThat((env.orchestrator.state.value as OrchestratorState.Error).message).contains("Timeout")
     }
 
     // --- Fakes ---
@@ -294,6 +457,8 @@ class OrchestratorTest {
         val preferences = FakeUserPreferences(enabledBroadcasts)
         val logger = NoOpLogger()
         val scope = CoroutineScope(UnconfinedTestDispatcher(testScope.testScheduler))
+        val profileRepository = FakeProfileRepository()
+        val rideRecorder = RideRecorder(profileRepository, logger, scope)
 
         val orchestrator = Orchestrator(
             systemMonitor = monitor,
@@ -302,6 +467,7 @@ class OrchestratorTest {
             hardwareAdapter = hardware,
             broadcastAdapters = setOf(broadcast1, broadcast2),
             userPreferences = preferences,
+            rideRecorder = rideRecorder,
             logger = logger,
             scope = scope,
         )
@@ -349,18 +515,22 @@ class OrchestratorTest {
     ) : HardwareAdapter {
         val mutableState = MutableStateFlow<AdapterState>(AdapterState.Inactive)
         override val state: StateFlow<AdapterState> = mutableState
-        override val deviceInfo = MutableStateFlow<DeviceInfo?>(null)
+        override val deviceInfo = MutableStateFlow<DeviceInfo?>(buildDeviceInfo())
         override val exerciseData = MutableStateFlow<ExerciseData?>(null)
         override val deviceIdentity = MutableStateFlow<DeviceIdentity?>(null)
         var connectCalled = false
+        var connectCallCount = 0
         var disconnectCalled = false
         val receivedCommands = mutableListOf<DeviceCommand>()
+        var shouldThrowOnSendCommand = false
+        var reconnectResult: AdapterState? = null
 
         override fun canOperate(snapshot: SystemSnapshot) = operatable
 
         override suspend fun connect() {
             connectCalled = true
-            mutableState.value = connectState
+            connectCallCount++
+            mutableState.value = if (connectCallCount > 1 && reconnectResult != null) reconnectResult!! else connectState
         }
 
         override suspend fun disconnect() {
@@ -369,6 +539,7 @@ class OrchestratorTest {
         }
 
         override suspend fun sendCommand(command: DeviceCommand) {
+            if (shouldThrowOnSendCommand) throw RuntimeException("sendCommand failed")
             receivedCommands.add(command)
         }
     }
@@ -395,13 +566,20 @@ class OrchestratorTest {
         private val _incomingCommands = MutableSharedFlow<DeviceCommand>()
         override val incomingCommands: Flow<DeviceCommand> = _incomingCommands
         var startCalled = false
+        var startCallCount = 0
         var stopCalled = false
+        var failOnStart = false
 
         override fun canOperate(snapshot: SystemSnapshot) = operatable
 
-        override suspend fun start(dataSource: Flow<ExerciseData>) {
+        override suspend fun start(dataSource: Flow<ExerciseData>, deviceInfo: DeviceInfo) {
             startCalled = true
-            _state.value = AdapterState.Active
+            startCallCount++
+            if (failOnStart) {
+                _state.value = AdapterState.Error("start failed #$startCallCount")
+            } else {
+                _state.value = AdapterState.Active
+            }
         }
 
         override suspend fun stop() {
@@ -412,6 +590,23 @@ class OrchestratorTest {
         suspend fun emitCommand(command: DeviceCommand) {
             _incomingCommands.emit(command)
         }
+
+        fun setError(message: String) {
+            _state.value = AdapterState.Error(message)
+        }
+    }
+
+    private class FakeProfileRepository : ProfileRepository {
+        override val profiles: Flow<List<Profile>> = MutableStateFlow(emptyList())
+        override val activeProfile: StateFlow<Profile?> = MutableStateFlow(null)
+        override suspend fun createProfile(name: String) = Profile(id = 1, name = name)
+        override suspend fun updateProfile(profile: Profile) {}
+        override suspend fun deleteProfile(id: Long) {}
+        override suspend fun setActiveProfile(id: Long) {}
+        override fun getRideSummaries(profileId: Long): Flow<List<RideSummary>> = MutableStateFlow(emptyList())
+        override suspend fun saveRideSummary(summary: RideSummary, samples: List<WorkoutSample>) {}
+        override suspend fun deleteRideSummary(id: Long) {}
+        override fun getWorkoutSamples(rideId: Long): Flow<List<WorkoutSample>> = MutableStateFlow(emptyList())
     }
 
     private class NoOpLogger : AppLogger {

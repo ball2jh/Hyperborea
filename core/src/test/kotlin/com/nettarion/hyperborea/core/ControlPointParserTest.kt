@@ -39,11 +39,27 @@ class ControlPointParserTest {
 
     @Test
     fun `parseFtmsControlPoint set target resistance`() {
-        // Resistance 100 (10.0 in uint16 LE / 10) = 0x64, 0x00
-        val result = ControlPointParser.parseFtmsControlPoint(byteArrayOf(0x04, 0x64, 0x00))
+        // Resistance 100 as UINT8 (10.0 / 0.1 resolution) = 0x64
+        val result = ControlPointParser.parseFtmsControlPoint(byteArrayOf(0x04, 0x64))
         val cmd = (result as ControlPointParser.ControlPointResult.DeviceCmd).command
         assertThat(cmd).isInstanceOf(DeviceCommand.SetResistance::class.java)
         assertThat((cmd as DeviceCommand.SetResistance).level).isEqualTo(10)
+    }
+
+    @Test
+    fun `parseFtmsControlPoint set target resistance rounds half-levels up`() {
+        // Resistance 55 as UINT8 (5.5 / 0.1 resolution) = 0x37 → rounds to 6
+        val result = ControlPointParser.parseFtmsControlPoint(byteArrayOf(0x04, 0x37))
+        val cmd = (result as ControlPointParser.ControlPointResult.DeviceCmd).command
+        assertThat((cmd as DeviceCommand.SetResistance).level).isEqualTo(6)
+    }
+
+    @Test
+    fun `parseFtmsControlPoint set target resistance rounds down below half`() {
+        // Resistance 54 as UINT8 (5.4 / 0.1 resolution) = 0x36 → rounds to 5
+        val result = ControlPointParser.parseFtmsControlPoint(byteArrayOf(0x04, 0x36))
+        val cmd = (result as ControlPointParser.ControlPointResult.DeviceCmd).command
+        assertThat((cmd as DeviceCommand.SetResistance).level).isEqualTo(5)
     }
 
     @Test
@@ -69,6 +85,36 @@ class ControlPointParserTest {
     fun `parseFtmsControlPoint start returns SessionControl`() {
         val result = ControlPointParser.parseFtmsControlPoint(byteArrayOf(0x07))
         assertThat(result).isInstanceOf(ControlPointParser.ControlPointResult.SessionControl::class.java)
+    }
+
+    @Test
+    fun `parseFtmsControlPoint set wheel circumference returns SessionControl`() {
+        // 0x12 with uint16 LE circumference (2096mm = 0x0830)
+        val result = ControlPointParser.parseFtmsControlPoint(byteArrayOf(0x12, 0x30, 0x08))
+        assertThat(result).isInstanceOf(ControlPointParser.ControlPointResult.SessionControl::class.java)
+        assertThat((result as ControlPointParser.ControlPointResult.SessionControl).opcode)
+            .isEqualTo(0x12.toByte())
+    }
+
+    @Test
+    fun `parseFtmsControlPoint set wheel circumference too short returns Unsupported`() {
+        val result = ControlPointParser.parseFtmsControlPoint(byteArrayOf(0x12, 0x30))
+        assertThat(result).isInstanceOf(ControlPointParser.ControlPointResult.Unsupported::class.java)
+    }
+
+    @Test
+    fun `parseFtmsControlPoint spin down control returns SessionControl`() {
+        // 0x13 with uint8 control parameter (0x01 = start)
+        val result = ControlPointParser.parseFtmsControlPoint(byteArrayOf(0x13, 0x01))
+        assertThat(result).isInstanceOf(ControlPointParser.ControlPointResult.SessionControl::class.java)
+        assertThat((result as ControlPointParser.ControlPointResult.SessionControl).opcode)
+            .isEqualTo(0x13.toByte())
+    }
+
+    @Test
+    fun `parseFtmsControlPoint spin down control too short returns Unsupported`() {
+        val result = ControlPointParser.parseFtmsControlPoint(byteArrayOf(0x13))
+        assertThat(result).isInstanceOf(ControlPointParser.ControlPointResult.Unsupported::class.java)
     }
 
     @Test

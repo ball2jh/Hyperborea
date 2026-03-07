@@ -14,6 +14,7 @@ data class DashboardUiState(
     val deviceInfo: DeviceInfo?,
     val broadcasts: List<BroadcastUiState>,
     val systemStatus: SystemStatus,
+    val profileName: String? = null,
 )
 
 data class BroadcastUiState(

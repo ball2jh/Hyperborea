@@ -4,10 +4,12 @@ import com.nettarion.hyperborea.core.AppLogger
 import com.nettarion.hyperborea.core.DeviceCommand
 import com.nettarion.hyperborea.core.DeviceIdentity
 import com.nettarion.hyperborea.core.ExerciseData
+import com.nettarion.hyperborea.hardware.fitpro.session.DeviceCapabilities
 import com.nettarion.hyperborea.hardware.fitpro.session.ExerciseDataAccumulator
 import com.nettarion.hyperborea.hardware.fitpro.session.FitProSession
 import com.nettarion.hyperborea.hardware.fitpro.session.SessionState
 import com.nettarion.hyperborea.hardware.fitpro.transport.HidTransport
+import kotlin.math.roundToInt
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
@@ -22,6 +24,7 @@ class V2Session(
     private val transport: HidTransport,
     private val logger: AppLogger,
     private val scope: CoroutineScope,
+    private val capabilities: DeviceCapabilities,
     private val accumulator: ExerciseDataAccumulator = ExerciseDataAccumulator(),
 ) : FitProSession {
 
@@ -36,6 +39,8 @@ class V2Session(
 
     private var heartbeatJob: Job? = null
     private var receiveJob: Job? = null
+    private var lastSentGrade = 0f
+    private var lastSentSpeed = 0f
 
     override suspend fun start() {
         if (_sessionState.value is SessionState.Streaming || _sessionState.value is SessionState.Connecting) return
@@ -103,18 +108,42 @@ class V2Session(
                 V2FeatureId.TARGET_RESISTANCE,
                 command.level.toFloat(),
             )
-            is DeviceCommand.SetIncline -> V2Message.Outgoing.WriteFeature(
-                V2FeatureId.TARGET_GRADE,
-                command.percent,
-            )
-            is DeviceCommand.SetTargetSpeed -> V2Message.Outgoing.WriteFeature(
-                V2FeatureId.TARGET_KPH,
-                command.kph,
-            )
+            is DeviceCommand.SetIncline -> {
+                lastSentGrade = roundToStep(command.percent, capabilities.inclineStep)
+                V2Message.Outgoing.WriteFeature(V2FeatureId.TARGET_GRADE, lastSentGrade)
+            }
+            is DeviceCommand.SetTargetSpeed -> {
+                lastSentSpeed = command.kph
+                V2Message.Outgoing.WriteFeature(V2FeatureId.TARGET_KPH, command.kph)
+            }
+            is DeviceCommand.AdjustIncline -> {
+                lastSentGrade += if (command.increase) capabilities.inclineStep else -capabilities.inclineStep
+                lastSentGrade = lastSentGrade.coerceIn(-10f, 40f)
+                V2Message.Outgoing.WriteFeature(V2FeatureId.TARGET_GRADE, lastSentGrade)
+            }
+            is DeviceCommand.AdjustSpeed -> {
+                lastSentSpeed += if (command.increase) 0.5f else -0.5f
+                lastSentSpeed = lastSentSpeed.coerceIn(0f, 60f)
+                V2Message.Outgoing.WriteFeature(V2FeatureId.TARGET_KPH, lastSentSpeed)
+            }
             is DeviceCommand.SetTargetPower -> V2Message.Outgoing.WriteFeature(
                 V2FeatureId.GOAL_WATTS,
                 command.watts.toFloat(),
             )
+            is DeviceCommand.PauseWorkout -> {
+                accumulator.pause()
+                V2Message.Outgoing.WriteFeature(
+                    V2FeatureId.SYSTEM_MODE,
+                    SYSTEM_MODE_PAUSE,
+                )
+            }
+            is DeviceCommand.ResumeWorkout -> {
+                accumulator.resume()
+                V2Message.Outgoing.WriteFeature(
+                    V2FeatureId.SYSTEM_MODE,
+                    SYSTEM_MODE_RUNNING,
+                )
+            }
         }
 
         try {
@@ -199,6 +228,9 @@ class V2Session(
         }
     }
 
+    private fun roundToStep(value: Float, step: Float): Float =
+        (value / step).roundToInt() * step
+
     private fun startHeartbeat() {
         heartbeatJob = scope.launch {
             while (isActive && _sessionState.value is SessionState.Streaming) {
@@ -225,5 +257,6 @@ class V2Session(
         private const val MAX_SUBSCRIBE_BATCH = 8
         private const val SYSTEM_MODE_IDLE = 1f
         private const val SYSTEM_MODE_RUNNING = 2f
+        private const val SYSTEM_MODE_PAUSE = 3f
     }
 }

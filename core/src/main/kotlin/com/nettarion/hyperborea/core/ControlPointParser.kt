@@ -1,5 +1,7 @@
 package com.nettarion.hyperborea.core
 
+import kotlin.math.roundToInt
+
 object ControlPointParser {
 
     sealed interface ControlPointResult {
@@ -26,10 +28,10 @@ object ControlPointParser {
                 val raw = sint16LEAt(payload, 1)
                 ControlPointResult.DeviceCmd(DeviceCommand.SetIncline(raw / 10f))
             }
-            0x04.toByte() -> { // Set Target Resistance
-                if (payload.size < 3) return ControlPointResult.Unsupported(opcode)
-                val raw = uint16LEAt(payload, 1)
-                ControlPointResult.DeviceCmd(DeviceCommand.SetResistance((raw / 10.0).toInt()))
+            0x04.toByte() -> { // Set Target Resistance (UINT8, 0.1 resolution)
+                if (payload.size < 2) return ControlPointResult.Unsupported(opcode)
+                val raw = payload[1].toInt() and 0xFF
+                ControlPointResult.DeviceCmd(DeviceCommand.SetResistance((raw / 10.0).roundToInt()))
             }
             0x05.toByte() -> { // Set Target Power
                 if (payload.size < 3) return ControlPointResult.Unsupported(opcode)
@@ -43,6 +45,14 @@ object ControlPointParser {
                 // wind speed at 1-2, grade at 3-4 (sint16 LE, 0.01 resolution)
                 val gradeRaw = sint16LEAt(payload, 3)
                 ControlPointResult.DeviceCmd(DeviceCommand.SetIncline(gradeRaw / 100f))
+            }
+            0x12.toByte() -> { // Set Wheel Circumference (uint16 LE, 0.1mm resolution)
+                if (payload.size < 3) return ControlPointResult.Unsupported(opcode)
+                ControlPointResult.SessionControl(opcode)
+            }
+            0x13.toByte() -> { // Spin Down Control (uint8 control)
+                if (payload.size < 2) return ControlPointResult.Unsupported(opcode)
+                ControlPointResult.SessionControl(opcode)
             }
             else -> ControlPointResult.Unsupported(opcode)
         }
@@ -66,6 +76,10 @@ object ControlPointParser {
                 val gradePct = ((raw.toDouble() / 65535.0) * 2.0 - 1.0) * 100.0
                 ControlPointResult.DeviceCmd(DeviceCommand.SetIncline(gradePct.toFloat()))
             }
+            0x03 -> ControlPointResult.DeviceCmd(DeviceCommand.AdjustSpeed(increase = true))
+            0x04 -> ControlPointResult.DeviceCmd(DeviceCommand.AdjustSpeed(increase = false))
+            0x14 -> ControlPointResult.DeviceCmd(DeviceCommand.AdjustIncline(increase = true))
+            0x15 -> ControlPointResult.DeviceCmd(DeviceCommand.AdjustIncline(increase = false))
             else -> ControlPointResult.Unsupported(payload[0])
         }
     }

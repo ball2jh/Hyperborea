@@ -306,12 +306,11 @@ class V1SessionTest {
      */
     private fun buildDataResponsePacket(wattsValue: Int = 100): ByteArray {
         // periodicReadFields sorted by fieldIndex:
-        // WATTS(3,2), RPM(5,2), PULSE(10,4), ACTUAL_KPH(16,2), ACTUAL_INCLINE(17,2),
-        // RUNNING_TIME(11,4), CURRENT_DISTANCE(4,4), CURRENT_CALORIES(21,4), CURRENT_TIME(20,4),
-        // GRADE(1,2), RESISTANCE(2,2), WORKOUT_MODE(12,1)
-        // Sorted: GRADE(1), RESISTANCE(2), WATTS(3), CURRENT_DISTANCE(4), RPM(5),
-        //         PULSE(10), RUNNING_TIME(11), WORKOUT_MODE(12), ACTUAL_KPH(16),
-        //         ACTUAL_INCLINE(17), CURRENT_TIME(20), CURRENT_CALORIES(21)
+        // GRADE(1,2), RESISTANCE(2,2), WATTS(3,2), CURRENT_DISTANCE(4,4),
+        // RPM(5,2), DISTANCE(6,4), PULSE(10,4), RUNNING_TIME(11,4),
+        // WORKOUT_MODE(12,1), CALORIES(13,4), ACTUAL_KPH(16,2),
+        // ACTUAL_INCLINE(17,2), CURRENT_TIME(20,4), CURRENT_CALORIES(21,4)
+        // Total = 2+2+2+4+2+4+4+4+1+4+2+2+4+4 = 41 bytes
 
         val fieldData = mutableListOf<Byte>()
 
@@ -326,12 +325,16 @@ class V1SessionTest {
         fieldData.addAll(listOf(0, 0, 0, 0))
         // RPM(5) - 2 bytes - value 0
         fieldData.addAll(listOf(0, 0))
+        // DISTANCE(6) - 4 bytes - value 0
+        fieldData.addAll(listOf(0, 0, 0, 0))
         // PULSE(10) - 4 bytes - value 0
         fieldData.addAll(listOf(0, 0, 0, 0))
         // RUNNING_TIME(11) - 4 bytes - value 0
         fieldData.addAll(listOf(0, 0, 0, 0))
         // WORKOUT_MODE(12) - 1 byte - value 0
         fieldData.add(0)
+        // CALORIES(13) - 4 bytes - value 0
+        fieldData.addAll(listOf(0, 0, 0, 0))
         // ACTUAL_KPH(16) - 2 bytes - value 0
         fieldData.addAll(listOf(0, 0))
         // ACTUAL_INCLINE(17) - 2 bytes - value 0

@@ -1,13 +1,14 @@
 package com.nettarion.hyperborea.core
 
 import com.google.common.truth.Truth.assertThat
+import com.nettarion.hyperborea.core.test.buildDeviceInfo
 import org.junit.Test
 
 class DeviceInfoTest {
 
     @Test
     fun `construction with all fields`() {
-        val info = DeviceInfo(
+        val info = buildDeviceInfo(
             name = "Test Bike",
             type = DeviceType.BIKE,
             supportedMetrics = setOf(Metric.POWER, Metric.CADENCE),
@@ -19,9 +20,8 @@ class DeviceInfoTest {
 
     @Test
     fun `supportedMetrics is a Set — no duplicates`() {
-        val info = DeviceInfo(
+        val info = buildDeviceInfo(
             name = "Bike",
-            type = DeviceType.BIKE,
             supportedMetrics = setOf(Metric.POWER, Metric.POWER, Metric.CADENCE),
         )
         assertThat(info.supportedMetrics).hasSize(2)
@@ -29,8 +29,8 @@ class DeviceInfoTest {
 
     @Test
     fun `data class equality`() {
-        val a = DeviceInfo("Bike", DeviceType.BIKE, setOf(Metric.POWER))
-        val b = DeviceInfo("Bike", DeviceType.BIKE, setOf(Metric.POWER))
+        val a = buildDeviceInfo(name = "Bike", supportedMetrics = setOf(Metric.POWER))
+        val b = buildDeviceInfo(name = "Bike", supportedMetrics = setOf(Metric.POWER))
         assertThat(a).isEqualTo(b)
         assertThat(a.hashCode()).isEqualTo(b.hashCode())
     }

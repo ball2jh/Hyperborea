@@ -6,6 +6,7 @@ import com.nettarion.hyperborea.core.BroadcastAdapter
 import com.nettarion.hyperborea.core.BroadcastId
 import com.nettarion.hyperborea.core.ClientInfo
 import com.nettarion.hyperborea.core.DeviceCommand
+import com.nettarion.hyperborea.core.DeviceInfo
 import com.nettarion.hyperborea.core.ExerciseData
 import com.nettarion.hyperborea.core.Prerequisite
 import com.nettarion.hyperborea.core.SystemSnapshot
@@ -23,6 +24,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.launch
 
 @Singleton
@@ -52,7 +54,7 @@ class WftnpAdapter @Inject constructor(
     private var dataCollectJob: Job? = null
     private var adapterScope: CoroutineScope? = null
 
-    override suspend fun start(dataSource: Flow<ExerciseData>) {
+    override suspend fun start(dataSource: Flow<ExerciseData>, deviceInfo: DeviceInfo) {
         if (_state.value is AdapterState.Active || _state.value is AdapterState.Activating) return
         _state.value = AdapterState.Activating
 
@@ -60,9 +62,12 @@ class WftnpAdapter @Inject constructor(
             val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
             adapterScope = scope
 
+            val serviceDef = WftnpServiceDefinition(deviceInfo)
             val wftnpServer = WftnpServer(
                 logger = logger,
                 scope = scope,
+                deviceType = deviceInfo.type,
+                serviceDef = serviceDef,
                 onClientChange = { clients -> _connectedClients.value = clients },
                 onCommand = { command -> _incomingCommands.tryEmit(command) },
             )
@@ -72,8 +77,14 @@ class WftnpAdapter @Inject constructor(
             nsdRegistrar.register(WftnpServer.PORT, deviceName() ?: DEFAULT_DEVICE_NAME)
 
             dataCollectJob = scope.launch {
-                dataSource.collect { data ->
-                    wftnpServer.broadcastData(data)
+                try {
+                    dataSource.collect { data ->
+                        wftnpServer.broadcastData(data)
+                    }
+                } catch (e: CancellationException) { throw e }
+                catch (e: Exception) {
+                    logger.e(TAG, "Data collection failed", e)
+                    _state.value = AdapterState.Error("Data collection failed: ${e.message}", e)
                 }
             }
 

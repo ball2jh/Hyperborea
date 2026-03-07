@@ -1,5 +1,6 @@
 package com.nettarion.hyperborea.core
 
+// Not thread-safe — must be called from a single collector
 class RevolutionCounter {
     var cumulativeWheelRevs: Long = 0
         private set

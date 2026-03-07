@@ -147,17 +147,18 @@ class V1CodecTest {
 
     @Test
     fun `decode DataResponse with DONE parses field values from payload`() {
-        // Build a minimal response with just GRADE(1) and WATTS(3) in periodicReadFields order
-        // periodicReadFields sorted: GRADE(1,2), RESISTANCE(2,2), WATTS(3,2), CURRENT_DISTANCE(4,4),
-        //   RPM(5,2), PULSE(10,4), RUNNING_TIME(11,4), WORKOUT_MODE(12,1), ACTUAL_KPH(16,2),
+        // periodicReadFields sorted by fieldIndex:
+        //   GRADE(1,2), RESISTANCE(2,2), WATTS(3,2), CURRENT_DISTANCE(4,4),
+        //   RPM(5,2), DISTANCE(6,4), PULSE(10,4), RUNNING_TIME(11,4),
+        //   WORKOUT_MODE(12,1), CALORIES(13,4), ACTUAL_KPH(16,2),
         //   ACTUAL_INCLINE(17,2), CURRENT_TIME(20,4), CURRENT_CALORIES(21,4)
-        // Total data = 2+2+2+4+2+4+4+1+2+2+4+4 = 33 bytes
-        val fieldData = ByteArray(33)
+        // Total = 2+2+2+4+2+4+4+4+1+4+2+2+4+4 = 41 bytes
+        val fieldData = ByteArray(41)
         // GRADE at offset 0: signed 16-bit LE -350 = grade -3.5%
         val grade = (-350).toShort()
         fieldData[0] = grade.toByte()
         fieldData[1] = (grade.toInt() shr 8).toByte()
-        // WATTS at offset 4: 200 LE
+        // WATTS at offset 4 (after GRADE=2, RESISTANCE=2): 200 LE
         fieldData[4] = 200.toByte()
         fieldData[5] = 0
 
@@ -293,6 +294,40 @@ class V1CodecTest {
         assertThat(decoded).isInstanceOf(V1Message.Incoming.SecurityResponse::class.java)
         val sec = decoded as V1Message.Incoming.SecurityResponse
         assertThat(sec.isUnlocked).isFalse()
+    }
+
+    @Test
+    fun `encode ReadWriteData clamps extreme speed value to Short range`() {
+        // 400 kph * 100 = 40000, which exceeds Short.MAX_VALUE (32767)
+        // Should clamp to 32767 instead of wrapping
+        val msg = V1Message.Outgoing.ReadWriteData(
+            writeFields = mapOf(V1DataField.KPH to 400f),
+        )
+        val packets = V1Codec.encode(msg)
+        assertThat(packets).isNotEmpty()
+        // Decode the speed bytes from the packet — find write payload
+        // The packet is: [device, len, cmd, numSections, sectionBitmask, speedLo, speedHi, ..., checksum]
+        val packet = packets[0]
+        // KPH is fieldIndex=0, section=0, bit=0 → sectionBitmask has bit 0 set
+        // Layout: [0x02, len, 0x02, 1(numSections), 0x01(bitmask), speedLo, speedHi, 0(read numSections), checksum]
+        val speedLo = packet[5].toInt() and 0xFF
+        val speedHi = packet[6].toInt() and 0xFF
+        val rawSpeed = (speedLo or (speedHi shl 8)).toShort()
+        assertThat(rawSpeed).isEqualTo(Short.MAX_VALUE)
+    }
+
+    @Test
+    fun `decodeDataResponse rejects partial payload`() {
+        // Payload shorter than expected total size → returns empty fields
+        val shortPayload = ByteArray(10) // way too short for 14 periodicReadFields
+        val totalLen = 4 + shortPayload.size + 1
+        val header = byteArrayOf(0x07, totalLen.toByte(), 0x02, 0x02)
+        val withoutChecksum = header + shortPayload
+        val packet = withoutChecksum + V1Codec.checksum(withoutChecksum)
+
+        val decoded = V1Codec.decodeSingle(packet) as V1Message.Incoming.DataResponse
+        assertThat(decoded.status).isEqualTo(V1Message.STATUS_DONE)
+        assertThat(decoded.fields).isEmpty()
     }
 
     @Test

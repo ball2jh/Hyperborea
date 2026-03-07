@@ -1,7 +1,10 @@
 package com.nettarion.hyperborea.core.test
 
 import com.nettarion.hyperborea.core.DeclaredComponent
+import com.nettarion.hyperborea.core.DeviceInfo
+import com.nettarion.hyperborea.core.DeviceType
 import com.nettarion.hyperborea.core.ExerciseData
+import com.nettarion.hyperborea.core.Metric
 import com.nettarion.hyperborea.core.InstalledPackage
 import com.nettarion.hyperborea.core.LogLevel
 import com.nettarion.hyperborea.core.SystemLogEntry
@@ -38,6 +41,26 @@ fun buildSystemSnapshot(
     components = components,
     usbDevices = usbDevices,
     timestamp = timestamp,
+)
+
+fun buildDeviceInfo(
+    name: String = "Test Device",
+    type: DeviceType = DeviceType.BIKE,
+    supportedMetrics: Set<Metric> = emptySet(),
+    maxResistance: Int = 24,
+    minResistance: Int = 1,
+    minIncline: Float = -6f,
+    maxIncline: Float = 40f,
+    maxPower: Int = 2000,
+): DeviceInfo = DeviceInfo(
+    name = name,
+    type = type,
+    supportedMetrics = supportedMetrics,
+    maxResistance = maxResistance,
+    minResistance = minResistance,
+    minIncline = minIncline,
+    maxIncline = maxIncline,
+    maxPower = maxPower,
 )
 
 fun buildExerciseData(

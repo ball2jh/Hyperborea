@@ -18,9 +18,6 @@ class HyperboreaApp : Application() {
             return
         }
         diagnosticBootstrap.start()
-        val intent = Intent(this, HyperboreaService::class.java).apply {
-            action = HyperboreaService.ACTION_ACTIVATE
-        }
-        startService(intent)
+        startService(Intent(this, HyperboreaService::class.java))
     }
 }

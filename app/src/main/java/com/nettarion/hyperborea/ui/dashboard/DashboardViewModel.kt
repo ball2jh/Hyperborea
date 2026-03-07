@@ -11,6 +11,7 @@ import com.nettarion.hyperborea.core.BroadcastId
 import com.nettarion.hyperborea.core.ClientInfo
 import com.nettarion.hyperborea.core.HardwareAdapter
 import com.nettarion.hyperborea.core.Orchestrator
+import com.nettarion.hyperborea.core.ProfileRepository
 import com.nettarion.hyperborea.core.SystemMonitor
 import com.nettarion.hyperborea.core.UserPreferences
 import dagger.hilt.android.lifecycle.HiltViewModel
@@ -30,6 +31,7 @@ class DashboardViewModel @Inject constructor(
     private val broadcastAdapters: Set<@JvmSuppressWildcards BroadcastAdapter>,
     private val systemMonitor: SystemMonitor,
     private val userPreferences: UserPreferences,
+    private val profileRepository: ProfileRepository,
     @param:ApplicationContext private val context: Context,
 ) : ViewModel() {
 
@@ -62,8 +64,8 @@ class DashboardViewModel @Inject constructor(
         hardwareAdapter.exerciseData,
         hardwareAdapter.state,
         hardwareAdapter.deviceInfo,
-        combine(systemMonitor.snapshot.map { it.status }, broadcastsFlow, ::Pair),
-    ) { orchState, exercise, hwState, deviceInfo, (status, broadcasts) ->
+        combine(systemMonitor.snapshot.map { it.status }, broadcastsFlow, profileRepository.activeProfile, ::Triple),
+    ) { orchState, exercise, hwState, deviceInfo, (status, broadcasts, profile) ->
         DashboardUiState(
             orchestratorState = orchState,
             exerciseData = exercise,
@@ -71,6 +73,7 @@ class DashboardViewModel @Inject constructor(
             deviceInfo = deviceInfo,
             broadcasts = broadcasts,
             systemStatus = status,
+            profileName = profile?.name,
         )
     }.stateIn(
         viewModelScope,
@@ -85,6 +88,9 @@ class DashboardViewModel @Inject constructor(
         ),
     )
 
+    val activeProfileId: Long?
+        get() = profileRepository.activeProfile.value?.id
+
     fun startBroadcasting() {
         val intent = Intent(context, HyperboreaService::class.java).apply {
             action = HyperboreaService.ACTION_ACTIVATE
@@ -92,9 +98,28 @@ class DashboardViewModel @Inject constructor(
         context.startService(intent)
     }
 
-    fun stopBroadcasting() {
+    fun stopBroadcasting(save: Boolean = true) {
+        val action = if (save) HyperboreaService.ACTION_DEACTIVATE else HyperboreaService.ACTION_DEACTIVATE_DISCARD
         val intent = Intent(context, HyperboreaService::class.java).apply {
-            action = HyperboreaService.ACTION_DEACTIVATE
+            this.action = action
+        }
+        context.startService(intent)
+    }
+
+    /** Returns elapsed seconds from the current exercise data, or 0 if not available. */
+    val currentElapsedSeconds: Long
+        get() = uiState.value.exerciseData?.elapsedTime ?: 0
+
+    fun pauseBroadcasting() {
+        val intent = Intent(context, HyperboreaService::class.java).apply {
+            action = HyperboreaService.ACTION_PAUSE
+        }
+        context.startService(intent)
+    }
+
+    fun resumeBroadcasting() {
+        val intent = Intent(context, HyperboreaService::class.java).apply {
+            action = HyperboreaService.ACTION_RESUME
         }
         context.startService(intent)
     }

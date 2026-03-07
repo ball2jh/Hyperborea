@@ -3,6 +3,7 @@ package com.nettarion.hyperborea.broadcast.wftnp
 import com.nettarion.hyperborea.core.AppLogger
 import com.nettarion.hyperborea.core.ControlPointParser
 import com.nettarion.hyperborea.core.DeviceCommand
+import com.nettarion.hyperborea.core.DeviceType
 import com.nettarion.hyperborea.core.ExerciseData
 import com.nettarion.hyperborea.core.FtmsDataEncoder
 import com.nettarion.hyperborea.core.RevolutionCounter
@@ -17,6 +18,8 @@ class WftnpClientHandler(
     val clientId: String,
     private val input: InputStream,
     private val output: OutputStream,
+    private val deviceType: DeviceType,
+    private val serviceDef: WftnpServiceDefinition,
     private val onCommand: (DeviceCommand) -> Unit,
     private val logger: AppLogger,
 ) {
@@ -47,9 +50,9 @@ class WftnpClientHandler(
         if (isClosed) return
         val now = System.currentTimeMillis()
 
-        if (enabledNotifications.contains(WftnpServiceDefinition.INDOOR_BIKE_DATA)) {
-            val value = FtmsDataEncoder.encodeIndoorBikeData(data)
-            send(WftnpCodec.encodeNotification(WftnpServiceDefinition.INDOOR_BIKE_DATA, value))
+        if (enabledNotifications.contains(serviceDef.dataCharacteristic)) {
+            val value = FtmsDataEncoder.encodeData(deviceType, data)
+            send(WftnpCodec.encodeNotification(serviceDef.dataCharacteristic, value))
         }
 
         if (enabledNotifications.contains(WftnpServiceDefinition.CPS_MEASUREMENT)) {
@@ -85,15 +88,16 @@ class WftnpClientHandler(
     }
 
     private suspend fun handleDiscoverServices(request: WftnpMessage.DiscoverServices) {
-        val payload = ByteArray(WftnpServiceDefinition.services.size * 16)
-        WftnpServiceDefinition.services.forEachIndexed { i, uuid ->
+        val services = WftnpServiceDefinition.services
+        val payload = ByteArray(services.size * 16)
+        services.forEachIndexed { i, uuid ->
             WftnpCodec.encodeUuidBlob(uuid).copyInto(payload, i * 16)
         }
         send(WftnpCodec.encodeResponse(WftnpCodec.ID_DISCOVER_SERVICES, request.sequence, WftnpCodec.RESP_SUCCESS, payload))
     }
 
     private suspend fun handleDiscoverCharacteristics(request: WftnpMessage.DiscoverCharacteristics) {
-        val chars = WftnpServiceDefinition.characteristicsFor(request.serviceUuid)
+        val chars = serviceDef.characteristicsFor(request.serviceUuid)
         if (chars == null) {
             send(WftnpCodec.encodeResponse(WftnpCodec.ID_DISCOVER_CHARACTERISTICS, request.sequence, WftnpCodec.RESP_SERVICE_NOT_FOUND))
             return
@@ -110,7 +114,7 @@ class WftnpClientHandler(
     }
 
     private suspend fun handleReadCharacteristic(request: WftnpMessage.ReadCharacteristic) {
-        val value = WftnpServiceDefinition.readValue(request.charUuid)
+        val value = serviceDef.readValue(request.charUuid)
         if (value == null) {
             send(WftnpCodec.encodeResponse(WftnpCodec.ID_READ_CHARACTERISTIC, request.sequence, WftnpCodec.RESP_CHAR_NOT_FOUND))
             return
@@ -120,7 +124,7 @@ class WftnpClientHandler(
     }
 
     private suspend fun handleWriteCharacteristic(request: WftnpMessage.WriteCharacteristic) {
-        if (!WftnpServiceDefinition.isWritable(request.charUuid)) {
+        if (!serviceDef.isWritable(request.charUuid)) {
             send(WftnpCodec.encodeResponse(WftnpCodec.ID_WRITE_CHARACTERISTIC, request.sequence, WftnpCodec.RESP_OP_NOT_SUPPORTED))
             return
         }
@@ -154,7 +158,7 @@ class WftnpClientHandler(
     }
 
     private suspend fun handleEnableNotifications(request: WftnpMessage.EnableNotifications) {
-        if (!WftnpServiceDefinition.isNotifiable(request.charUuid)) {
+        if (!serviceDef.isNotifiable(request.charUuid)) {
             send(WftnpCodec.encodeResponse(WftnpCodec.ID_ENABLE_NOTIFICATIONS, request.sequence, WftnpCodec.RESP_CHAR_NOT_FOUND))
             return
         }

@@ -4,8 +4,11 @@ import android.content.Context
 import android.content.Intent
 import android.os.Environment
 import androidx.lifecycle.ViewModel
+import com.nettarion.hyperborea.core.AdapterState
 import com.nettarion.hyperborea.core.AppLogger
+import com.nettarion.hyperborea.core.BroadcastAdapter
 import com.nettarion.hyperborea.core.BroadcastId
+import com.nettarion.hyperborea.core.ClientInfo
 import com.nettarion.hyperborea.core.DeviceIdentity
 import com.nettarion.hyperborea.core.ExerciseData
 import com.nettarion.hyperborea.core.HardwareAdapter
@@ -20,9 +23,11 @@ import com.nettarion.hyperborea.platform.update.TrackState
 import com.nettarion.hyperborea.platform.update.UpdateManager
 import dagger.hilt.android.lifecycle.HiltViewModel
 import dagger.hilt.android.qualifiers.ApplicationContext
+import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.combine
 import java.io.File
 import java.text.SimpleDateFormat
 import java.util.Date
@@ -35,11 +40,28 @@ class AdminViewModel @Inject constructor(
     private val systemLogStore: SystemLogStore,
     private val systemMonitor: SystemMonitor,
     private val hardwareAdapter: HardwareAdapter,
+    private val broadcastAdapters: Set<@JvmSuppressWildcards BroadcastAdapter>,
     private val updateManager: UpdateManager,
     private val userPreferences: UserPreferences,
     private val logger: AppLogger,
     @param:ApplicationContext private val context: Context,
 ) : ViewModel() {
+
+    val broadcastDiagnostics: Flow<List<BroadcastDiagnostic>> = combine(
+        broadcastAdapters.sortedBy { it.id.ordinal }.flatMap { listOf(it.state, it.connectedClients) },
+    ) { values ->
+        val sorted = broadcastAdapters.sortedBy { it.id.ordinal }
+        sorted.mapIndexed { i, adapter ->
+            val state = values[i * 2] as AdapterState
+            @Suppress("UNCHECKED_CAST")
+            val clients = values[i * 2 + 1] as Set<ClientInfo>
+            BroadcastDiagnostic(
+                id = adapter.id,
+                state = state,
+                clients = clients,
+            )
+        }
+    }
 
     val logEntries: StateFlow<List<LogEntry>> = logStore.entries
     val systemLogEntries: StateFlow<List<SystemLogEntry>> = systemLogStore.entries
@@ -84,11 +106,15 @@ class AdminViewModel @Inject constructor(
             // Fall back to app-private external files dir
             val fallbackDir = context.getExternalFilesDir(Environment.DIRECTORY_DOWNLOADS)
             if (fallbackDir != null) {
-                fallbackDir.mkdirs()
-                val fallbackFile = File(fallbackDir, filename)
-                fallbackFile.writeText(content)
-                _exportResult.value = ExportResult(fallbackFile.absolutePath)
-                return
+                try {
+                    fallbackDir.mkdirs()
+                    val fallbackFile = File(fallbackDir, filename)
+                    fallbackFile.writeText(content)
+                    _exportResult.value = ExportResult(fallbackFile.absolutePath)
+                    return
+                } catch (e2: Exception) {
+                    logger.e(TAG, "Fallback write also failed", e2)
+                }
             }
             _exportResult.value = ExportResult(null, error = "Failed to save: ${e.message}")
             return
@@ -133,4 +159,10 @@ class AdminViewModel @Inject constructor(
 data class ExportResult(
     val filePath: String?,
     val error: String? = null,
+)
+
+data class BroadcastDiagnostic(
+    val id: BroadcastId,
+    val state: AdapterState,
+    val clients: Set<ClientInfo>,
 )

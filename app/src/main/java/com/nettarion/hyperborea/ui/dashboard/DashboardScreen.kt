@@ -5,11 +5,13 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.systemBarsPadding
+import androidx.compose.foundation.layout.navigationBarsPadding
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Snackbar
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -29,12 +31,14 @@ import kotlinx.coroutines.delay
 
 @Composable
 fun DashboardScreen(
+    onProfileClick: (profileId: Long) -> Unit,
     viewModel: DashboardViewModel = hiltViewModel(),
     adminViewModel: AdminViewModel = hiltViewModel(),
 ) {
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
     var drawerOpen by remember { mutableStateOf(false) }
     var logsExpanded by remember { mutableStateOf(false) }
+    var showStopDialog by remember { mutableStateOf(false) }
     val colors = LocalHyperboreaColors.current
 
     // Export result snackbar
@@ -57,15 +61,29 @@ fun DashboardScreen(
         modifier = Modifier
             .fillMaxSize()
             .background(MaterialTheme.colorScheme.background)
-            .systemBarsPadding(),
+            .navigationBarsPadding(),
     ) {
         Column(modifier = Modifier.fillMaxSize()) {
             StatusBar(
                 orchestratorState = uiState.orchestratorState,
                 broadcasts = uiState.broadcasts,
                 exerciseData = uiState.exerciseData,
+                profileName = uiState.profileName,
                 onStart = viewModel::startBroadcasting,
-                onStop = viewModel::stopBroadcasting,
+                onStop = {
+                    if (viewModel.currentElapsedSeconds >= 60) {
+                        showStopDialog = true
+                    } else {
+                        viewModel.stopBroadcasting(save = false)
+                    }
+                },
+                onPause = viewModel::pauseBroadcasting,
+                onResume = viewModel::resumeBroadcasting,
+                onSettingsClick = { drawerOpen = true },
+                onProfileClick = {
+                    val profileId = viewModel.activeProfileId
+                    if (profileId != null) onProfileClick(profileId)
+                },
             )
             HorizontalDivider(thickness = 1.dp, color = colors.divider)
             MetricGrid(
@@ -73,8 +91,6 @@ fun DashboardScreen(
                 supportedMetrics = uiState.deviceInfo?.supportedMetrics,
                 modifier = Modifier.weight(1f),
             )
-            HorizontalDivider(thickness = 1.dp, color = colors.divider)
-            BottomBar(onSettingsClick = { drawerOpen = true })
         }
 
         AdminDrawer(
@@ -92,6 +108,26 @@ fun DashboardScreen(
             onClose = { logsExpanded = false },
             viewModel = adminViewModel,
         )
+
+        if (showStopDialog) {
+            AlertDialog(
+                onDismissRequest = { showStopDialog = false },
+                title = { Text("Stop workout?") },
+                text = { Text("Do you want to save this ride?") },
+                confirmButton = {
+                    TextButton(onClick = {
+                        showStopDialog = false
+                        viewModel.stopBroadcasting(save = true)
+                    }) { Text("Save") }
+                },
+                dismissButton = {
+                    TextButton(onClick = {
+                        showStopDialog = false
+                        viewModel.stopBroadcasting(save = false)
+                    }) { Text("Discard") }
+                },
+            )
+        }
 
         // Snackbar for export results
         snackbarMessage?.let { message ->

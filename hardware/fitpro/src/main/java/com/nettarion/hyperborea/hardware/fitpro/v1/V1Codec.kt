@@ -187,24 +187,27 @@ object V1Codec {
         return buildBitFieldPayload(fields.associateWith { 0f }, includeData = false)
     }
 
+    private fun clampToShort(value: Int): Short =
+        value.coerceIn(Short.MIN_VALUE.toInt(), Short.MAX_VALUE.toInt()).toShort()
+
     private fun convertToBytes(field: V1DataField, value: Float): ByteArray = when (field.converter) {
         V1Converter.SPEED -> {
             // KPH * 100, stored as unsigned 16-bit LE
-            val raw = (value * 100).toInt().toShort()
+            val raw = clampToShort((value * 100).toInt())
             byteArrayOf(raw.toByte(), (raw.toInt() shr 8).toByte())
         }
         V1Converter.GRADE -> {
             // Grade * 100, stored as signed 16-bit LE
-            val raw = (value * 100).toInt().toShort()
+            val raw = clampToShort((value * 100).toInt())
             byteArrayOf(raw.toByte(), (raw.toInt() shr 8).toByte())
         }
         V1Converter.RESISTANCE -> {
             // Raw resistance level as 16-bit LE
-            val raw = value.toInt().toShort()
+            val raw = clampToShort(value.toInt())
             byteArrayOf(raw.toByte(), (raw.toInt() shr 8).toByte())
         }
         V1Converter.SHORT -> {
-            val raw = value.toInt().toShort()
+            val raw = clampToShort(value.toInt())
             byteArrayOf(raw.toByte(), (raw.toInt() shr 8).toByte())
         }
         V1Converter.BYTE -> {
@@ -354,9 +357,15 @@ object V1Codec {
         val fields = mutableMapOf<V1DataField, Float>()
         var offset = 0
         val readFields = V1DataField.periodicReadFields.sortedBy { it.fieldIndex }
+        val expectedSize = readFields.sumOf { it.sizeBytes }
+
+        // If payload doesn't match expected total size, only decode if it's
+        // a complete set — partial payloads could mean misaligned fields
+        if (payload.size != expectedSize) {
+            return V1Message.Incoming.DataResponse(status, emptyMap())
+        }
 
         for (field in readFields) {
-            if (offset + field.sizeBytes > payload.size) break
             val fieldData = payload.copyOfRange(offset, offset + field.sizeBytes)
             fields[field] = convertFromBytes(field, fieldData)
             offset += field.sizeBytes

@@ -1,5 +1,7 @@
 package com.nettarion.hyperborea.broadcast.ftms
 
+import android.Manifest
+import android.annotation.SuppressLint
 import android.bluetooth.BluetoothDevice
 import android.bluetooth.BluetoothGatt
 import android.bluetooth.BluetoothGattCharacteristic
@@ -8,14 +10,20 @@ import android.bluetooth.BluetoothGattServer
 import android.bluetooth.BluetoothGattServerCallback
 import android.bluetooth.BluetoothGattService
 import android.bluetooth.BluetoothProfile
+import android.content.Context
+import android.content.pm.PackageManager
+import android.os.Build
 import com.nettarion.hyperborea.core.AppLogger
 import com.nettarion.hyperborea.core.ControlPointParser
 import com.nettarion.hyperborea.core.DeviceCommand
+import com.nettarion.hyperborea.core.DeviceInfo
 import java.util.UUID
 import java.util.concurrent.ConcurrentHashMap
 
 class FtmsGattCallback(
+    private val context: Context,
     private val logger: AppLogger,
+    private val deviceInfo: DeviceInfo,
     private val onClientConnected: (BluetoothDevice) -> Unit,
     private val onClientDisconnected: (BluetoothDevice) -> Unit,
     private val onCommand: (DeviceCommand) -> Unit,
@@ -47,17 +55,17 @@ class FtmsGattCallback(
         offset: Int,
         characteristic: BluetoothGattCharacteristic,
     ) {
-        val value = FtmsServiceBuilder.staticValueFor(characteristic.uuid)
+        val value = FtmsServiceBuilder.staticValueFor(characteristic.uuid, deviceInfo)
         if (value == null) {
-            gattServer?.sendResponse(device, requestId, BluetoothGatt.GATT_READ_NOT_PERMITTED, 0, null)
+            sendGattResponse(device, requestId, BluetoothGatt.GATT_READ_NOT_PERMITTED, 0, null)
             return
         }
         if (offset >= value.size) {
-            gattServer?.sendResponse(device, requestId, BluetoothGatt.GATT_SUCCESS, offset, ByteArray(0))
+            sendGattResponse(device, requestId, BluetoothGatt.GATT_SUCCESS, offset, ByteArray(0))
             return
         }
         val slice = value.copyOfRange(offset, value.size)
-        gattServer?.sendResponse(device, requestId, BluetoothGatt.GATT_SUCCESS, offset, slice)
+        sendGattResponse(device, requestId, BluetoothGatt.GATT_SUCCESS, offset, slice)
     }
 
     @Suppress("DEPRECATION")
@@ -72,14 +80,14 @@ class FtmsGattCallback(
     ) {
         if (characteristic.uuid != FtmsServiceBuilder.FTMS_CONTROL_POINT_UUID || value == null) {
             if (responseNeeded) {
-                gattServer?.sendResponse(device, requestId, BluetoothGatt.GATT_WRITE_NOT_PERMITTED, 0, null)
+                sendGattResponse(device, requestId, BluetoothGatt.GATT_WRITE_NOT_PERMITTED, 0, null)
             }
             return
         }
 
         // Send GATT write response first (Zwift uses write-with-response)
         if (responseNeeded) {
-            gattServer?.sendResponse(device, requestId, BluetoothGatt.GATT_SUCCESS, 0, null)
+            sendGattResponse(device, requestId, BluetoothGatt.GATT_SUCCESS, 0, null)
         }
 
         // Parse the control point command
@@ -96,7 +104,7 @@ class FtmsGattCallback(
                 ?.getCharacteristic(FtmsServiceBuilder.FTMS_CONTROL_POINT_UUID)
             if (cpChar != null) {
                 cpChar.value = cpResp
-                gattServer?.notifyCharacteristicChanged(device, cpChar, true) // confirm = true for indication
+                notifyGattChange(device, cpChar, true) // confirm = true for indication
             }
         }
 
@@ -115,9 +123,9 @@ class FtmsGattCallback(
         if (descriptor.uuid == FtmsServiceBuilder.CCCD_UUID) {
             val charUuid = descriptor.characteristic.uuid
             val value = cccdState[charUuid] ?: FtmsServiceBuilder.CCCD_DISABLED
-            gattServer?.sendResponse(device, requestId, BluetoothGatt.GATT_SUCCESS, offset, value)
+            sendGattResponse(device, requestId, BluetoothGatt.GATT_SUCCESS, offset, value)
         } else {
-            gattServer?.sendResponse(device, requestId, BluetoothGatt.GATT_READ_NOT_PERMITTED, 0, null)
+            sendGattResponse(device, requestId, BluetoothGatt.GATT_READ_NOT_PERMITTED, 0, null)
         }
     }
 
@@ -135,11 +143,11 @@ class FtmsGattCallback(
             cccdState[charUuid] = value.copyOf()
             logger.d(TAG, "CCCD write for ${charUuid}: ${value.joinToString { "%02X".format(it) }}")
             if (responseNeeded) {
-                gattServer?.sendResponse(device, requestId, BluetoothGatt.GATT_SUCCESS, 0, null)
+                sendGattResponse(device, requestId, BluetoothGatt.GATT_SUCCESS, 0, null)
             }
         } else {
             if (responseNeeded) {
-                gattServer?.sendResponse(device, requestId, BluetoothGatt.GATT_WRITE_NOT_PERMITTED, 0, null)
+                sendGattResponse(device, requestId, BluetoothGatt.GATT_WRITE_NOT_PERMITTED, 0, null)
             }
         }
     }
@@ -156,6 +164,33 @@ class FtmsGattCallback(
     fun isSubscribed(charUuid: UUID): Boolean {
         val cccd = cccdState[charUuid] ?: return false
         return cccd.size >= 2 && (cccd[0].toInt() != 0 || cccd[1].toInt() != 0)
+    }
+
+    private fun hasBluetoothPermission(): Boolean =
+        Build.VERSION.SDK_INT < Build.VERSION_CODES.S ||
+            context.checkSelfPermission(Manifest.permission.BLUETOOTH_CONNECT) == PackageManager.PERMISSION_GRANTED
+
+    @SuppressLint("MissingPermission") // Checked by hasBluetoothPermission() above
+    private fun sendGattResponse(
+        device: BluetoothDevice,
+        requestId: Int,
+        status: Int,
+        offset: Int,
+        value: ByteArray?,
+    ) {
+        if (!hasBluetoothPermission()) return
+        gattServer?.sendResponse(device, requestId, status, offset, value)
+    }
+
+    @SuppressLint("MissingPermission") // Checked by hasBluetoothPermission() above
+    @Suppress("DEPRECATION")
+    private fun notifyGattChange(
+        device: BluetoothDevice,
+        characteristic: BluetoothGattCharacteristic,
+        confirm: Boolean,
+    ) {
+        if (!hasBluetoothPermission()) return
+        gattServer?.notifyCharacteristicChanged(device, characteristic, confirm)
     }
 
     private companion object {

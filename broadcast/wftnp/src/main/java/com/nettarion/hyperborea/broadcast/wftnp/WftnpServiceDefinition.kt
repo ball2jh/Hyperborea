@@ -1,51 +1,40 @@
 package com.nettarion.hyperborea.broadcast.wftnp
 
-object WftnpServiceDefinition {
+import com.nettarion.hyperborea.core.DeviceInfo
+import com.nettarion.hyperborea.core.DeviceType
+import com.nettarion.hyperborea.core.FtmsDataEncoder
 
-    // WFTNP property flags (NOT standard BLE ATT flags)
-    const val PROP_READ: Byte = 0x01
-    const val PROP_WRITE: Byte = 0x02
-    const val PROP_NOTIFY: Byte = 0x04
-    const val PROP_INDICATE: Byte = 0x08
+class WftnpServiceDefinition(deviceInfo: DeviceInfo) {
 
-    // Services
-    val FTMS_SERVICE = ShortUuid(0x1826)
-    val CPS_SERVICE = ShortUuid(0x1818)
+    val dataCharacteristic = ShortUuid(FtmsDataEncoder.dataCharacteristicShortUuid(deviceInfo.type))
 
-    // FTMS characteristics
-    val FTMS_FEATURE = ShortUuid(0x2ACC)
-    val SUPPORTED_RESISTANCE = ShortUuid(0x2AD6)
-    val FTMS_CONTROL_POINT = ShortUuid(0x2AD9)
-    val WAHOO_CONTROL = ShortUuid(0xE005)
-    val INDOOR_BIKE_DATA = ShortUuid(0x2AD2)
-    val TRAINING_STATUS = ShortUuid(0x2AD3)
+    // Same feature set as BLE (FtmsServiceBuilder.ftmsFeatureValue).
+    val ftmsFeatureValue: ByteArray = when (deviceInfo.type) {
+        DeviceType.BIKE -> byteArrayOf(
+            0x8F.toByte(), 0x56, 0x00, 0x00, 0x0E, 0xE0.toByte(), 0x00, 0x00,
+        )
+        DeviceType.TREADMILL -> TODO("Treadmill WFTNP feature value")
+        DeviceType.ROWER -> TODO("Rower WFTNP feature value")
+        DeviceType.ELLIPTICAL -> TODO("Cross Trainer WFTNP feature value")
+    }
 
-    // CPS characteristics
-    val CPS_FEATURE = ShortUuid(0x2A65)
-    val SENSOR_LOCATION = ShortUuid(0x2A5D)
-    val CPS_MEASUREMENT = ShortUuid(0x2A63)
+    private val resistanceRangeValue: ByteArray =
+        sint16LE(deviceInfo.minResistance * 10) + sint16LE(deviceInfo.maxResistance * 10) + uint16LE(10)
 
-    // Static read values (verified against Zwift's FTMS_ProcessMachineFeatures)
-    val FTMS_FEATURE_VALUE = byteArrayOf(
-        0x83.toByte(), 0x14, 0x00, 0x00, 0x0C, 0xE0.toByte(), 0x00, 0x00,
-    )
-    val RESISTANCE_RANGE_VALUE = byteArrayOf(
-        0x0A, 0x00, 0x96.toByte(), 0x00, 0x0A, 0x00,
-    )
-    val TRAINING_STATUS_VALUE = byteArrayOf(0x00, 0x01)
-    val CPS_FEATURE_VALUE = byteArrayOf(0x0C, 0x00, 0x00, 0x00)
-    val SENSOR_LOCATION_VALUE = byteArrayOf(0x0D)
+    private val inclinationRangeValue: ByteArray =
+        sint16LE((deviceInfo.minIncline * 10).toInt()) + sint16LE((deviceInfo.maxIncline * 10).toInt()) + uint16LE(5)
 
-    val services: List<ShortUuid> = listOf(FTMS_SERVICE, CPS_SERVICE)
-
-    private data class CharDef(val uuid: ShortUuid, val properties: Byte, val readValue: ByteArray?)
+    private val powerRangeValue: ByteArray =
+        sint16LE(0) + sint16LE(deviceInfo.maxPower) + uint16LE(1)
 
     private val ftmsChars = listOf(
-        CharDef(FTMS_FEATURE, PROP_READ, FTMS_FEATURE_VALUE),
-        CharDef(SUPPORTED_RESISTANCE, PROP_READ, RESISTANCE_RANGE_VALUE),
+        CharDef(FTMS_FEATURE, PROP_READ, ftmsFeatureValue),
+        CharDef(SUPPORTED_RESISTANCE, PROP_READ, resistanceRangeValue),
+        CharDef(SUPPORTED_INCLINATION, PROP_READ, inclinationRangeValue),
+        CharDef(SUPPORTED_POWER, PROP_READ, powerRangeValue),
         CharDef(FTMS_CONTROL_POINT, (PROP_WRITE.toInt() or PROP_INDICATE.toInt()).toByte(), null),
         CharDef(WAHOO_CONTROL, PROP_WRITE, null),
-        CharDef(INDOOR_BIKE_DATA, PROP_NOTIFY, null),
+        CharDef(dataCharacteristic, PROP_NOTIFY, null),
         CharDef(TRAINING_STATUS, PROP_READ, TRAINING_STATUS_VALUE),
     )
 
@@ -80,4 +69,47 @@ object WftnpServiceDefinition {
 
     fun serviceForCharacteristic(char: ShortUuid): ShortUuid? =
         charsByService.entries.firstOrNull { (_, chars) -> chars.any { it.uuid == char } }?.key
+
+    private data class CharDef(val uuid: ShortUuid, val properties: Byte, val readValue: ByteArray?)
+
+    companion object {
+        // WFTNP property flags (NOT standard BLE ATT flags)
+        const val PROP_READ: Byte = 0x01
+        const val PROP_WRITE: Byte = 0x02
+        const val PROP_NOTIFY: Byte = 0x04
+        const val PROP_INDICATE: Byte = 0x08
+
+        // Services
+        val FTMS_SERVICE = ShortUuid(0x1826)
+        val CPS_SERVICE = ShortUuid(0x1818)
+
+        // FTMS characteristics
+        val FTMS_FEATURE = ShortUuid(0x2ACC)
+        val SUPPORTED_RESISTANCE = ShortUuid(0x2AD6)
+        val SUPPORTED_INCLINATION = ShortUuid(0x2AD5)
+        val SUPPORTED_POWER = ShortUuid(0x2AD7)
+        val FTMS_CONTROL_POINT = ShortUuid(0x2AD9)
+        val WAHOO_CONTROL = ShortUuid(0xE005)
+        val TRAINING_STATUS = ShortUuid(0x2AD3)
+
+        // CPS characteristics
+        val CPS_FEATURE = ShortUuid(0x2A65)
+        val SENSOR_LOCATION = ShortUuid(0x2A5D)
+        val CPS_MEASUREMENT = ShortUuid(0x2A63)
+
+        // Static read values (device-independent)
+        val TRAINING_STATUS_VALUE = byteArrayOf(0x00, 0x01)
+        val CPS_FEATURE_VALUE = byteArrayOf(0x0C, 0x00, 0x00, 0x00)
+        val SENSOR_LOCATION_VALUE = byteArrayOf(0x0D)
+
+        val services: List<ShortUuid> = listOf(FTMS_SERVICE, CPS_SERVICE)
+
+        private fun uint16LE(value: Int): ByteArray =
+            byteArrayOf((value and 0xFF).toByte(), (value shr 8).toByte())
+
+        private fun sint16LE(value: Int): ByteArray {
+            val clamped = value.coerceIn(-32768, 32767)
+            return byteArrayOf((clamped and 0xFF).toByte(), (clamped shr 8).toByte())
+        }
+    }
 }

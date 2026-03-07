@@ -17,6 +17,11 @@ import com.nettarion.hyperborea.core.HardwareAdapter
 import com.nettarion.hyperborea.core.Orchestrator
 import com.nettarion.hyperborea.core.OrchestratorState
 import com.nettarion.hyperborea.core.Prerequisite
+import com.nettarion.hyperborea.core.Profile
+import com.nettarion.hyperborea.core.ProfileRepository
+import com.nettarion.hyperborea.core.RideRecorder
+import com.nettarion.hyperborea.core.RideSummary
+import com.nettarion.hyperborea.core.WorkoutSample
 import com.nettarion.hyperborea.core.SystemController
 import com.nettarion.hyperborea.core.SystemMonitor
 import com.nettarion.hyperborea.core.SystemSnapshot
@@ -48,6 +53,7 @@ class DashboardViewModelTest {
     private lateinit var fakeHardware: FakeHardwareAdapter
     private lateinit var fakeSystemMonitor: FakeSystemMonitor
     private lateinit var fakeUserPreferences: FakeUserPreferences
+    private lateinit var fakeProfileRepository: FakeProfileRepository
     private lateinit var context: Context
 
     @Before
@@ -56,6 +62,7 @@ class DashboardViewModelTest {
         fakeHardware = FakeHardwareAdapter()
         fakeSystemMonitor = FakeSystemMonitor()
         fakeUserPreferences = FakeUserPreferences()
+        fakeProfileRepository = FakeProfileRepository()
         context = RuntimeEnvironment.getApplication()
     }
 
@@ -67,6 +74,8 @@ class DashboardViewModelTest {
     private fun TestScope.createViewModel(
         broadcastAdapters: Set<BroadcastAdapter> = emptySet(),
     ): DashboardViewModel {
+        val logger = NoOpLogger()
+        val rideRecorder = RideRecorder(fakeProfileRepository, logger, this)
         val orchestrator = Orchestrator(
             systemMonitor = fakeSystemMonitor,
             systemController = FakeSystemController(),
@@ -74,7 +83,8 @@ class DashboardViewModelTest {
             hardwareAdapter = fakeHardware,
             broadcastAdapters = broadcastAdapters,
             userPreferences = fakeUserPreferences,
-            logger = NoOpLogger(),
+            rideRecorder = rideRecorder,
+            logger = logger,
             scope = this,
         )
         return DashboardViewModel(
@@ -83,6 +93,7 @@ class DashboardViewModelTest {
             broadcastAdapters = broadcastAdapters,
             systemMonitor = fakeSystemMonitor,
             userPreferences = fakeUserPreferences,
+            profileRepository = fakeProfileRepository,
             context = context,
         )
     }
@@ -204,7 +215,7 @@ class DashboardViewModelTest {
         override val connectedClients: MutableStateFlow<Set<ClientInfo>> = connectedClientsFlow
         override val incomingCommands: Flow<DeviceCommand> = emptyFlow()
         override fun canOperate(snapshot: SystemSnapshot): Boolean = true
-        override suspend fun start(dataSource: Flow<ExerciseData>) {}
+        override suspend fun start(dataSource: Flow<ExerciseData>, deviceInfo: DeviceInfo) {}
         override suspend fun stop() {}
     }
 
@@ -240,6 +251,19 @@ class DashboardViewModelTest {
 
     private class FakeEcosystemManager : EcosystemManager {
         override val prerequisites: List<Prerequisite> = emptyList()
+    }
+
+    private class FakeProfileRepository : ProfileRepository {
+        override val profiles: Flow<List<Profile>> = MutableStateFlow(emptyList())
+        override val activeProfile: MutableStateFlow<Profile?> = MutableStateFlow(null)
+        override suspend fun createProfile(name: String) = Profile(id = 1, name = name)
+        override suspend fun updateProfile(profile: Profile) {}
+        override suspend fun deleteProfile(id: Long) {}
+        override suspend fun setActiveProfile(id: Long) {}
+        override fun getRideSummaries(profileId: Long): Flow<List<RideSummary>> = MutableStateFlow(emptyList())
+        override suspend fun saveRideSummary(summary: RideSummary, samples: List<WorkoutSample>) {}
+        override suspend fun deleteRideSummary(id: Long) {}
+        override fun getWorkoutSamples(rideId: Long): Flow<List<WorkoutSample>> = MutableStateFlow(emptyList())
     }
 
     private class NoOpLogger : AppLogger {

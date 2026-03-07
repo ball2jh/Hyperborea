@@ -24,7 +24,7 @@ class V2SessionTest {
 
     private fun createSession(scope: TestScope): V2Session =
         V2Session(
-            transport, logger, scope.backgroundScope,
+            transport, logger, scope.backgroundScope, EquipmentProfiles.S22I,
         )
 
     @Test

@@ -13,8 +13,6 @@ class ExerciseDataAccumulator(
     private var heartRate: Int? = null
     private var distance: Float? = null
     private var calories: Int? = null
-    private var elapsedTime: Long = 0L
-    private var startTime: Long = 0L
     private var targetSpeed: Float? = null
     private var targetIncline: Float? = null
     private var targetPower: Int? = null
@@ -24,19 +22,42 @@ class ExerciseDataAccumulator(
     private var lifetimeDistance: Float? = null
     private var lifetimeCalories: Int? = null
 
+    // Elapsed time tracking — own clock, pausable
+    private var accumulatedSeconds: Long = 0L
+    private var runningStartTime: Long = 0L
+    private var paused: Boolean = false
+
     fun start() {
-        startTime = clock()
+        // Clock starts lazily on first non-zero cadence
+    }
+
+    fun pause() {
+        if (!paused && runningStartTime > 0L) {
+            accumulatedSeconds += (clock() - runningStartTime) / 1000L
+            runningStartTime = 0L
+            paused = true
+        }
+    }
+
+    fun resume() {
+        if (paused) {
+            runningStartTime = clock()
+            paused = false
+        }
     }
 
     fun updatePower(value: Int) { power = value }
-    fun updateCadence(value: Int) { cadence = value }
+    fun updateCadence(value: Int) {
+        cadence = value
+        if (value > 0 && runningStartTime == 0L && !paused) runningStartTime = clock()
+    }
     fun updateSpeed(value: Float) { speed = value }
     fun updateResistance(value: Int) { resistance = value }
     fun updateIncline(value: Float) { incline = value }
     fun updateHeartRate(value: Int) { heartRate = value }
     fun updateDistance(value: Float) { distance = value }
     fun updateCalories(value: Int) { calories = value }
-    fun updateElapsedTime(seconds: Long) { elapsedTime = seconds }
+    fun updateElapsedTime(seconds: Long) { /* ignored — we track our own clock */ }
     fun updateTargetSpeed(value: Float) { targetSpeed = value }
     fun updateTargetIncline(value: Float) { targetIncline = value }
     fun updateTargetPower(value: Int) { targetPower = value }
@@ -45,6 +66,11 @@ class ExerciseDataAccumulator(
     fun updateLifetimeRunningTime(seconds: Long) { lifetimeRunningTime = seconds }
     fun updateLifetimeDistance(value: Float) { lifetimeDistance = value }
     fun updateLifetimeCalories(value: Int) { lifetimeCalories = value }
+
+    private fun elapsedSeconds(): Long {
+        val running = if (runningStartTime > 0L) (clock() - runningStartTime) / 1000L else 0L
+        return accumulatedSeconds + running
+    }
 
     fun snapshot(): ExerciseData = ExerciseData(
         power = power,
@@ -55,7 +81,7 @@ class ExerciseDataAccumulator(
         heartRate = heartRate,
         distance = distance,
         calories = calories,
-        elapsedTime = if (elapsedTime > 0) elapsedTime else (clock() - startTime) / 1000L,
+        elapsedTime = elapsedSeconds(),
         targetSpeed = targetSpeed,
         targetIncline = targetIncline,
         targetPower = targetPower,
@@ -75,8 +101,9 @@ class ExerciseDataAccumulator(
         heartRate = null
         distance = null
         calories = null
-        elapsedTime = 0L
-        startTime = 0L
+        accumulatedSeconds = 0L
+        runningStartTime = 0L
+        paused = false
         targetSpeed = null
         targetIncline = null
         targetPower = null

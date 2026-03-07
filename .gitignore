@@ -30,6 +30,10 @@ iFit/firmware/repack/
 iFit/firmware/backups/
 iFit/firmware/downloads/
 iFit/ifit_apps/
+MyWoosh/
+
+# Binary docs
+docs/*.pdf
 
 # Python
 __pycache__/
