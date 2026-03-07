@@ -3,8 +3,9 @@ package com.nettarion.hyperborea.core
 import kotlinx.coroutines.flow.StateFlow
 
 interface HardwareAdapter : Adapter {
-    val deviceInfo: DeviceInfo
+    val deviceInfo: StateFlow<DeviceInfo?>
     val exerciseData: StateFlow<ExerciseData?>
+    val deviceIdentity: StateFlow<DeviceIdentity?>
 
     /**
      * Establish a connection to the hardware device.

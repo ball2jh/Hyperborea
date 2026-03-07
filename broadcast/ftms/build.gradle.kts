@@ -14,7 +14,6 @@ android {
 dependencies {
     api(project(":core"))
     implementation(libs.coroutines.android)
-    implementation(libs.javax.inject)
 
     testImplementation(testFixtures(project(":core")))
     testImplementation(libs.junit)
@@ -22,4 +21,6 @@ dependencies {
     testImplementation(libs.truth)
     testImplementation(libs.coroutines.test)
     testImplementation(libs.turbine)
+    testImplementation(libs.mockk)
+    testImplementation(libs.robolectric)
 }

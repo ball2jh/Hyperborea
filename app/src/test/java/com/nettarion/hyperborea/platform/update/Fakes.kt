@@ -31,13 +31,13 @@ class FakeUpdateInstaller : UpdateInstaller {
     var lastInstallPath: String? = null
     var lastFinalizePath: String? = null
 
-    override fun install(path: String): InstallResult {
+    override suspend fun install(path: String): InstallResult {
         installCalled = true
         lastInstallPath = path
         return installResult
     }
 
-    override fun finalize(path: String) {
+    override suspend fun finalize(path: String) {
         finalizeCalled = true
         lastFinalizePath = path
     }

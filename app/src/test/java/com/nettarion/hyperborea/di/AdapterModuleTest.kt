@@ -1,7 +1,7 @@
 package com.nettarion.hyperborea.di
 
 import com.google.common.truth.Truth.assertThat
-import com.nettarion.hyperborea.broadcast.dircon.DirconAdapter
+import com.nettarion.hyperborea.broadcast.wftnp.WftnpAdapter
 import com.nettarion.hyperborea.broadcast.ftms.FtmsAdapter
 import com.nettarion.hyperborea.core.BroadcastAdapter
 import com.nettarion.hyperborea.core.HardwareAdapter
@@ -12,16 +12,16 @@ class AdapterModuleTest {
 
     @Test
     fun `FitProAdapter implements HardwareAdapter`() {
-        assertThat(FitProAdapter()).isInstanceOf(HardwareAdapter::class.java)
+        assertThat(HardwareAdapter::class.java.isAssignableFrom(FitProAdapter::class.java)).isTrue()
     }
 
     @Test
     fun `FtmsAdapter implements BroadcastAdapter`() {
-        assertThat(FtmsAdapter()).isInstanceOf(BroadcastAdapter::class.java)
+        assertThat(BroadcastAdapter::class.java.isAssignableFrom(FtmsAdapter::class.java)).isTrue()
     }
 
     @Test
-    fun `DirconAdapter implements BroadcastAdapter`() {
-        assertThat(DirconAdapter()).isInstanceOf(BroadcastAdapter::class.java)
+    fun `WftnpAdapter implements BroadcastAdapter`() {
+        assertThat(BroadcastAdapter::class.java.isAssignableFrom(WftnpAdapter::class.java)).isTrue()
     }
 }

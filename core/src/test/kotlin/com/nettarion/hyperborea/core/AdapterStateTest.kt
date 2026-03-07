@@ -2,8 +2,6 @@ package com.nettarion.hyperborea.core
 
 import com.google.common.truth.Truth.assertThat
 import org.junit.Test
-import kotlin.test.assertEquals
-import kotlin.test.assertNotEquals
 
 class AdapterStateTest {
 
@@ -57,14 +55,14 @@ class AdapterStateTest {
         val cause = RuntimeException("boom")
         val a = AdapterState.Error("failed", cause)
         val b = AdapterState.Error("failed", cause)
-        assertEquals(a, b)
+        assertThat(a).isEqualTo(b)
     }
 
     @Test
     fun `Error inequality on different messages`() {
         val a = AdapterState.Error("error A")
         val b = AdapterState.Error("error B")
-        assertNotEquals(a, b)
+        assertThat(a).isNotEqualTo(b)
     }
 
     @Test

@@ -4,6 +4,7 @@ import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.StateFlow
 
 interface BroadcastAdapter : Adapter {
+    val id: BroadcastId
     val connectedClients: StateFlow<Set<ClientInfo>>
 
     /**
@@ -19,7 +20,7 @@ interface BroadcastAdapter : Adapter {
 
     /**
      * Stop broadcasting and release resources.
-     *
+     *$$
      * - If the adapter is already [AdapterState.Inactive], this is a no-op.
      * - Resets [connectedClients] to an empty set.
      * - Transitions state to [AdapterState.Inactive].

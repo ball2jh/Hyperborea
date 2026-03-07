@@ -10,7 +10,7 @@ import org.robolectric.RobolectricTestRunner
 class ManifestParsingTest {
 
     @Test
-    fun `parses full manifest with both sections`() {
+    fun `parses full manifest`() {
         val json = """
             {
                 "app": {
@@ -19,12 +19,6 @@ class ManifestParsingTest {
                     "url": "https://example.com/app.apk",
                     "sha256": "abc123",
                     "releaseNotes": "Bug fixes."
-                },
-                "firmware": {
-                    "version": "2.0.1",
-                    "url": "https://example.com/firmware.zip",
-                    "sha256": "def456",
-                    "releaseNotes": "New kernel."
                 }
             }
         """.trimIndent()
@@ -37,51 +31,6 @@ class ManifestParsingTest {
         assertThat(manifest.app!!.url).isEqualTo("https://example.com/app.apk")
         assertThat(manifest.app!!.sha256).isEqualTo("abc123")
         assertThat(manifest.app!!.releaseNotes).isEqualTo("Bug fixes.")
-
-        assertThat(manifest.firmware).isNotNull()
-        assertThat(manifest.firmware!!.version).isEqualTo("2.0.1")
-        assertThat(manifest.firmware!!.url).isEqualTo("https://example.com/firmware.zip")
-        assertThat(manifest.firmware!!.sha256).isEqualTo("def456")
-        assertThat(manifest.firmware!!.releaseNotes).isEqualTo("New kernel.")
-    }
-
-    @Test
-    fun `parses manifest with only app section`() {
-        val json = """
-            {
-                "app": {
-                    "versionCode": 3,
-                    "versionName": "2.0",
-                    "url": "https://example.com/app.apk",
-                    "sha256": "abc123"
-                }
-            }
-        """.trimIndent()
-
-        val manifest = UpdateManifest.parse(json)
-
-        assertThat(manifest.app).isNotNull()
-        assertThat(manifest.app!!.versionCode).isEqualTo(3)
-        assertThat(manifest.firmware).isNull()
-    }
-
-    @Test
-    fun `parses manifest with only firmware section`() {
-        val json = """
-            {
-                "firmware": {
-                    "version": "3.0",
-                    "url": "https://example.com/fw.zip",
-                    "sha256": "aabbcc"
-                }
-            }
-        """.trimIndent()
-
-        val manifest = UpdateManifest.parse(json)
-
-        assertThat(manifest.app).isNull()
-        assertThat(manifest.firmware).isNotNull()
-        assertThat(manifest.firmware!!.version).isEqualTo("3.0")
     }
 
     @Test
@@ -89,7 +38,6 @@ class ManifestParsingTest {
         val manifest = UpdateManifest.parse("{}")
 
         assertThat(manifest.app).isNull()
-        assertThat(manifest.firmware).isNull()
     }
 
     @Test
@@ -117,20 +65,6 @@ class ManifestParsingTest {
                 "app": {
                     "versionName": "1.0",
                     "url": "https://example.com/app.apk",
-                    "sha256": "abc"
-                }
-            }
-        """.trimIndent()
-
-        UpdateManifest.parse(json)
-    }
-
-    @Test(expected = JSONException::class)
-    fun `firmware section missing required version throws`() {
-        val json = """
-            {
-                "firmware": {
-                    "url": "https://example.com/fw.zip",
                     "sha256": "abc"
                 }
             }

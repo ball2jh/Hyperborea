@@ -2,8 +2,6 @@ package com.nettarion.hyperborea.core
 
 import com.google.common.truth.Truth.assertThat
 import org.junit.Test
-import kotlin.test.assertEquals
-import kotlin.test.assertNotEquals
 
 class SystemLogTypesTest {
 
@@ -48,14 +46,14 @@ class SystemLogTypesTest {
     fun `SystemLogEntry equality`() {
         val a = SystemLogEntry(1L, LogLevel.DEBUG, "T", "m", 1, 1, SystemLogSource.LOGCAT)
         val b = SystemLogEntry(1L, LogLevel.DEBUG, "T", "m", 1, 1, SystemLogSource.LOGCAT)
-        assertEquals(a, b)
+        assertThat(a).isEqualTo(b)
     }
 
     @Test
     fun `SystemLogEntry inequality on different source`() {
         val a = SystemLogEntry(1L, LogLevel.DEBUG, "T", "m", 1, 1, SystemLogSource.LOGCAT)
         val b = SystemLogEntry(1L, LogLevel.DEBUG, "T", "m", 1, 1, SystemLogSource.DMESG)
-        assertNotEquals(a, b)
+        assertThat(a).isNotEqualTo(b)
     }
 
     @Test
@@ -95,7 +93,7 @@ class SystemLogTypesTest {
     fun `CaptureConfig equality`() {
         val a = CaptureConfig()
         val b = CaptureConfig()
-        assertEquals(a, b)
+        assertThat(a).isEqualTo(b)
     }
 
     // --- CaptureState ---
@@ -150,14 +148,14 @@ class SystemLogTypesTest {
         val cause = RuntimeException("boom")
         val a = CaptureState.Error("failed", cause)
         val b = CaptureState.Error("failed", cause)
-        assertEquals(a, b)
+        assertThat(a).isEqualTo(b)
     }
 
     @Test
     fun `CaptureState Error inequality on different messages`() {
         val a = CaptureState.Error("error A")
         val b = CaptureState.Error("error B")
-        assertNotEquals(a, b)
+        assertThat(a).isNotEqualTo(b)
     }
 
     @Test

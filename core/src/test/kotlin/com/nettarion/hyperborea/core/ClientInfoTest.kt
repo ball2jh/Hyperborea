@@ -2,8 +2,6 @@ package com.nettarion.hyperborea.core
 
 import com.google.common.truth.Truth.assertThat
 import org.junit.Test
-import kotlin.test.assertEquals
-import kotlin.test.assertNotEquals
 
 class ClientInfoTest {
 
@@ -17,35 +15,35 @@ class ClientInfoTest {
 
     @Test
     fun `equality based on all fields`() {
-        val a = ClientInfo(id = "host:1234", protocol = "DIRCON", connectedAt = 500L)
-        val b = ClientInfo(id = "host:1234", protocol = "DIRCON", connectedAt = 500L)
-        assertEquals(a, b)
+        val a = ClientInfo(id = "host:1234", protocol = "WFTNP", connectedAt = 500L)
+        val b = ClientInfo(id = "host:1234", protocol = "WFTNP", connectedAt = 500L)
+        assertThat(a).isEqualTo(b)
     }
 
     @Test
     fun `inequality on different id`() {
-        val a = ClientInfo(id = "host:1234", protocol = "DIRCON", connectedAt = 500L)
-        val b = ClientInfo(id = "host:5678", protocol = "DIRCON", connectedAt = 500L)
-        assertNotEquals(a, b)
+        val a = ClientInfo(id = "host:1234", protocol = "WFTNP", connectedAt = 500L)
+        val b = ClientInfo(id = "host:5678", protocol = "WFTNP", connectedAt = 500L)
+        assertThat(a).isNotEqualTo(b)
     }
 
     @Test
     fun `inequality on different protocol`() {
         val a = ClientInfo(id = "host:1234", protocol = "FTMS", connectedAt = 500L)
-        val b = ClientInfo(id = "host:1234", protocol = "DIRCON", connectedAt = 500L)
-        assertNotEquals(a, b)
+        val b = ClientInfo(id = "host:1234", protocol = "WFTNP", connectedAt = 500L)
+        assertThat(a).isNotEqualTo(b)
     }
 
     @Test
     fun `inequality on different connectedAt`() {
         val a = ClientInfo(id = "host:1234", protocol = "FTMS", connectedAt = 500L)
         val b = ClientInfo(id = "host:1234", protocol = "FTMS", connectedAt = 600L)
-        assertNotEquals(a, b)
+        assertThat(a).isNotEqualTo(b)
     }
 
     @Test
     fun `copy preserves unchanged fields`() {
-        val original = ClientInfo(id = "host:1234", protocol = "DIRCON", connectedAt = 500L)
+        val original = ClientInfo(id = "host:1234", protocol = "WFTNP", connectedAt = 500L)
         val copy = original.copy(protocol = "FTMS")
         assertThat(copy.id).isEqualTo("host:1234")
         assertThat(copy.protocol).isEqualTo("FTMS")

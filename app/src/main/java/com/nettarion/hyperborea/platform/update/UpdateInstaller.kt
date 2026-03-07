@@ -1,8 +1,8 @@
 package com.nettarion.hyperborea.platform.update
 
 interface UpdateInstaller {
-    fun install(path: String): InstallResult
-    fun finalize(path: String)
+    suspend fun install(path: String): InstallResult
+    suspend fun finalize(path: String)
 }
 
 sealed interface InstallResult {

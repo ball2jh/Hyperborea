@@ -10,4 +10,12 @@ data class ExerciseData(
     val distance: Float?,
     val calories: Int?,
     val elapsedTime: Long,
+    val targetSpeed: Float? = null,
+    val targetIncline: Float? = null,
+    val targetPower: Int? = null,
+    val targetResistance: Int? = null,
+    val workoutMode: Int? = null,
+    val lifetimeRunningTime: Long? = null,
+    val lifetimeDistance: Float? = null,
+    val lifetimeCalories: Int? = null,
 )

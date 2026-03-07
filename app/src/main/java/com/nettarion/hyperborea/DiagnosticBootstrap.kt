@@ -12,7 +12,6 @@ import com.nettarion.hyperborea.core.SystemMonitor
 import com.nettarion.hyperborea.platform.LogExporter
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.delay
-import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import javax.inject.Inject
@@ -36,8 +35,9 @@ class DiagnosticBootstrap @Inject constructor(
             // Start system log capture (logcat main+system buffers)
             systemLogCapture.start(CaptureConfig(logcat = true, dmesg = false))
 
-            // Wait for first real system snapshot
-            val snapshot = systemMonitor.snapshot.first { it.timestamp > 0 }
+            // Capture initial system snapshot
+            systemMonitor.refresh()
+            val snapshot = systemMonitor.snapshot.value
             val s = snapshot.status
             logger.i(TAG, "System status — BLE: ${s.isBluetoothLeEnabled}, BLE advertising: ${s.isBluetoothLeAdvertisingSupported}, WiFi: ${s.isWifiEnabled}, USB: ${s.isUsbHostAvailable}, ADB: ${s.isAdbEnabled}")
             logger.i(TAG, "WiFi IP: ${s.wifiIpAddress ?: "none"}")

@@ -4,8 +4,6 @@ import com.google.common.truth.Truth.assertThat
 import com.nettarion.hyperborea.core.test.buildSystemSnapshot
 import kotlinx.coroutines.test.runTest
 import org.junit.Test
-import kotlin.test.assertEquals
-import kotlin.test.assertNotEquals
 
 class PrerequisiteTest {
 
@@ -13,21 +11,21 @@ class PrerequisiteTest {
     fun `equality is based on id only`() {
         val a = Prerequisite(id = "check-1", description = "First description", isMet = { true })
         val b = Prerequisite(id = "check-1", description = "Different description", isMet = { false })
-        assertEquals(a, b)
+        assertThat(a).isEqualTo(b)
     }
 
     @Test
     fun `inequality on different ids`() {
         val a = Prerequisite(id = "check-1", description = "Same", isMet = { true })
         val b = Prerequisite(id = "check-2", description = "Same", isMet = { true })
-        assertNotEquals(a, b)
+        assertThat(a).isNotEqualTo(b)
     }
 
     @Test
     fun `hashCode is based on id only`() {
         val a = Prerequisite(id = "check-1", description = "A", isMet = { true })
         val b = Prerequisite(id = "check-1", description = "B", isMet = { false })
-        assertEquals(a.hashCode(), b.hashCode())
+        assertThat(a.hashCode()).isEqualTo(b.hashCode())
     }
 
     @Test

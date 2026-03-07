@@ -1,7 +1,6 @@
 package com.nettarion.hyperborea.platform.update
 
 import android.content.Context
-import android.os.Build
 import com.nettarion.hyperborea.BuildConfig
 import com.nettarion.hyperborea.core.AppLogger
 import dagger.hilt.android.qualifiers.ApplicationContext
@@ -19,7 +18,6 @@ class UpdateManager @Inject constructor(
     @param:ApplicationContext private val context: Context,
     private val httpClient: UpdateHttpClient,
     private val appInstaller: AppInstaller,
-    private val firmwareInstaller: FirmwareInstaller,
     private val logger: AppLogger,
     private val scope: CoroutineScope,
 ) {
@@ -31,16 +29,6 @@ class UpdateManager @Inject constructor(
         downloadDir = context.filesDir.resolve("update").absolutePath,
         downloadFilename = "hyperborea.apk",
         installer = appInstaller,
-        httpClient = httpClient,
-        logger = logger,
-        scope = scope,
-    )
-
-    val firmwareTrack: UpdateTrack = UpdateTrack(
-        name = "firmware",
-        downloadDir = FIRMWARE_DOWNLOAD_DIR,
-        downloadFilename = FIRMWARE_FILENAME,
-        installer = firmwareInstaller,
         httpClient = httpClient,
         logger = logger,
         scope = scope,
@@ -76,23 +64,6 @@ class UpdateManager @Inject constructor(
                         logger.d(TAG, "App is up to date (code $currentVersionCode)")
                     }
                 }
-
-                manifest.firmware?.let { firmware ->
-                    val currentFirmware = Build.DISPLAY
-                    if (firmware.version != currentFirmware) {
-                        logger.i(TAG, "Firmware update available: ${firmware.version} (current: $currentFirmware)")
-                        firmwareTrack.setAvailable(
-                            UpdateInfo(
-                                version = firmware.version,
-                                url = firmware.url,
-                                sha256 = firmware.sha256,
-                                releaseNotes = firmware.releaseNotes,
-                            ),
-                        )
-                    } else {
-                        logger.d(TAG, "Firmware is up to date ($currentFirmware)")
-                    }
-                }
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Exception) {
@@ -105,7 +76,5 @@ class UpdateManager @Inject constructor(
 
     companion object {
         private const val TAG = "Update"
-        private const val FIRMWARE_DOWNLOAD_DIR = "/cache"
-        private const val FIRMWARE_FILENAME = "hyperborea_ota.zip"
     }
 }
