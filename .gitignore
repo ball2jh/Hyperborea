@@ -3,6 +3,12 @@
 build/
 !gradle/wrapper/gradle-wrapper.jar
 
+# Kotlin compiler
+.kotlin/
+
+# Claude Code local settings
+.claude/settings.local.json
+
 # IDE
 .idea/
 *.iml
@@ -30,6 +36,10 @@ __pycache__/
 *.pyc
 *.pyo
 .venv/
+
+# Update server test artifacts
+tools/update-server/*.zip
+tools/update-server/update.json
 
 # OS
 .DS_Store

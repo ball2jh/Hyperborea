@@ -15,6 +15,11 @@ Outputs to iFit/firmware/keys/ (configurable via --output-dir):
     ota_signing.pk8        — PKCS#8 DER format
     ota_signing.x509.pem   — X.509 certificate (CN=Hyperborea OTA, O=Nettarion)
 
+  Throwaway key (signs ERU to strip its platform cert match):
+    throwaway.key          — PEM RSA 2048 private key
+    throwaway.pk8          — PKCS#8 DER format (for apksigner CLI)
+    throwaway.x509.pem     — X.509 certificate (CN=Throwaway, O=Nettarion)
+
   Derived artifacts:
     otacerts.zip           — Contains ota_signing.x509.pem; installed to
                              /system/etc/security/otacerts.zip on device
@@ -144,15 +149,14 @@ def generate_recovery_res_keys(output_dir: Path) -> None:
     Generate AOSP mincrypt v2 text format from ota_signing.x509.pem.
     Recovery uses /res/keys to verify OTA zip signatures.
 
-    Format (single line):
-        v2 {numwords} {n0inv} {n[0]} {n[1]} ... {n[63]} {e} {rr[0]} {rr[1]} ... {rr[63]}
+    Format (single line, curly-brace notation):
+        v2 {numwords,0xN0INV,{n[0],n[1],...,n[63]},{rr[0],rr[1],...,rr[63]}}
 
     Where:
         numwords  = RSA key size in 32-bit words (64 for RSA-2048)
-        n0inv     = Montgomery inverse: 2^32 - (n^-1 mod 2^32)
-        n[i]      = Modulus in little-endian 32-bit words
-        e         = Public exponent (65537)
-        rr[i]     = R^2 mod n in little-endian 32-bit words, R = 2^(numwords*32)
+        n0inv     = Montgomery inverse in hex: 2^32 - (n^-1 mod 2^32)
+        n[i]      = Modulus in little-endian 32-bit words (decimal)
+        rr[i]     = R^2 mod n in little-endian 32-bit words (decimal), R = 2^(numwords*32)
     """
     # Use the cryptography library for RSA public number extraction
     from cryptography import x509 as x509_mod
@@ -165,7 +169,6 @@ def generate_recovery_res_keys(output_dir: Path) -> None:
     cert = x509_mod.load_pem_x509_certificate(cert_pem_bytes, default_backend())
     pub_numbers = cert.public_key().public_numbers()
     n = pub_numbers.n
-    e = pub_numbers.e
 
     # RSA-2048: 256 bytes = 64 32-bit words
     num_words = 256 // 4  # 64
@@ -190,13 +193,11 @@ def generate_recovery_res_keys(output_dir: Path) -> None:
         rr_words.append(tmp & 0xFFFFFFFF)
         tmp >>= 32
 
-    # Assemble the mincrypt v2 line:
-    #   v2 {numwords} {n0inv} {n_words...} {e} {rr_words...}
-    parts = ["v2", str(num_words), str(n0inv)]
-    parts.extend(str(w) for w in n_words)
-    parts.append(str(e))
-    parts.extend(str(w) for w in rr_words)
-    recovery_keys_content = " ".join(parts) + "\n"
+    # Assemble the mincrypt v2 line (curly-brace format matching AOSP recovery):
+    #   v2 {numwords,0xN0INV,{n_words...},{rr_words...}}
+    n_str = ",".join(str(w) for w in n_words)
+    rr_str = ",".join(str(w) for w in rr_words)
+    recovery_keys_content = f"v2 {{{num_words},0x{n0inv:08x},{{{n_str}}},{{{rr_str}}}}}\n"
 
     keys_path = output_dir / "recovery_res_keys"
     keys_path.write_text(recovery_keys_content)
@@ -213,6 +214,9 @@ def keys_exist(output_dir: Path) -> bool:
         "ota_signing.key",
         "ota_signing.pk8",
         "ota_signing.x509.pem",
+        "throwaway.key",
+        "throwaway.pk8",
+        "throwaway.x509.pem",
         "otacerts.zip",
         "recovery_res_keys",
     ]
@@ -265,6 +269,14 @@ def main() -> None:
         output_dir,
         name="ota_signing",
         subject="/CN=Hyperborea OTA/O=Nettarion",
+    )
+
+    # --- Throwaway key (for ERU re-signing) ---
+    print(f"\nGenerating throwaway key pair in {output_dir}/")
+    generate_key_pair(
+        output_dir,
+        name="throwaway",
+        subject="/CN=Throwaway/O=Nettarion",
     )
 
     # --- Derived: otacerts.zip ---

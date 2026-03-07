@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-Hyperborea is an Android app that bridges a NordicTrack S22i stationary bike to Zwift and other fitness platforms via BLE and WiFi. It reads bike data through the proprietary FitPro protocol over USB serial and rebroadcasts it as standard fitness protocols (BLE FTMS and Wahoo DIRCON).
+Hyperborea is an Android app that bridges a NordicTrack S22i stationary bike to Zwift and other fitness platforms via BLE and WiFi. It reads bike data through the proprietary FitPro protocol over USB serial and rebroadcasts it as standard fitness protocols (BLE FTMS and Wahoo WFTNP).
 
 - **Target device**: NordicTrack S22i console — Android 7.1.2 (API 25), 1920x1080 landscape, 22"
 - **Stack**: Kotlin, Jetpack Compose + Material3, Hilt (KSP), Gradle — check `libs.versions.toml` and `build.gradle.kts` for current versions
@@ -27,7 +27,7 @@ Hyperborea is an Android app that bridges a NordicTrack S22i stationary bike to 
 ```
 :app  →  :core  ←  :hardware:fitpro
   ↓                 :broadcast:ftms
-  ↓                 :broadcast:dircon
+  ↓                 :broadcast:wftnp
   └── all modules
 ```
 
@@ -38,7 +38,7 @@ All feature modules depend only on `:core`. The `:app` module wires everything t
 - **`:core`** — Pure Kotlin module (no Android dependencies). Defines domain interfaces and data types. Uses `kotlinx-coroutines-core` for Flow/StateFlow.
 - **`:hardware:fitpro`** — Android library. Implements the hardware adapter for the NordicTrack FitPro protocol over USB serial (115200 baud).
 - **`:broadcast:ftms`** — Android library. Implements a broadcast adapter as a BLE GATT server advertising FTMS (UUID 0x1826).
-- **`:broadcast:dircon`** — Android library. Implements a broadcast adapter as a TCP server for the Wahoo DIRCON protocol.
+- **`:broadcast:wftnp`** — Android library. Implements a broadcast adapter as a TCP server for the Wahoo WFTNP protocol.
 - **`:app`** — Application module. Contains Hilt DI wiring, Compose UI, foreground service, and Android platform implementations.
 
 ### Design Patterns

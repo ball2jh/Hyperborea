@@ -4,7 +4,6 @@ import org.json.JSONObject
 
 data class UpdateManifest(
     val app: AppUpdate?,
-    val firmware: FirmwareUpdate?,
 ) {
     companion object {
         fun parse(json: String): UpdateManifest {
@@ -19,14 +18,6 @@ data class UpdateManifest(
                         releaseNotes = obj.optString("releaseNotes", ""),
                     )
                 },
-                firmware = root.optJSONObject("firmware")?.let { obj ->
-                    FirmwareUpdate(
-                        version = obj.getString("version"),
-                        url = obj.getString("url"),
-                        sha256 = obj.getString("sha256"),
-                        releaseNotes = obj.optString("releaseNotes", ""),
-                    )
-                },
             )
         }
     }
@@ -35,13 +26,6 @@ data class UpdateManifest(
 data class AppUpdate(
     val versionCode: Int,
     val versionName: String,
-    val url: String,
-    val sha256: String,
-    val releaseNotes: String,
-)
-
-data class FirmwareUpdate(
-    val version: String,
     val url: String,
     val sha256: String,
     val releaseNotes: String,

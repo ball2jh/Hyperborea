@@ -23,55 +23,54 @@ class IfitEcosystemManagerTest {
     // --- Prerequisites ---
 
     @Test
-    fun `has single prerequisite`() {
-        assertThat(manager.prerequisites).hasSize(1)
+    fun `has two prerequisites`() {
+        assertThat(manager.prerequisites).hasSize(2)
     }
 
-    @Test
-    fun `prerequisite id is ifit-standalone-stopped`() {
-        assertThat(manager.prerequisites.single().id).isEqualTo("ifit-standalone-stopped")
-    }
+    // --- ifit-standalone-stopped ---
+
+    private fun standalonePrereq() = manager.prerequisites.first { it.id == "ifit-standalone-stopped" }
 
     @Test
-    fun `prerequisite is met when no ifit components`() {
+    fun `standalone prerequisite is met when no ifit components`() {
         val snapshot = buildSystemSnapshot(components = emptyList())
-        assertThat(manager.prerequisites.single().isMet(snapshot)).isTrue()
+        assertThat(standalonePrereq().isMet(snapshot)).isTrue()
     }
 
     @Test
-    fun `prerequisite is met when ifit service is ENABLED`() {
+    fun `standalone prerequisite is met when ifit service is ENABLED`() {
         val snapshot = buildSystemSnapshot(
             components = listOf(buildIfitComponent(ComponentState.ENABLED)),
         )
-        assertThat(manager.prerequisites.single().isMet(snapshot)).isTrue()
+        assertThat(standalonePrereq().isMet(snapshot)).isTrue()
     }
 
     @Test
-    fun `prerequisite is met when ifit service is DISABLED`() {
+    fun `standalone prerequisite is met when ifit service is DISABLED`() {
         val snapshot = buildSystemSnapshot(
             components = listOf(buildIfitComponent(ComponentState.DISABLED)),
         )
-        assertThat(manager.prerequisites.single().isMet(snapshot)).isTrue()
+        assertThat(standalonePrereq().isMet(snapshot)).isTrue()
     }
 
     @Test
-    fun `prerequisite is NOT met when ifit service is RUNNING`() {
+    fun `standalone prerequisite is NOT met when ifit service is RUNNING`() {
         val snapshot = buildSystemSnapshot(
             components = listOf(buildIfitComponent(ComponentState.RUNNING)),
         )
-        assertThat(manager.prerequisites.single().isMet(snapshot)).isFalse()
+        assertThat(standalonePrereq().isMet(snapshot)).isFalse()
     }
 
     @Test
-    fun `prerequisite is NOT met when ifit service is RUNNING_FOREGROUND`() {
+    fun `standalone prerequisite is NOT met when ifit service is RUNNING_FOREGROUND`() {
         val snapshot = buildSystemSnapshot(
             components = listOf(buildIfitComponent(ComponentState.RUNNING_FOREGROUND)),
         )
-        assertThat(manager.prerequisites.single().isMet(snapshot)).isFalse()
+        assertThat(standalonePrereq().isMet(snapshot)).isFalse()
     }
 
     @Test
-    fun `prerequisite is met when other package is running`() {
+    fun `standalone prerequisite is met when other package is running`() {
         val snapshot = buildSystemSnapshot(
             components = listOf(
                 DeclaredComponent(
@@ -82,37 +81,82 @@ class IfitEcosystemManagerTest {
                 ),
             ),
         )
-        assertThat(manager.prerequisites.single().isMet(snapshot)).isTrue()
+        assertThat(standalonePrereq().isMet(snapshot)).isTrue()
     }
 
-    // --- fulfill ---
-
     @Test
-    fun `fulfill calls forceStopPackage with correct package`() = runTest {
+    fun `standalone fulfill calls forceStopPackage with correct package`() = runTest {
         var capturedPackage: String? = null
-        val controller = stubController(
-            onForceStop = { pkg ->
-                capturedPackage = pkg
-                true
-            },
-        )
-        manager.prerequisites.single().fulfill!!.invoke(controller)
+        val controller = stubController(onForceStop = { pkg -> capturedPackage = pkg; true })
+        standalonePrereq().fulfill!!.invoke(controller)
         assertThat(capturedPackage).isEqualTo("com.ifit.standalone")
     }
 
     @Test
-    fun `fulfill returns Success when forceStopPackage succeeds`() = runTest {
+    fun `standalone fulfill returns Success when forceStopPackage succeeds`() = runTest {
         val controller = stubController(onForceStop = { true })
-        val result = manager.prerequisites.single().fulfill!!.invoke(controller)
+        val result = standalonePrereq().fulfill!!.invoke(controller)
         assertThat(result).isEqualTo(FulfillResult.Success)
     }
 
     @Test
-    fun `fulfill returns Failed when forceStopPackage fails`() = runTest {
+    fun `standalone fulfill returns Failed when forceStopPackage fails`() = runTest {
         val controller = stubController(onForceStop = { false })
-        val result = manager.prerequisites.single().fulfill!!.invoke(controller)
+        val result = standalonePrereq().fulfill!!.invoke(controller)
         assertThat(result).isInstanceOf(FulfillResult.Failed::class.java)
         assertThat((result as FulfillResult.Failed).reason).contains("com.ifit.standalone")
+    }
+
+    // --- eru-usb-receiver-disabled ---
+
+    private fun eruReceiverPrereq() = manager.prerequisites.first { it.id == "eru-usb-receiver-disabled" }
+
+    @Test
+    fun `eru receiver prerequisite is met when receiver is absent`() {
+        val snapshot = buildSystemSnapshot(components = emptyList())
+        assertThat(eruReceiverPrereq().isMet(snapshot)).isTrue()
+    }
+
+    @Test
+    fun `eru receiver prerequisite is met when receiver is DISABLED`() {
+        val snapshot = buildSystemSnapshot(
+            components = listOf(buildEruReceiver(ComponentState.DISABLED)),
+        )
+        assertThat(eruReceiverPrereq().isMet(snapshot)).isTrue()
+    }
+
+    @Test
+    fun `eru receiver prerequisite is NOT met when receiver is ENABLED`() {
+        val snapshot = buildSystemSnapshot(
+            components = listOf(buildEruReceiver(ComponentState.ENABLED)),
+        )
+        assertThat(eruReceiverPrereq().isMet(snapshot)).isFalse()
+    }
+
+    @Test
+    fun `eru receiver fulfill calls disableComponent with correct arguments`() = runTest {
+        var capturedPkg: String? = null
+        var capturedClass: String? = null
+        val controller = stubController(
+            onDisableComponent = { pkg, cls -> capturedPkg = pkg; capturedClass = cls; true },
+        )
+        eruReceiverPrereq().fulfill!!.invoke(controller)
+        assertThat(capturedPkg).isEqualTo("com.ifit.eru")
+        assertThat(capturedClass).isEqualTo("com.ifit.eru.receivers.UsbDeviceAttachedReceiver")
+    }
+
+    @Test
+    fun `eru receiver fulfill returns Success when disableComponent succeeds`() = runTest {
+        val controller = stubController(onDisableComponent = { _, _ -> true })
+        val result = eruReceiverPrereq().fulfill!!.invoke(controller)
+        assertThat(result).isEqualTo(FulfillResult.Success)
+    }
+
+    @Test
+    fun `eru receiver fulfill returns Failed when disableComponent fails`() = runTest {
+        val controller = stubController(onDisableComponent = { _, _ -> false })
+        val result = eruReceiverPrereq().fulfill!!.invoke(controller)
+        assertThat(result).isInstanceOf(FulfillResult.Failed::class.java)
     }
 
     // --- Helpers ---
@@ -124,15 +168,23 @@ class IfitEcosystemManagerTest {
         state = state,
     )
 
+    private fun buildEruReceiver(state: ComponentState) = DeclaredComponent(
+        packageName = "com.ifit.eru",
+        className = "com.ifit.eru.receivers.UsbDeviceAttachedReceiver",
+        type = ComponentType.BROADCAST_RECEIVER,
+        state = state,
+    )
+
     private fun stubController(
         onForceStop: suspend (String) -> Boolean = { false },
+        onDisableComponent: suspend (String, String) -> Boolean = { _, _ -> false },
     ) = object : SystemController {
         override suspend fun stopService(packageName: String, className: String) = false
         override suspend fun forceStopPackage(packageName: String) = onForceStop(packageName)
         override suspend fun disablePackage(packageName: String) = false
         override suspend fun enablePackage(packageName: String) = false
         override suspend fun uninstallPackage(packageName: String) = false
-        override suspend fun disableComponent(packageName: String, className: String) = false
+        override suspend fun disableComponent(packageName: String, className: String) = onDisableComponent(packageName, className)
         override suspend fun enableComponent(packageName: String, className: String) = false
         override suspend fun grantUsbPermission(packageName: String) = false
         override suspend fun revokeUsbPermissions(packageName: String) = false

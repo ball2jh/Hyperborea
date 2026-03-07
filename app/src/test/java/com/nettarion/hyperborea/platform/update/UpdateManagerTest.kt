@@ -1,8 +1,5 @@
 package com.nettarion.hyperborea.platform.update
 
-import android.content.Context
-import android.content.pm.PackageInfo
-import android.content.pm.PackageManager
 import app.cash.turbine.test
 import com.google.common.truth.Truth.assertThat
 import kotlinx.coroutines.ExperimentalCoroutinesApi
@@ -36,8 +33,7 @@ class UpdateManagerTest {
         return UpdateManager(
             context = context,
             httpClient = httpClient,
-            appInstaller = AppInstaller(logger),
-            firmwareInstaller = FirmwareInstaller(context, logger),
+            appInstaller = AppInstaller(context, logger),
             logger = logger,
             scope = scope,
         )
@@ -92,58 +88,33 @@ class UpdateManagerTest {
     }
 
     @Test
-    fun `checkForUpdates with firmware update sets firmwareTrack to Available`() = runTest {
-        manager = createManager(UnconfinedTestDispatcher(testScheduler))
-        httpClient.manifestResponse = """
-            {
-                "firmware": {
-                    "version": "new-firmware-version-that-doesnt-match",
-                    "url": "https://example.com/fw.zip",
-                    "sha256": "def456",
-                    "releaseNotes": "Kernel update."
-                }
-            }
-        """.trimIndent()
-
-        manager.checkForUpdates()
-
-        val state = manager.firmwareTrack.state.value
-        assertThat(state).isInstanceOf(TrackState.Available::class.java)
-        assertThat((state as TrackState.Available).info.version)
-            .isEqualTo("new-firmware-version-that-doesnt-match")
-    }
-
-    @Test
-    fun `checkForUpdates with empty manifest keeps both tracks Idle`() = runTest {
+    fun `checkForUpdates with empty manifest keeps appTrack Idle`() = runTest {
         manager = createManager(UnconfinedTestDispatcher(testScheduler))
         httpClient.manifestResponse = "{}"
 
         manager.checkForUpdates()
 
         assertThat(manager.appTrack.state.value).isEqualTo(TrackState.Idle)
-        assertThat(manager.firmwareTrack.state.value).isEqualTo(TrackState.Idle)
     }
 
     @Test
-    fun `checkForUpdates with HTTP error keeps both tracks Idle`() = runTest {
+    fun `checkForUpdates with HTTP error keeps appTrack Idle`() = runTest {
         manager = createManager(UnconfinedTestDispatcher(testScheduler))
         httpClient.manifestException = java.io.IOException("No network")
 
         manager.checkForUpdates()
 
         assertThat(manager.appTrack.state.value).isEqualTo(TrackState.Idle)
-        assertThat(manager.firmwareTrack.state.value).isEqualTo(TrackState.Idle)
     }
 
     @Test
-    fun `checkForUpdates with malformed JSON keeps both tracks Idle`() = runTest {
+    fun `checkForUpdates with malformed JSON keeps appTrack Idle`() = runTest {
         manager = createManager(UnconfinedTestDispatcher(testScheduler))
         httpClient.manifestResponse = "not json"
 
         manager.checkForUpdates()
 
         assertThat(manager.appTrack.state.value).isEqualTo(TrackState.Idle)
-        assertThat(manager.firmwareTrack.state.value).isEqualTo(TrackState.Idle)
     }
 
     @Test
@@ -158,32 +129,5 @@ class UpdateManagerTest {
             // so we verify it returns to false
             assertThat(manager.checking.value).isFalse()
         }
-    }
-
-    @Test
-    fun `checkForUpdates with both tracks updates both`() = runTest {
-        manager = createManager(UnconfinedTestDispatcher(testScheduler))
-        httpClient.manifestResponse = """
-            {
-                "app": {
-                    "versionCode": 999,
-                    "versionName": "99.0",
-                    "url": "https://example.com/app.apk",
-                    "sha256": "abc123",
-                    "releaseNotes": "App update."
-                },
-                "firmware": {
-                    "version": "unique-new-fw",
-                    "url": "https://example.com/fw.zip",
-                    "sha256": "def456",
-                    "releaseNotes": "FW update."
-                }
-            }
-        """.trimIndent()
-
-        manager.checkForUpdates()
-
-        assertThat(manager.appTrack.state.value).isInstanceOf(TrackState.Available::class.java)
-        assertThat(manager.firmwareTrack.state.value).isInstanceOf(TrackState.Available::class.java)
     }
 }

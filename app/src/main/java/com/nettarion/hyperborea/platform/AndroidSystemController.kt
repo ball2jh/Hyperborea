@@ -127,9 +127,9 @@ class AndroidSystemController @Inject constructor(
         withContext(Dispatchers.IO) {
             try {
                 val process = Runtime.getRuntime().exec(arrayOf("sh", "-c", command))
-                val exitCode = process.waitFor()
                 val output = process.inputStream.bufferedReader().readText().trim()
                 val error = process.errorStream.bufferedReader().readText().trim()
+                val exitCode = process.waitFor()
                 process.destroy()
                 if (exitCode != 0) {
                     logger.w(TAG, "Shell command failed (exit=$exitCode): $command — $error")
@@ -149,6 +149,6 @@ class AndroidSystemController @Inject constructor(
     )
 
     private companion object {
-        const val TAG = "Hyperborea.SystemController"
+        const val TAG = "SystemController"
     }
 }

@@ -129,7 +129,7 @@ class UpdateTrack internal constructor(
         }
         val path = File(downloadDir, downloadFilename).absolutePath
         logger.i(TAG, "$name: Finalizing install")
-        installer.finalize(path)
+        scope.launch { installer.finalize(path) }
     }
 
     fun dismiss() {

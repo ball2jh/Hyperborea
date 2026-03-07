@@ -2,8 +2,6 @@ package com.nettarion.hyperborea.core
 
 import com.google.common.truth.Truth.assertThat
 import org.junit.Test
-import kotlin.test.assertEquals
-import kotlin.test.assertNotEquals
 
 class FulfillResultTest {
 
@@ -46,14 +44,14 @@ class FulfillResultTest {
         val cause = RuntimeException("boom")
         val a = FulfillResult.Failed("failed", cause)
         val b = FulfillResult.Failed("failed", cause)
-        assertEquals(a, b)
+        assertThat(a).isEqualTo(b)
     }
 
     @Test
     fun `Failed inequality on different reasons`() {
         val a = FulfillResult.Failed("reason A")
         val b = FulfillResult.Failed("reason B")
-        assertNotEquals(a, b)
+        assertThat(a).isNotEqualTo(b)
     }
 
     @Test

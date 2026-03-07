@@ -1,8 +1,33 @@
+import java.security.KeyStore
+import java.security.MessageDigest
+import java.util.Properties
+
 plugins {
     alias(libs.plugins.android.application)
     alias(libs.plugins.kotlin.compose)
     alias(libs.plugins.hilt)
     alias(libs.plugins.ksp)
+}
+
+val localProperties = Properties()
+val localPropertiesFile = rootProject.file("local.properties")
+if (localPropertiesFile.exists()) {
+    localPropertiesFile.inputStream().use { stream -> localProperties.load(stream) }
+}
+val manifestUrl = localProperties.getProperty("update.manifest.url")
+    ?: findProperty("update.manifest.url") as String?
+    ?: "https://example.com/hyperborea/manifest.json"
+
+fun signingConfigFingerprint(config: com.android.build.api.dsl.ApkSigningConfig): String {
+    val file = config.storeFile ?: return ""
+    if (!file.exists()) return ""
+    val ks = KeyStore.getInstance(
+        if (file.extension.equals("p12", ignoreCase = true)) "PKCS12" else "JKS"
+    )
+    file.inputStream().use { ks.load(it, config.storePassword?.toCharArray()) }
+    val cert = ks.getCertificate(config.keyAlias) ?: return ""
+    val digest = MessageDigest.getInstance("SHA-256").digest(cert.encoded)
+    return digest.joinToString("") { "%02X".format(it) }
 }
 
 android {
@@ -16,11 +41,12 @@ android {
         versionCode = 1
         versionName = "1.0"
 
-        buildConfigField("String", "UPDATE_MANIFEST_URL", "\"https://example.com/hyperborea/manifest.json\"")
+        buildConfigField("String", "UPDATE_MANIFEST_URL", "\"$manifestUrl\"")
+        buildConfigField("String", "SIGNING_CERTIFICATE_SHA256", "\"\"")
     }
 
     signingConfigs {
-        create("system") {
+        create("platform") {
             storeFile = rootProject.file("iFit/firmware/keys/platform.p12")
             storePassword = "android"
             keyAlias = "platform"
@@ -28,22 +54,43 @@ android {
         }
     }
 
+    buildTypes {
+        release {
+            isMinifyEnabled = true
+            isShrinkResources = true
+            proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
+        }
+    }
+
     flavorDimensions += "target"
     productFlavors {
         create("standard") {
             dimension = "target"
-            isDefault = true
+            // Normal build for development (adb install)
         }
         create("system") {
             dimension = "target"
-            signingConfig = signingConfigs.getByName("system")
+            // System build for OTA firmware (priv-app with sharedUserId)
         }
     }
 
-    buildTypes {
-        release {
-            isMinifyEnabled = false
-            proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
+    // Platform-sign all system flavor variants (overrides debug signingConfig)
+    androidComponents {
+        onVariants(selector().withFlavor("target" to "system")) { variant ->
+            variant.signingConfig.setConfig(signingConfigs.getByName("platform"))
+            val fingerprint = signingConfigFingerprint(signingConfigs.getByName("platform"))
+            variant.buildConfigFields?.put(
+                "SIGNING_CERTIFICATE_SHA256",
+                com.android.build.api.variant.BuildConfigField("String", "\"$fingerprint\"", null)
+            )
+        }
+        onVariants(selector().withFlavor("target" to "standard")) { variant ->
+            val debugConfig = signingConfigs.getByName("debug")
+            val fingerprint = signingConfigFingerprint(debugConfig)
+            variant.buildConfigFields?.put(
+                "SIGNING_CERTIFICATE_SHA256",
+                com.android.build.api.variant.BuildConfigField("String", "\"$fingerprint\"", null)
+            )
         }
     }
 
@@ -69,7 +116,7 @@ dependencies {
     implementation(project(":core"))
     implementation(project(":hardware:fitpro"))
     implementation(project(":broadcast:ftms"))
-    implementation(project(":broadcast:dircon"))
+    implementation(project(":broadcast:wftnp"))
     implementation(project(":ecosystem:ifit"))
 
     implementation(libs.coroutines.android)
@@ -77,6 +124,7 @@ dependencies {
     implementation(libs.compose.ui)
     implementation(libs.compose.ui.graphics)
     implementation(libs.compose.ui.tooling.preview)
+    implementation(libs.compose.material.icons)
     implementation(libs.compose.material3)
     implementation(libs.activity.compose)
     implementation(libs.lifecycle.runtime.compose)

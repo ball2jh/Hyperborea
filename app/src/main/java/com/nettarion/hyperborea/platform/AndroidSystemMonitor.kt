@@ -8,14 +8,14 @@ import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
 import android.content.pm.ApplicationInfo
+import android.content.pm.ComponentInfo
 import android.content.pm.PackageInfo
 import android.content.pm.PackageManager
+import android.content.pm.ProviderInfo
 import android.hardware.usb.UsbManager
 import android.net.wifi.WifiManager
 import android.provider.Settings
 import com.nettarion.hyperborea.core.AppLogger
-import android.content.pm.ComponentInfo
-import android.content.pm.ProviderInfo
 import com.nettarion.hyperborea.core.ComponentState
 import com.nettarion.hyperborea.core.ComponentType
 import com.nettarion.hyperborea.core.DeclaredComponent
@@ -24,13 +24,11 @@ import com.nettarion.hyperborea.core.SystemMonitor
 import com.nettarion.hyperborea.core.SystemSnapshot
 import com.nettarion.hyperborea.core.SystemStatus
 import com.nettarion.hyperborea.core.UsbDeviceInfo
-import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.channels.Channel
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
-import kotlinx.coroutines.launch
-import kotlinx.coroutines.withTimeoutOrNull
+import kotlinx.coroutines.withContext
 import java.io.File
 import javax.inject.Inject
 import javax.inject.Singleton
@@ -38,11 +36,8 @@ import javax.inject.Singleton
 @Singleton
 class AndroidSystemMonitor @Inject constructor(
     private val context: Context,
-    private val scope: CoroutineScope,
     private val logger: AppLogger,
 ) : SystemMonitor {
-
-    private val refreshTrigger = Channel<Unit>(Channel.CONFLATED)
 
     private val _snapshot = MutableStateFlow(EMPTY_SNAPSHOT)
     override val snapshot: StateFlow<SystemSnapshot> = _snapshot.asStateFlow()
@@ -50,7 +45,7 @@ class AndroidSystemMonitor @Inject constructor(
     private val receiver = object : BroadcastReceiver() {
         override fun onReceive(context: Context, intent: Intent) {
             logger.d(TAG, "Broadcast received: ${intent.action}")
-            refreshTrigger.trySend(Unit)
+            updateStatus()
         }
     }
 
@@ -62,23 +57,30 @@ class AndroidSystemMonitor @Inject constructor(
             addAction(UsbManager.ACTION_USB_DEVICE_DETACHED)
         }
         context.registerReceiver(receiver, filter)
-
-        scope.launch {
-            logger.i(TAG, "System monitor started")
-            _snapshot.value = capture()
-            logger.d(TAG, "Initial snapshot: ${_snapshot.value.status}")
-            while (true) {
-                withTimeoutOrNull(POLL_INTERVAL_MS) { refreshTrigger.receive() }
-                _snapshot.value = capture()
-            }
-        }
+        logger.i(TAG, "System monitor started")
     }
 
     override suspend fun refresh() {
-        refreshTrigger.send(Unit)
+        withContext(Dispatchers.IO) {
+            _snapshot.value = captureFullSnapshot()
+        }
+        logger.d(TAG, "Full snapshot captured: ${_snapshot.value.status}")
     }
 
-    private fun capture(): SystemSnapshot {
+    /**
+     * Lightweight update: only refreshes system status and USB devices.
+     * Called reactively from broadcast receivers — no component/package scan.
+     */
+    private fun updateStatus() {
+        val current = _snapshot.value
+        _snapshot.value = current.copy(
+            status = captureStatus(),
+            usbDevices = captureUsbDevices(),
+            timestamp = System.currentTimeMillis(),
+        )
+    }
+
+    private fun captureFullSnapshot(): SystemSnapshot {
         return SystemSnapshot(
             status = captureStatus(),
             packages = capturePackages(),
@@ -97,7 +99,8 @@ class AndroidSystemMonitor @Inject constructor(
         val bleEnabled = pm.hasSystemFeature(PackageManager.FEATURE_BLUETOOTH_LE) &&
             btAdapter?.isEnabled == true
         val bleAdvertisingSupported = bleEnabled &&
-            btAdapter?.isMultipleAdvertisementSupported == true
+            (btAdapter?.isMultipleAdvertisementSupported == true ||
+                btAdapter?.bluetoothLeAdvertiser != null)
 
         // WiFi + IP
         val wifiManager = context.getSystemService(Context.WIFI_SERVICE) as? WifiManager
@@ -274,7 +277,6 @@ class AndroidSystemMonitor @Inject constructor(
 
     private companion object {
         const val TAG = "SystemMonitor"
-        const val POLL_INTERVAL_MS = 15_000L
         val EMPTY_SNAPSHOT = SystemSnapshot(
             status = SystemStatus(
                 isBluetoothLeEnabled = false,

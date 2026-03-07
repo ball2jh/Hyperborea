@@ -2,10 +2,25 @@ package com.nettarion.hyperborea.ui.theme
 
 import androidx.compose.ui.graphics.Color
 
-val Purple80 = Color(0xFFD0BCFF)
-val PurpleGrey80 = Color(0xFFCCC2DC)
-val Pink80 = Color(0xFFEFB8C8)
+// Background layers
+val BackgroundDeep = Color(0xFF07080A)
+val Surface = Color(0xFF0F1115)
+val SurfaceVariant = Color(0xFF181B22)
+val Divider = Color(0xFF1A1D24)
 
-val Purple40 = Color(0xFF6650a4)
-val PurpleGrey40 = Color(0xFF625b71)
-val Pink40 = Color(0xFF7D5260)
+// Text hierarchy
+val TextHigh = Color(0xFFF0F2F5)
+val TextMedium = Color(0xFF7A8290)
+val TextLow = Color(0xFF3D4350)
+
+// Accent
+val ElectricBlue = Color(0xFF3B82F6)
+val Amber = Color(0xFFF59E0B)
+
+// Status
+val StatusActive = Color(0xFF22C55E)
+val StatusError = Color(0xFFEF4444)
+val StatusIdle = Color(0xFF6B7280)
+
+// Error surfaces
+val ErrorContainer = Color(0xFF3B1C1C)

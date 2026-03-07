@@ -2,7 +2,6 @@ package com.nettarion.hyperborea.core
 
 import com.google.common.truth.Truth.assertThat
 import org.junit.Test
-import kotlin.test.assertEquals
 
 class DeviceInfoTest {
 
@@ -32,8 +31,8 @@ class DeviceInfoTest {
     fun `data class equality`() {
         val a = DeviceInfo("Bike", DeviceType.BIKE, setOf(Metric.POWER))
         val b = DeviceInfo("Bike", DeviceType.BIKE, setOf(Metric.POWER))
-        assertEquals(a, b)
-        assertEquals(a.hashCode(), b.hashCode())
+        assertThat(a).isEqualTo(b)
+        assertThat(a.hashCode()).isEqualTo(b.hashCode())
     }
 
     @Test
@@ -63,14 +62,14 @@ class DeviceInfoTest {
     @Test
     fun `DeviceType valueOf round-trip`() {
         for (type in DeviceType.entries) {
-            assertEquals(type, DeviceType.valueOf(type.name))
+            assertThat(type).isEqualTo(DeviceType.valueOf(type.name))
         }
     }
 
     @Test
     fun `Metric valueOf round-trip`() {
         for (metric in Metric.entries) {
-            assertEquals(metric, Metric.valueOf(metric.name))
+            assertThat(metric).isEqualTo(Metric.valueOf(metric.name))
         }
     }
 }

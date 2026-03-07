@@ -1,0 +1,13 @@
+{
+  "app": {
+    "file": "hyperborea.apk",
+    "versionCode": 2,
+    "versionName": "1.1",
+    "releaseNotes": "Bug fixes."
+  },
+  "firmware": {
+    "file": "firmware.zip",
+    "version": "2.0.1",
+    "releaseNotes": "Updated kernel."
+  }
+}

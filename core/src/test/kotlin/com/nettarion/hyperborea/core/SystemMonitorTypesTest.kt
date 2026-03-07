@@ -2,8 +2,6 @@ package com.nettarion.hyperborea.core
 
 import com.google.common.truth.Truth.assertThat
 import org.junit.Test
-import kotlin.test.assertEquals
-import kotlin.test.assertNotEquals
 
 class SystemMonitorTypesTest {
 
@@ -29,8 +27,8 @@ class SystemMonitorTypesTest {
             isRootAvailable = false,
             isSeLinuxEnforcing = false,
         )
-        assertEquals(a, b)
-        assertEquals(a.hashCode(), b.hashCode())
+        assertThat(a).isEqualTo(b)
+        assertThat(a.hashCode()).isEqualTo(b.hashCode())
     }
 
     @Test
@@ -45,15 +43,15 @@ class SystemMonitorTypesTest {
             isRootAvailable = false,
             isSeLinuxEnforcing = false,
         )
-        assertNotEquals(base, base.copy(isWifiEnabled = true))
+        assertThat(base).isNotEqualTo(base.copy(isWifiEnabled = true))
     }
 
     @Test
     fun `InstalledPackage data class equality`() {
         val a = InstalledPackage("com.example", "1.0", 1L, false)
         val b = InstalledPackage("com.example", "1.0", 1L, false)
-        assertEquals(a, b)
-        assertEquals(a.hashCode(), b.hashCode())
+        assertThat(a).isEqualTo(b)
+        assertThat(a.hashCode()).isEqualTo(b.hashCode())
     }
 
     @Test
@@ -76,7 +74,7 @@ class SystemMonitorTypesTest {
     @Test
     fun `ComponentType valueOf round-trip`() {
         for (type in ComponentType.entries) {
-            assertEquals(type, ComponentType.valueOf(type.name))
+            assertThat(type).isEqualTo(ComponentType.valueOf(type.name))
         }
     }
 
@@ -93,7 +91,7 @@ class SystemMonitorTypesTest {
     @Test
     fun `ComponentState valueOf round-trip`() {
         for (state in ComponentState.entries) {
-            assertEquals(state, ComponentState.valueOf(state.name))
+            assertThat(state).isEqualTo(ComponentState.valueOf(state.name))
         }
     }
 
@@ -101,22 +99,22 @@ class SystemMonitorTypesTest {
     fun `DeclaredComponent data class equality`() {
         val a = DeclaredComponent("com.example", "com.example.MyService", ComponentType.SERVICE, ComponentState.RUNNING)
         val b = DeclaredComponent("com.example", "com.example.MyService", ComponentType.SERVICE, ComponentState.RUNNING)
-        assertEquals(a, b)
-        assertEquals(a.hashCode(), b.hashCode())
+        assertThat(a).isEqualTo(b)
+        assertThat(a.hashCode()).isEqualTo(b.hashCode())
     }
 
     @Test
     fun `DeclaredComponent inequality on different state`() {
         val a = DeclaredComponent("com.example", "com.example.MyService", ComponentType.SERVICE, ComponentState.RUNNING)
         val b = DeclaredComponent("com.example", "com.example.MyService", ComponentType.SERVICE, ComponentState.ENABLED)
-        assertNotEquals(a, b)
+        assertThat(a).isNotEqualTo(b)
     }
 
     @Test
     fun `DeclaredComponent inequality on different type`() {
         val a = DeclaredComponent("com.example", "com.example.Foo", ComponentType.SERVICE, ComponentState.ENABLED)
         val b = DeclaredComponent("com.example", "com.example.Foo", ComponentType.ACTIVITY, ComponentState.ENABLED)
-        assertNotEquals(a, b)
+        assertThat(a).isNotEqualTo(b)
     }
 
     @Test
@@ -133,8 +131,8 @@ class SystemMonitorTypesTest {
         )
         val a = SystemSnapshot(status, emptyList(), emptyList(), emptyList(), 100L)
         val b = SystemSnapshot(status, emptyList(), emptyList(), emptyList(), 100L)
-        assertEquals(a, b)
-        assertEquals(a.hashCode(), b.hashCode())
+        assertThat(a).isEqualTo(b)
+        assertThat(a.hashCode()).isEqualTo(b.hashCode())
     }
 
     @Test
@@ -151,7 +149,7 @@ class SystemMonitorTypesTest {
         )
         val a = SystemSnapshot(status, emptyList(), emptyList(), emptyList(), 100L)
         val b = SystemSnapshot(status, emptyList(), emptyList(), emptyList(), 200L)
-        assertNotEquals(a, b)
+        assertThat(a).isNotEqualTo(b)
     }
 
     @Test

@@ -2,8 +2,6 @@ package com.nettarion.hyperborea.core
 
 import com.google.common.truth.Truth.assertThat
 import org.junit.Test
-import kotlin.test.assertEquals
-import kotlin.test.assertNotEquals
 
 class ExerciseDataTest {
 
@@ -59,15 +57,15 @@ class ExerciseDataTest {
     fun `data class equality`() {
         val a = ExerciseData(100, 80, 20.0f, 5, 1.0f, 120, 2.0f, 100, 600L)
         val b = ExerciseData(100, 80, 20.0f, 5, 1.0f, 120, 2.0f, 100, 600L)
-        assertEquals(a, b)
-        assertEquals(a.hashCode(), b.hashCode())
+        assertThat(a).isEqualTo(b)
+        assertThat(a.hashCode()).isEqualTo(b.hashCode())
     }
 
     @Test
     fun `data class inequality on different fields`() {
         val base = ExerciseData(100, 80, 20.0f, 5, 1.0f, 120, 2.0f, 100, 600L)
-        assertNotEquals(base, base.copy(power = 200))
-        assertNotEquals(base, base.copy(elapsedTime = 999L))
+        assertThat(base).isNotEqualTo(base.copy(power = 200))
+        assertThat(base).isNotEqualTo(base.copy(elapsedTime = 999L))
     }
 
     @Test
