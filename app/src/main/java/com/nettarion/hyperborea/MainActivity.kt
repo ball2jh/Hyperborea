@@ -4,10 +4,19 @@ import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.nettarion.hyperborea.core.LicenseChecker
+import com.nettarion.hyperborea.core.LicenseState
 import com.nettarion.hyperborea.ui.AppScreen
 import com.nettarion.hyperborea.ui.activation.ActivationScreen
 import com.nettarion.hyperborea.ui.dashboard.DashboardScreen
@@ -16,18 +25,48 @@ import com.nettarion.hyperborea.ui.profile.ProfilePickerScreen
 import com.nettarion.hyperborea.ui.profile.ProfileStatsScreen
 import com.nettarion.hyperborea.ui.theme.HyperboreaTheme
 import dagger.hilt.android.AndroidEntryPoint
+import javax.inject.Inject
 
 @AndroidEntryPoint
 class MainActivity : ComponentActivity() {
+
+    @Inject lateinit var licenseChecker: LicenseChecker
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
         setContent {
             HyperboreaTheme {
-                var currentScreen by remember { mutableStateOf<AppScreen>(AppScreen.ProfilePicker) }
+                val licenseState by licenseChecker.state.collectAsStateWithLifecycle()
+
+                var currentScreen by remember { mutableStateOf<AppScreen?>(null) }
+
+                LaunchedEffect(licenseState) {
+                    when (licenseState) {
+                        is LicenseState.Licensed -> {
+                            if (currentScreen == null || currentScreen is AppScreen.Activation) {
+                                currentScreen = AppScreen.ProfilePicker
+                            }
+                        }
+                        is LicenseState.Unlicensed -> {
+                            currentScreen = AppScreen.Activation
+                        }
+                        is LicenseState.Checking -> {
+                            // Stay on current screen or show nothing
+                        }
+                    }
+                }
+
+                LaunchedEffect(Unit) {
+                    licenseChecker.check()
+                }
 
                 when (val screen = currentScreen) {
+                    null -> {
+                        Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                            CircularProgressIndicator()
+                        }
+                    }
                     is AppScreen.Activation -> ActivationScreen(
                         onActivated = { currentScreen = AppScreen.ProfilePicker },
                     )

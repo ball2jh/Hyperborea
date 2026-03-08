@@ -10,18 +10,22 @@ import com.nettarion.hyperborea.core.BroadcastAdapter
 import com.nettarion.hyperborea.core.BroadcastId
 import com.nettarion.hyperborea.core.ClientInfo
 import com.nettarion.hyperborea.core.HardwareAdapter
+import com.nettarion.hyperborea.core.LicenseChecker
+import com.nettarion.hyperborea.core.LicenseState
 import com.nettarion.hyperborea.core.Orchestrator
 import com.nettarion.hyperborea.core.ProfileRepository
 import com.nettarion.hyperborea.core.SystemMonitor
 import com.nettarion.hyperborea.core.UserPreferences
 import dagger.hilt.android.lifecycle.HiltViewModel
 import dagger.hilt.android.qualifiers.ApplicationContext
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
+import kotlinx.coroutines.launch
 import javax.inject.Inject
 
 @HiltViewModel
@@ -32,8 +36,22 @@ class DashboardViewModel @Inject constructor(
     private val systemMonitor: SystemMonitor,
     private val userPreferences: UserPreferences,
     private val profileRepository: ProfileRepository,
+    private val licenseChecker: LicenseChecker,
     @param:ApplicationContext private val context: Context,
 ) : ViewModel() {
+
+    val licenseState: StateFlow<LicenseState> = licenseChecker.state
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), LicenseState.Checking)
+
+    init {
+        // Periodic license re-check every 4 hours
+        viewModelScope.launch {
+            while (true) {
+                delay(LICENSE_RECHECK_INTERVAL_MS)
+                licenseChecker.check()
+            }
+        }
+    }
 
     private val broadcastsFlow: Flow<List<BroadcastUiState>> = combine(
         buildList<Flow<*>> {
@@ -126,5 +144,9 @@ class DashboardViewModel @Inject constructor(
 
     fun toggleBroadcast(id: BroadcastId, enabled: Boolean) {
         userPreferences.setBroadcastEnabled(id, enabled)
+    }
+
+    companion object {
+        private const val LICENSE_RECHECK_INTERVAL_MS = 4 * 60 * 60 * 1000L // 4 hours
     }
 }
