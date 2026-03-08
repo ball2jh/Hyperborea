@@ -1,5 +1,10 @@
 package com.nettarion.hyperborea.core
 
+import com.nettarion.hyperborea.core.ByteUtils.putUint32LE
+import com.nettarion.hyperborea.core.ByteUtils.sint16LE
+import com.nettarion.hyperborea.core.ByteUtils.uint16LE
+import com.nettarion.hyperborea.core.ByteUtils.uint24LE
+
 object FtmsDataEncoder {
 
     fun encodeData(deviceType: DeviceType, data: ExerciseData): ByteArray = when (deviceType) {
@@ -153,25 +158,4 @@ object FtmsDataEncoder {
         return byteArrayOf(0x00, status) // Flags=0x00 (no string), TrainingStatus
     }
 
-    private fun uint16LE(value: Int): ByteArray =
-        byteArrayOf((value and 0xFF).toByte(), (value shr 8).toByte())
-
-    private fun uint24LE(value: Long): ByteArray =
-        byteArrayOf(
-            (value and 0xFF).toByte(),
-            ((value shr 8) and 0xFF).toByte(),
-            ((value shr 16) and 0xFF).toByte(),
-        )
-
-    private fun sint16LE(value: Int): ByteArray {
-        val clamped = value.coerceIn(-32768, 32767)
-        return byteArrayOf((clamped and 0xFF).toByte(), (clamped shr 8).toByte())
-    }
-
-    private fun putUint32LE(dest: ByteArray, offset: Int, value: Long) {
-        dest[offset] = (value and 0xFF).toByte()
-        dest[offset + 1] = ((value shr 8) and 0xFF).toByte()
-        dest[offset + 2] = ((value shr 16) and 0xFF).toByte()
-        dest[offset + 3] = ((value shr 24) and 0xFF).toByte()
-    }
 }

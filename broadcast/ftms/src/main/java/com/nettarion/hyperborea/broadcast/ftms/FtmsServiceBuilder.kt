@@ -3,6 +3,8 @@ package com.nettarion.hyperborea.broadcast.ftms
 import android.bluetooth.BluetoothGattCharacteristic
 import android.bluetooth.BluetoothGattDescriptor
 import android.bluetooth.BluetoothGattService
+import com.nettarion.hyperborea.core.ByteUtils.sint16LE
+import com.nettarion.hyperborea.core.ByteUtils.uint16LE
 import com.nettarion.hyperborea.core.DeviceInfo
 import com.nettarion.hyperborea.core.DeviceType
 import com.nettarion.hyperborea.core.FtmsDataEncoder
@@ -153,14 +155,6 @@ object FtmsServiceBuilder {
         CPS_FEATURE_UUID -> CPS_FEATURE_VALUE.copyOf()
         SENSOR_LOCATION_UUID -> SENSOR_LOCATION_VALUE.copyOf()
         else -> null
-    }
-
-    private fun uint16LE(value: Int): ByteArray =
-        byteArrayOf((value and 0xFF).toByte(), (value shr 8).toByte())
-
-    private fun sint16LE(value: Int): ByteArray {
-        val clamped = value.coerceIn(-32768, 32767)
-        return byteArrayOf((clamped and 0xFF).toByte(), (clamped shr 8).toByte())
     }
 
     private fun readCharacteristic(uuid: UUID) = BluetoothGattCharacteristic(
