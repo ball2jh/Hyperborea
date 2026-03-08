@@ -9,7 +9,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
 import com.nettarion.hyperborea.core.LogEntry
 import com.nettarion.hyperborea.core.LogLevel
-import com.nettarion.hyperborea.core.SystemLogEntry
+import com.nettarion.hyperborea.core.system.SystemLogEntry
 import com.nettarion.hyperborea.ui.theme.HyperboreaColors
 import com.nettarion.hyperborea.ui.theme.LocalHyperboreaColors
 import com.nettarion.hyperborea.ui.theme.LogTextStyle

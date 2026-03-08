@@ -1,8 +1,8 @@
 package com.nettarion.hyperborea.platform.systemlog
 
 import com.nettarion.hyperborea.core.LogLevel
-import com.nettarion.hyperborea.core.SystemLogEntry
-import com.nettarion.hyperborea.core.SystemLogSource
+import com.nettarion.hyperborea.core.system.SystemLogEntry
+import com.nettarion.hyperborea.core.system.SystemLogSource
 import java.text.SimpleDateFormat
 import java.util.Calendar
 import java.util.Locale

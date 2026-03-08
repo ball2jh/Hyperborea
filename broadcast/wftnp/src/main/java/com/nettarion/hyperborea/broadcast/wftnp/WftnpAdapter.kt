@@ -1,12 +1,12 @@
 package com.nettarion.hyperborea.broadcast.wftnp
 
 import com.nettarion.hyperborea.core.AppLogger
-import com.nettarion.hyperborea.core.BaseBroadcastAdapter
-import com.nettarion.hyperborea.core.BroadcastId
-import com.nettarion.hyperborea.core.DeviceInfo
-import com.nettarion.hyperborea.core.ExerciseData
-import com.nettarion.hyperborea.core.Prerequisite
-import com.nettarion.hyperborea.core.SystemSnapshot
+import com.nettarion.hyperborea.core.adapter.BaseBroadcastAdapter
+import com.nettarion.hyperborea.core.adapter.BroadcastId
+import com.nettarion.hyperborea.core.model.DeviceInfo
+import com.nettarion.hyperborea.core.model.ExerciseData
+import com.nettarion.hyperborea.core.orchestration.Prerequisite
+import com.nettarion.hyperborea.core.system.SystemSnapshot
 import javax.inject.Inject
 import javax.inject.Named
 import javax.inject.Singleton
@@ -30,7 +30,7 @@ class WftnpAdapter @Inject constructor(
     override suspend fun onStart(
         scope: CoroutineScope,
         deviceInfo: DeviceInfo,
-    ): (ExerciseData) -> Unit {
+    ): suspend (ExerciseData) -> Unit {
         val serviceDef = WftnpServiceDefinition(deviceInfo)
         val wftnpServer = WftnpServer(
             logger = logger,

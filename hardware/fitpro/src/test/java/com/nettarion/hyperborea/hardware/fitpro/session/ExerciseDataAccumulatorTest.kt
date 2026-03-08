@@ -255,4 +255,48 @@ class ExerciseDataAccumulatorTest {
         accumulator.updateTargetIncline(8.0f)
         assertThat(accumulator.snapshot().targetIncline).isEqualTo(8.0f)
     }
+
+    @Test
+    fun `startTimer starts clock without cadence`() {
+        accumulator.start()
+        accumulator.startTimer()
+        fakeTime = 6000L  // 5 seconds
+        assertThat(accumulator.snapshot().elapsedTime).isEqualTo(5)
+    }
+
+    @Test
+    fun `startTimer is no-op when already running`() {
+        accumulator.start()
+        accumulator.updateCadence(60) // starts at 1000
+        fakeTime = 6000L              // 5 seconds
+        accumulator.startTimer()      // should be no-op since runningStartTime > 0
+        fakeTime = 11000L             // 10 seconds total
+        assertThat(accumulator.snapshot().elapsedTime).isEqualTo(10)
+    }
+
+    @Test
+    fun `startTimer is no-op when paused`() {
+        accumulator.start()
+        accumulator.updateCadence(60) // starts at 1000
+        fakeTime = 6000L              // 5 seconds
+        accumulator.pause()
+        accumulator.startTimer()      // should be no-op since paused=true
+        fakeTime = 16000L
+        assertThat(accumulator.snapshot().elapsedTime).isEqualTo(5)
+    }
+
+    @Test
+    fun `initialElapsedSeconds carries over time`() {
+        val acc = ExerciseDataAccumulator(clock = { fakeTime }, initialElapsedSeconds = 120L)
+        acc.start()
+        acc.startTimer()              // starts at fakeTime=1000
+        fakeTime = 11000L             // 10 seconds later
+        assertThat(acc.snapshot().elapsedTime).isEqualTo(130) // 120 + 10
+    }
+
+    @Test
+    fun `initialElapsedSeconds with no timer running`() {
+        val acc = ExerciseDataAccumulator(clock = { fakeTime }, initialElapsedSeconds = 60L)
+        assertThat(acc.snapshot().elapsedTime).isEqualTo(60)
+    }
 }

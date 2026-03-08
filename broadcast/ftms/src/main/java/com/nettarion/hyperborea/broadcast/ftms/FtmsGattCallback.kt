@@ -14,9 +14,9 @@ import android.content.Context
 import android.content.pm.PackageManager
 import android.os.Build
 import com.nettarion.hyperborea.core.AppLogger
-import com.nettarion.hyperborea.core.ControlPointParser
-import com.nettarion.hyperborea.core.DeviceCommand
-import com.nettarion.hyperborea.core.DeviceInfo
+import com.nettarion.hyperborea.core.ftms.ControlPointParser
+import com.nettarion.hyperborea.core.model.DeviceCommand
+import com.nettarion.hyperborea.core.model.DeviceInfo
 import java.util.UUID
 import java.util.concurrent.ConcurrentHashMap
 

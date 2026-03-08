@@ -1,0 +1,26 @@
+package com.nettarion.hyperborea.core.model
+
+data class RideSummary(
+    val id: Long = 0,
+    val profileId: Long,
+    val startedAt: Long,
+    val durationSeconds: Long,
+    val distanceKm: Float,
+    val calories: Int,
+    val avgPower: Int? = null,
+    val maxPower: Int? = null,
+    val avgCadence: Int? = null,
+    val maxCadence: Int? = null,
+    val avgSpeedKph: Float? = null,
+    val maxSpeedKph: Float? = null,
+    val avgHeartRate: Int? = null,
+    val maxHeartRate: Int? = null,
+    val avgResistance: Int? = null,
+    val maxResistance: Int? = null,
+    val avgIncline: Float? = null,
+    val maxIncline: Float? = null,
+    val totalElevationGainMeters: Float? = null,
+    val normalizedPower: Int? = null,
+    val intensityFactor: Float? = null,
+    val trainingStressScore: Float? = null,
+)

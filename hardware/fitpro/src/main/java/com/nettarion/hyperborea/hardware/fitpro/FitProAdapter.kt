@@ -1,18 +1,17 @@
 package com.nettarion.hyperborea.hardware.fitpro
 
-import com.nettarion.hyperborea.core.AdapterState
+import com.nettarion.hyperborea.core.adapter.AdapterState
 import com.nettarion.hyperborea.core.AppLogger
-import com.nettarion.hyperborea.core.DeviceCommand
-import com.nettarion.hyperborea.core.DeviceIdentity
-import com.nettarion.hyperborea.core.DeviceInfo
-import com.nettarion.hyperborea.core.ExerciseData
-import com.nettarion.hyperborea.core.FulfillResult
-import com.nettarion.hyperborea.core.HardwareAdapter
-import com.nettarion.hyperborea.core.Prerequisite
-import com.nettarion.hyperborea.core.SystemSnapshot
+import com.nettarion.hyperborea.core.model.DeviceCommand
+import com.nettarion.hyperborea.core.model.DeviceIdentity
+import com.nettarion.hyperborea.core.model.DeviceInfo
+import com.nettarion.hyperborea.core.model.ExerciseData
+import com.nettarion.hyperborea.core.orchestration.FulfillResult
+import com.nettarion.hyperborea.core.adapter.HardwareAdapter
+import com.nettarion.hyperborea.core.orchestration.Prerequisite
+import com.nettarion.hyperborea.core.system.SystemSnapshot
 import com.nettarion.hyperborea.hardware.fitpro.session.DeviceDatabase
-import com.nettarion.hyperborea.hardware.fitpro.session.DeviceCapabilities
-import com.nettarion.hyperborea.hardware.fitpro.session.EquipmentProfiles
+import com.nettarion.hyperborea.hardware.fitpro.session.ExerciseDataAccumulator
 import com.nettarion.hyperborea.hardware.fitpro.session.FitProSession
 import com.nettarion.hyperborea.hardware.fitpro.session.SessionState
 import com.nettarion.hyperborea.hardware.fitpro.transport.HidTransportFactory
@@ -67,7 +66,7 @@ class FitProAdapter @Inject constructor(
     override val state: StateFlow<AdapterState> = _state.asStateFlow()
 
     private var session: FitProSession? = null
-    private var activeCapabilities: DeviceCapabilities? = null
+    private var initialElapsedSeconds: Long = 0L
     private var dataForwardJob: Job? = null
     private var identityForwardJob: Job? = null
     private var stateMonitorJob: Job? = null
@@ -81,22 +80,24 @@ class FitProAdapter @Inject constructor(
             val transport = result.transport
             val productId = result.productId
 
-            val capabilities = EquipmentProfiles.fromProductId(productId)
-            if (capabilities == null) {
+            val info = DeviceDatabase.fromProductId(productId)
+            if (info == null) {
                 logger.e(TAG, "Unknown product ID: $productId")
                 _state.value = AdapterState.Error("Unknown FitPro product ID: $productId")
                 return
             }
-            activeCapabilities = capabilities
+
+            val acc = ExerciseDataAccumulator(initialElapsedSeconds = initialElapsedSeconds)
+            initialElapsedSeconds = 0L
 
             val newSession = when (productId) {
                 FITPRO_PRODUCT_ID_V1 -> {
                     logger.i(TAG, "FitPro V1 protocol (product ID $productId)")
-                    V1Session(transport, logger, scope, capabilities)
+                    V1Session(transport, logger, scope, info, acc)
                 }
                 FITPRO_PRODUCT_ID_V2, FITPRO_PRODUCT_ID_V2_FTDI -> {
                     logger.i(TAG, "FitPro V2 protocol (product ID $productId)")
-                    V2Session(transport, logger, scope, capabilities)
+                    V2Session(transport, logger, scope, info, acc)
                 }
                 else -> {
                     logger.e(TAG, "Unknown product ID: $productId")
@@ -187,7 +188,6 @@ class FitProAdapter @Inject constructor(
 
         session?.stop()
         session = null
-        activeCapabilities = null
 
         _exerciseData.value = null
         _deviceIdentity.value = null
@@ -202,10 +202,8 @@ class FitProAdapter @Inject constructor(
             else -> {
                 val model = identity.model
                 val modelNumber = model?.toIntOrNull()
-                val info = if (modelNumber != null) DeviceDatabase.fromModel(modelNumber)
-                    else DeviceDatabase.fallback()
-                val caps = activeCapabilities
-                if (caps != null) info.copy(maxResistance = caps.maxResistance) else info
+                if (modelNumber != null) DeviceDatabase.fromModel(modelNumber)
+                else DeviceDatabase.fallback()
             }
         }
     }
@@ -218,6 +216,10 @@ class FitProAdapter @Inject constructor(
         catch (e: Exception) {
             logger.e(TAG, "Failed to send command: $command", e)
         }
+    }
+
+    override fun setInitialElapsedTime(seconds: Long) {
+        initialElapsedSeconds = seconds
     }
 
     private companion object {

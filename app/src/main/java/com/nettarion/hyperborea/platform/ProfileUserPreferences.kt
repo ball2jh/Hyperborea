@@ -1,9 +1,9 @@
 package com.nettarion.hyperborea.platform
 
 import com.nettarion.hyperborea.core.AppLogger
-import com.nettarion.hyperborea.core.BroadcastId
-import com.nettarion.hyperborea.core.ProfileRepository
-import com.nettarion.hyperborea.core.UserPreferences
+import com.nettarion.hyperborea.core.adapter.BroadcastId
+import com.nettarion.hyperborea.core.profile.ProfileRepository
+import com.nettarion.hyperborea.core.profile.UserPreferences
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow

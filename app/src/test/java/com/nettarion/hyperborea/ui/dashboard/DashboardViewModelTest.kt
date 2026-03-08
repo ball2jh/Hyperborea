@@ -3,32 +3,33 @@ package com.nettarion.hyperborea.ui.dashboard
 import android.content.Context
 import app.cash.turbine.test
 import com.google.common.truth.Truth.assertThat
-import com.nettarion.hyperborea.core.AdapterState
+import com.nettarion.hyperborea.core.adapter.AdapterState
 import com.nettarion.hyperborea.core.AppLogger
-import com.nettarion.hyperborea.core.BroadcastAdapter
-import com.nettarion.hyperborea.core.BroadcastId
-import com.nettarion.hyperborea.core.ClientInfo
-import com.nettarion.hyperborea.core.DeviceCommand
-import com.nettarion.hyperborea.core.DeviceIdentity
-import com.nettarion.hyperborea.core.DeviceInfo
-import com.nettarion.hyperborea.core.EcosystemManager
-import com.nettarion.hyperborea.core.ExerciseData
-import com.nettarion.hyperborea.core.HardwareAdapter
+import com.nettarion.hyperborea.core.adapter.BroadcastAdapter
+import com.nettarion.hyperborea.core.adapter.BroadcastId
+import com.nettarion.hyperborea.core.model.ClientInfo
+import com.nettarion.hyperborea.core.model.DeviceCommand
+import com.nettarion.hyperborea.core.model.DeviceIdentity
+import com.nettarion.hyperborea.core.model.DeviceInfo
+import com.nettarion.hyperborea.core.orchestration.EcosystemManager
+import com.nettarion.hyperborea.core.model.ExerciseData
+import com.nettarion.hyperborea.core.adapter.HardwareAdapter
 import com.nettarion.hyperborea.core.LicenseChecker
 import com.nettarion.hyperborea.core.LicenseState
 import com.nettarion.hyperborea.core.LinkResult
-import com.nettarion.hyperborea.core.Orchestrator
-import com.nettarion.hyperborea.core.OrchestratorState
-import com.nettarion.hyperborea.core.Prerequisite
-import com.nettarion.hyperborea.core.Profile
-import com.nettarion.hyperborea.core.ProfileRepository
-import com.nettarion.hyperborea.core.RideRecorder
-import com.nettarion.hyperborea.core.RideSummary
-import com.nettarion.hyperborea.core.WorkoutSample
-import com.nettarion.hyperborea.core.SystemController
-import com.nettarion.hyperborea.core.SystemMonitor
-import com.nettarion.hyperborea.core.SystemSnapshot
-import com.nettarion.hyperborea.core.UserPreferences
+import com.nettarion.hyperborea.core.orchestration.Orchestrator
+import com.nettarion.hyperborea.core.orchestration.OrchestratorState
+import com.nettarion.hyperborea.core.orchestration.Prerequisite
+import com.nettarion.hyperborea.core.model.Profile
+import com.nettarion.hyperborea.core.profile.ProfileRepository
+import com.nettarion.hyperborea.core.profile.RideRecorder
+import com.nettarion.hyperborea.core.model.RideSummary
+import com.nettarion.hyperborea.core.model.WorkoutSample
+import com.nettarion.hyperborea.core.system.SystemController
+import com.nettarion.hyperborea.core.system.SystemMonitor
+import com.nettarion.hyperborea.core.system.SystemSnapshot
+import com.nettarion.hyperborea.core.profile.UserPreferences
+import com.nettarion.hyperborea.core.test.buildDeviceInfo
 import com.nettarion.hyperborea.core.test.buildExerciseData
 import com.nettarion.hyperborea.core.test.buildSystemSnapshot
 import kotlinx.coroutines.Dispatchers
@@ -191,6 +192,132 @@ class DashboardViewModelTest {
         }
     }
 
+    // --- Action methods ---
+
+    @Test
+    fun `toggleBroadcast delegates to user preferences`() = runTest(UnconfinedTestDispatcher()) {
+        val ftms = FakeBroadcastAdapter(BroadcastId.FTMS)
+        val wftnp = FakeBroadcastAdapter(BroadcastId.WFTNP)
+        fakeUserPreferences.enabledBroadcastsFlow.value = BroadcastId.entries.toSet()
+
+        val vm = createViewModel(broadcastAdapters = setOf(ftms, wftnp))
+
+        vm.toggleBroadcast(BroadcastId.WFTNP, false)
+
+        assertThat(fakeUserPreferences.enabledBroadcastsFlow.value).doesNotContain(BroadcastId.WFTNP)
+        assertThat(fakeUserPreferences.enabledBroadcastsFlow.value).contains(BroadcastId.FTMS)
+    }
+
+    @Test
+    fun `toggleBroadcast enable adds to preferences`() = runTest(UnconfinedTestDispatcher()) {
+        fakeUserPreferences.enabledBroadcastsFlow.value = setOf(BroadcastId.FTMS)
+
+        val vm = createViewModel()
+        vm.toggleBroadcast(BroadcastId.WFTNP, true)
+
+        assertThat(fakeUserPreferences.enabledBroadcastsFlow.value).contains(BroadcastId.WFTNP)
+    }
+
+    // --- Hardware state ---
+
+    @Test
+    fun `hardware state flows to ui state`() = runTest(UnconfinedTestDispatcher()) {
+        val vm = createViewModel()
+
+        vm.uiState.test {
+            val initial = awaitItem()
+            assertThat(initial.hardwareState).isEqualTo(AdapterState.Inactive)
+
+            fakeHardware.stateFlow.value = AdapterState.Active
+            val updated = awaitItem()
+            assertThat(updated.hardwareState).isEqualTo(AdapterState.Active)
+        }
+    }
+
+    // --- Profile name ---
+
+    @Test
+    fun `profile name flows from repository`() = runTest(UnconfinedTestDispatcher()) {
+        val vm = createViewModel()
+
+        vm.uiState.test {
+            val initial = awaitItem()
+            assertThat(initial.profileName).isNull()
+
+            fakeProfileRepository.activeProfile.value = Profile(id = 1, name = "Alice")
+            val updated = awaitItem()
+            assertThat(updated.profileName).isEqualTo("Alice")
+        }
+    }
+
+    // --- Active profile id ---
+
+    @Test
+    fun `activeProfileId returns null when no active profile`() = runTest(UnconfinedTestDispatcher()) {
+        val vm = createViewModel()
+        assertThat(vm.activeProfileId).isNull()
+    }
+
+    @Test
+    fun `activeProfileId returns profile id when set`() = runTest(UnconfinedTestDispatcher()) {
+        fakeProfileRepository.activeProfile.value = Profile(id = 42, name = "Bob")
+        val vm = createViewModel()
+        assertThat(vm.activeProfileId).isEqualTo(42L)
+    }
+
+    // --- currentElapsedSeconds ---
+
+    @Test
+    fun `currentElapsedSeconds returns 0 when no exercise data`() = runTest(UnconfinedTestDispatcher()) {
+        val vm = createViewModel()
+        assertThat(vm.currentElapsedSeconds).isEqualTo(0L)
+    }
+
+    @Test
+    fun `currentElapsedSeconds returns elapsed time from exercise data`() = runTest(UnconfinedTestDispatcher()) {
+        val vm = createViewModel()
+        fakeHardware.exerciseDataFlow.value = buildExerciseData(elapsedTime = 300L)
+
+        vm.uiState.test {
+            awaitItem() // wait for update
+            assertThat(vm.currentElapsedSeconds).isEqualTo(300L)
+        }
+    }
+
+    // --- Device info ---
+
+    @Test
+    fun `device info flows to ui state`() = runTest(UnconfinedTestDispatcher()) {
+        val vm = createViewModel()
+
+        vm.uiState.test {
+            val initial = awaitItem()
+            assertThat(initial.deviceInfo).isNull()
+
+            val info = com.nettarion.hyperborea.core.test.buildDeviceInfo(name = "S22i")
+            fakeHardware.deviceInfoFlow.value = info
+            val updated = awaitItem()
+            assertThat(updated.deviceInfo).isEqualTo(info)
+        }
+    }
+
+    // --- Broadcast state ---
+
+    @Test
+    fun `broadcast state reflects adapter state`() = runTest(UnconfinedTestDispatcher()) {
+        val ftms = FakeBroadcastAdapter(BroadcastId.FTMS)
+        val vm = createViewModel(broadcastAdapters = setOf(ftms))
+
+        vm.uiState.test {
+            val initial = awaitItem()
+            assertThat(initial.broadcasts.first().state).isEqualTo(AdapterState.Inactive)
+
+            ftms.stateFlow.value = AdapterState.Active
+            val updated = awaitItem()
+            assertThat(updated.broadcasts.first().state).isEqualTo(AdapterState.Active)
+        }
+    }
+
     // --- Fakes ---
 
     private class FakeHardwareAdapter : HardwareAdapter {
@@ -207,6 +334,7 @@ class DashboardViewModelTest {
         override suspend fun connect() {}
         override suspend fun disconnect() {}
         override suspend fun sendCommand(command: DeviceCommand) {}
+        override fun setInitialElapsedTime(seconds: Long) {}
     }
 
     private class FakeBroadcastAdapter(

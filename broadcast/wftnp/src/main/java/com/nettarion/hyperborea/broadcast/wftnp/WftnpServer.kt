@@ -1,10 +1,10 @@
 package com.nettarion.hyperborea.broadcast.wftnp
 
 import com.nettarion.hyperborea.core.AppLogger
-import com.nettarion.hyperborea.core.ClientInfo
-import com.nettarion.hyperborea.core.DeviceCommand
-import com.nettarion.hyperborea.core.DeviceType
-import com.nettarion.hyperborea.core.ExerciseData
+import com.nettarion.hyperborea.core.model.ClientInfo
+import com.nettarion.hyperborea.core.model.DeviceCommand
+import com.nettarion.hyperborea.core.model.DeviceType
+import com.nettarion.hyperborea.core.model.ExerciseData
 import java.net.ServerSocket
 import java.util.concurrent.ConcurrentHashMap
 import kotlinx.coroutines.CoroutineScope
@@ -29,7 +29,9 @@ class WftnpServer(
     fun start(port: Int = PORT) {
         if (serverSocket != null) return
 
-        val socket = ServerSocket(port)
+        val socket = ServerSocket()
+        socket.reuseAddress = true
+        socket.bind(java.net.InetSocketAddress(port))
         serverSocket = socket
         logger.i(TAG, "TCP server started on port $port")
 
@@ -38,6 +40,8 @@ class WftnpServer(
                 while (isActive && !socket.isClosed) {
                     try {
                         val clientSocket = socket.accept()
+                        clientSocket.tcpNoDelay = true
+                        clientSocket.keepAlive = true
                         val clientId = clientSocket.remoteSocketAddress.toString()
                         logger.i(TAG, "Client connected: $clientId")
 
@@ -47,9 +51,11 @@ class WftnpServer(
                             output = clientSocket.getOutputStream(),
                             deviceType = deviceType,
                             serviceDef = serviceDef,
+                            scope = scope,
                             onCommand = onCommand,
                             logger = logger,
                         )
+                        handler.startSendLoop()
                         clients[clientId] = handler
                         notifyClientChange()
 
@@ -90,23 +96,14 @@ class WftnpServer(
         notifyClientChange()
     }
 
-    fun broadcastData(data: ExerciseData) {
+    suspend fun broadcastData(data: ExerciseData) {
         val deadClients = mutableListOf<String>()
         for ((id, handler) in clients) {
             if (handler.isClosed) {
                 deadClients.add(id)
                 continue
             }
-            scope.launch {
-                try {
-                    handler.sendNotifications(data)
-                } catch (e: Exception) {
-                    logger.d(TAG, "Notification send failed for $id: ${e.message}")
-                    handler.close()
-                    clients.remove(id)
-                    notifyClientChange()
-                }
-            }
+            handler.updateData(data)
         }
         if (deadClients.isNotEmpty()) {
             deadClients.forEach { clients.remove(it) }

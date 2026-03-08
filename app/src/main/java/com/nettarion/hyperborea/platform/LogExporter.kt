@@ -3,12 +3,12 @@ package com.nettarion.hyperborea.platform
 import android.app.Activity
 import android.content.Context
 import android.content.Intent
-import com.nettarion.hyperborea.core.ComponentType
+import com.nettarion.hyperborea.core.system.ComponentType
 import com.nettarion.hyperborea.core.LogEntry
 import com.nettarion.hyperborea.core.LogStore
-import com.nettarion.hyperborea.core.SystemLogEntry
-import com.nettarion.hyperborea.core.SystemLogStore
-import com.nettarion.hyperborea.core.SystemSnapshot
+import com.nettarion.hyperborea.core.system.SystemLogEntry
+import com.nettarion.hyperborea.core.system.SystemLogStore
+import com.nettarion.hyperborea.core.system.SystemSnapshot
 import dagger.hilt.android.qualifiers.ApplicationContext
 import java.io.File
 import java.text.SimpleDateFormat

@@ -1,8 +1,8 @@
 package com.nettarion.hyperborea.hardware.fitpro.session
 
-import com.nettarion.hyperborea.core.DeviceCommand
-import com.nettarion.hyperborea.core.DeviceIdentity
-import com.nettarion.hyperborea.core.ExerciseData
+import com.nettarion.hyperborea.core.model.DeviceCommand
+import com.nettarion.hyperborea.core.model.DeviceIdentity
+import com.nettarion.hyperborea.core.model.ExerciseData
 import kotlinx.coroutines.flow.StateFlow
 
 interface FitProSession {

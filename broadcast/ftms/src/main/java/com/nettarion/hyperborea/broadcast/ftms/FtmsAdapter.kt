@@ -2,12 +2,12 @@ package com.nettarion.hyperborea.broadcast.ftms
 
 import android.content.Context
 import com.nettarion.hyperborea.core.AppLogger
-import com.nettarion.hyperborea.core.BaseBroadcastAdapter
-import com.nettarion.hyperborea.core.BroadcastId
-import com.nettarion.hyperborea.core.DeviceInfo
-import com.nettarion.hyperborea.core.ExerciseData
-import com.nettarion.hyperborea.core.Prerequisite
-import com.nettarion.hyperborea.core.SystemSnapshot
+import com.nettarion.hyperborea.core.adapter.BaseBroadcastAdapter
+import com.nettarion.hyperborea.core.adapter.BroadcastId
+import com.nettarion.hyperborea.core.model.DeviceInfo
+import com.nettarion.hyperborea.core.model.ExerciseData
+import com.nettarion.hyperborea.core.orchestration.Prerequisite
+import com.nettarion.hyperborea.core.system.SystemSnapshot
 import kotlinx.coroutines.CoroutineScope
 
 class FtmsAdapter(
@@ -27,7 +27,7 @@ class FtmsAdapter(
     override suspend fun onStart(
         scope: CoroutineScope,
         deviceInfo: DeviceInfo,
-    ): (ExerciseData) -> Unit {
+    ): suspend (ExerciseData) -> Unit {
         val bleServer = FtmsBleServer(
             context = context,
             deviceInfo = deviceInfo,

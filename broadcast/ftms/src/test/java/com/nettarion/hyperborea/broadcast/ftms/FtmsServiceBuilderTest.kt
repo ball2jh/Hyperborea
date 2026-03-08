@@ -3,8 +3,8 @@ package com.nettarion.hyperborea.broadcast.ftms
 import android.bluetooth.BluetoothGattCharacteristic
 import android.bluetooth.BluetoothGattService
 import com.google.common.truth.Truth.assertThat
-import com.nettarion.hyperborea.core.DeviceInfo
-import com.nettarion.hyperborea.core.DeviceType
+import com.nettarion.hyperborea.core.model.DeviceInfo
+import com.nettarion.hyperborea.core.model.DeviceType
 import com.nettarion.hyperborea.core.test.buildDeviceInfo
 import org.junit.Test
 import org.junit.runner.RunWith

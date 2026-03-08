@@ -44,9 +44,9 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import com.nettarion.hyperborea.core.AdapterState
-import com.nettarion.hyperborea.core.ExerciseData
-import com.nettarion.hyperborea.core.OrchestratorState
+import com.nettarion.hyperborea.core.adapter.AdapterState
+import com.nettarion.hyperborea.core.model.ExerciseData
+import com.nettarion.hyperborea.core.orchestration.OrchestratorState
 import com.nettarion.hyperborea.ui.theme.LocalHyperboreaColors
 import java.text.SimpleDateFormat
 import java.util.Date

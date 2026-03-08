@@ -1,7 +1,8 @@
 package com.nettarion.hyperborea.hardware.fitpro.session
 
 import com.google.common.truth.Truth.assertThat
-import com.nettarion.hyperborea.core.DeviceCommand
+import com.nettarion.hyperborea.core.model.DeviceCommand
+import com.nettarion.hyperborea.core.test.buildDeviceInfo
 import com.nettarion.hyperborea.hardware.fitpro.v2.V2Codec
 import com.nettarion.hyperborea.hardware.fitpro.v2.V2FeatureId
 import com.nettarion.hyperborea.hardware.fitpro.v2.V2Message
@@ -9,6 +10,8 @@ import com.nettarion.hyperborea.hardware.fitpro.v2.V2Session
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
 import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.emptyFlow
 import kotlinx.coroutines.test.TestScope
 import kotlinx.coroutines.test.advanceTimeBy
 import kotlinx.coroutines.test.advanceUntilIdle
@@ -24,7 +27,7 @@ class V2SessionTest {
 
     private fun createSession(scope: TestScope): V2Session =
         V2Session(
-            transport, logger, scope.backgroundScope, EquipmentProfiles.S22I,
+            transport, logger, scope.backgroundScope, buildDeviceInfo(maxResistance = 24),
         )
 
     @Test
@@ -191,6 +194,220 @@ class V2SessionTest {
         // Not started
         session.writeFeature(DeviceCommand.SetResistance(10))
         assertThat(transport.writtenPackets).isEmpty()
+    }
+
+    // --- Double start ---
+
+    @Test
+    fun `double start is no-op when already streaming`() = runTest {
+        val session = createSession(this)
+        session.start()
+        advanceUntilIdle()
+        assertThat(session.sessionState.value).isEqualTo(SessionState.Streaming)
+
+        val packetCountBefore = transport.writtenPackets.size
+        session.start()
+        advanceUntilIdle()
+
+        assertThat(transport.writtenPackets.size).isEqualTo(packetCountBefore)
+        assertThat(session.sessionState.value).isEqualTo(SessionState.Streaming)
+    }
+
+    // --- writeFeature for all command types ---
+
+    @Test
+    fun `writeFeature SetTargetPower sends GOAL_WATTS`() = runTest {
+        val session = createSession(this)
+        session.start()
+        advanceUntilIdle()
+
+        val countBefore = transport.writtenPackets.size
+        session.writeFeature(DeviceCommand.SetTargetPower(250))
+
+        val written = transport.writtenPackets.drop(countBefore)
+        assertThat(written).hasSize(1)
+        assertThat(written[0][3]).isEqualTo(V2FeatureId.GOAL_WATTS.wireLo)
+    }
+
+    @Test
+    fun `writeFeature SetTargetSpeed sends TARGET_KPH`() = runTest {
+        val session = createSession(this)
+        session.start()
+        advanceUntilIdle()
+
+        val countBefore = transport.writtenPackets.size
+        session.writeFeature(DeviceCommand.SetTargetSpeed(30.0f))
+
+        val written = transport.writtenPackets.drop(countBefore)
+        assertThat(written).hasSize(1)
+        assertThat(written[0][3]).isEqualTo(V2FeatureId.TARGET_KPH.wireLo)
+    }
+
+    @Test
+    fun `writeFeature AdjustIncline sends TARGET_GRADE`() = runTest {
+        val session = createSession(this)
+        session.start()
+        advanceUntilIdle()
+
+        val countBefore = transport.writtenPackets.size
+        session.writeFeature(DeviceCommand.AdjustIncline(increase = true))
+
+        val written = transport.writtenPackets.drop(countBefore)
+        assertThat(written).hasSize(1)
+        assertThat(written[0][3]).isEqualTo(V2FeatureId.TARGET_GRADE.wireLo)
+    }
+
+    @Test
+    fun `writeFeature AdjustSpeed sends TARGET_KPH`() = runTest {
+        val session = createSession(this)
+        session.start()
+        advanceUntilIdle()
+
+        val countBefore = transport.writtenPackets.size
+        session.writeFeature(DeviceCommand.AdjustSpeed(increase = true))
+
+        val written = transport.writtenPackets.drop(countBefore)
+        assertThat(written).hasSize(1)
+        assertThat(written[0][3]).isEqualTo(V2FeatureId.TARGET_KPH.wireLo)
+    }
+
+    @Test
+    fun `writeFeature PauseWorkout sends SYSTEM_MODE PAUSE`() = runTest {
+        val session = createSession(this)
+        session.start()
+        advanceUntilIdle()
+
+        val countBefore = transport.writtenPackets.size
+        session.writeFeature(DeviceCommand.PauseWorkout)
+
+        val written = transport.writtenPackets.drop(countBefore)
+        assertThat(written).hasSize(1)
+        assertThat(written[0][3]).isEqualTo(V2FeatureId.SYSTEM_MODE.wireLo)
+    }
+
+    @Test
+    fun `writeFeature ResumeWorkout sends SYSTEM_MODE RUNNING`() = runTest {
+        val session = createSession(this)
+        session.start()
+        advanceUntilIdle()
+
+        val countBefore = transport.writtenPackets.size
+        session.writeFeature(DeviceCommand.ResumeWorkout)
+
+        val written = transport.writtenPackets.drop(countBefore)
+        assertThat(written).hasSize(1)
+        assertThat(written[0][3]).isEqualTo(V2FeatureId.SYSTEM_MODE.wireLo)
+    }
+
+    // --- Multiple events ---
+
+    @Test
+    fun `multiple events update multiple fields`() = runTest {
+        val session = createSession(this)
+        session.start()
+        advanceUntilIdle()
+
+        transport.emitIncoming(buildEventPacket(V2FeatureId.WATTS, 200.0f))
+        transport.emitIncoming(buildEventPacket(V2FeatureId.RPM, 95.0f))
+        transport.emitIncoming(buildEventPacket(V2FeatureId.CURRENT_KPH, 30.0f))
+        runCurrent()
+
+        val data = session.exerciseData.value
+        assertThat(data).isNotNull()
+        assertThat(data!!.power).isEqualTo(200)
+        assertThat(data.cadence).isEqualTo(95)
+        assertThat(data.speed).isEqualTo(30.0f)
+    }
+
+    @Test
+    fun `speed event updates exerciseData speed`() = runTest {
+        val session = createSession(this)
+        session.start()
+        advanceUntilIdle()
+
+        transport.emitIncoming(buildEventPacket(V2FeatureId.CURRENT_KPH, 25.5f))
+        runCurrent()
+
+        assertThat(session.exerciseData.value!!.speed).isEqualTo(25.5f)
+    }
+
+    @Test
+    fun `heart rate event updates exerciseData`() = runTest {
+        val session = createSession(this)
+        session.start()
+        advanceUntilIdle()
+
+        transport.emitIncoming(buildEventPacket(V2FeatureId.PULSE, 140.0f))
+        runCurrent()
+
+        assertThat(session.exerciseData.value!!.heartRate).isEqualTo(140)
+    }
+
+    @Test
+    fun `incline event updates exerciseData`() = runTest {
+        val session = createSession(this)
+        session.start()
+        advanceUntilIdle()
+
+        transport.emitIncoming(buildEventPacket(V2FeatureId.CURRENT_GRADE, 5.0f))
+        runCurrent()
+
+        assertThat(session.exerciseData.value!!.incline).isEqualTo(5.0f)
+    }
+
+    // --- Stop sends cleanup packets ---
+
+    @Test
+    fun `stop sends IDLE mode and Unsubscribe`() = runTest {
+        val session = createSession(this)
+        session.start()
+        advanceUntilIdle()
+
+        val countBefore = transport.writtenPackets.size
+        session.stop()
+        advanceUntilIdle()
+
+        // Should have sent IDLE mode WriteFeature + Unsubscribe
+        val stopPackets = transport.writtenPackets.drop(countBefore)
+        assertThat(stopPackets.size).isAtLeast(2)
+    }
+
+    // --- Transport close during receive loop ---
+
+    @Test
+    fun `transport close transitions to Disconnected`() = runTest {
+        val session = createSession(this)
+        session.start()
+        advanceUntilIdle()
+        assertThat(session.sessionState.value).isEqualTo(SessionState.Streaming)
+
+        transport.closeIncoming()
+        // Give time for channel close to propagate through receive loop
+        advanceTimeBy(1000)
+        runCurrent()
+        advanceUntilIdle()
+
+        assertThat(session.sessionState.value).isEqualTo(SessionState.Disconnected)
+    }
+
+    // --- Error during start ---
+
+    @Test
+    fun `start transitions to Error when transport fails`() = runTest {
+        val failingTransport = object : com.nettarion.hyperborea.hardware.fitpro.transport.HidTransport {
+            override val isOpen: Boolean = false
+            override suspend fun open() { throw java.io.IOException("USB disconnected") }
+            override suspend fun close() {}
+            override suspend fun write(data: ByteArray) {}
+            override suspend fun readPacket(): ByteArray? = null
+            override suspend fun clearBuffer() {}
+            override fun incoming(): Flow<ByteArray> = emptyFlow()
+        }
+        val session = V2Session(failingTransport, logger, backgroundScope, buildDeviceInfo(maxResistance = 24))
+        session.start()
+        advanceUntilIdle()
+
+        assertThat(session.sessionState.value).isInstanceOf(SessionState.Error::class.java)
     }
 
     private fun buildEventPacket(feature: V2FeatureId, value: Float): ByteArray {

@@ -16,8 +16,8 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
-import com.nettarion.hyperborea.core.ExerciseData
-import com.nettarion.hyperborea.core.Metric
+import com.nettarion.hyperborea.core.model.ExerciseData
+import com.nettarion.hyperborea.core.model.Metric
 import com.nettarion.hyperborea.ui.theme.LocalHyperboreaColors
 
 @Composable

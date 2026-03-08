@@ -2,11 +2,11 @@ package com.nettarion.hyperborea.data
 
 import androidx.room.withTransaction
 import com.nettarion.hyperborea.core.AppLogger
-import com.nettarion.hyperborea.core.BroadcastId
-import com.nettarion.hyperborea.core.Profile
-import com.nettarion.hyperborea.core.ProfileRepository
-import com.nettarion.hyperborea.core.RideSummary
-import com.nettarion.hyperborea.core.WorkoutSample
+import com.nettarion.hyperborea.core.adapter.BroadcastId
+import com.nettarion.hyperborea.core.model.Profile
+import com.nettarion.hyperborea.core.profile.ProfileRepository
+import com.nettarion.hyperborea.core.model.RideSummary
+import com.nettarion.hyperborea.core.model.WorkoutSample
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.SharingStarted

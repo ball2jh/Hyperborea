@@ -1,12 +1,12 @@
 package com.nettarion.hyperborea.hardware.fitpro
 
 import com.google.common.truth.Truth.assertThat
-import com.nettarion.hyperborea.core.AdapterState
-import com.nettarion.hyperborea.core.DeviceCommand
-import com.nettarion.hyperborea.core.DeviceType
-import com.nettarion.hyperborea.core.FulfillResult
-import com.nettarion.hyperborea.core.SystemController
-import com.nettarion.hyperborea.core.UsbDeviceInfo
+import com.nettarion.hyperborea.core.adapter.AdapterState
+import com.nettarion.hyperborea.core.model.DeviceCommand
+import com.nettarion.hyperborea.core.model.DeviceType
+import com.nettarion.hyperborea.core.orchestration.FulfillResult
+import com.nettarion.hyperborea.core.system.SystemController
+import com.nettarion.hyperborea.core.system.UsbDeviceInfo
 import com.nettarion.hyperborea.core.test.buildSystemSnapshot
 import com.nettarion.hyperborea.hardware.fitpro.session.FakeAppLogger
 import com.nettarion.hyperborea.hardware.fitpro.session.FakeHidTransport
