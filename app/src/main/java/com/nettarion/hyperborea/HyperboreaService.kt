@@ -9,8 +9,10 @@ import android.os.IBinder
 import com.nettarion.hyperborea.core.AppLogger
 import com.nettarion.hyperborea.core.LicenseChecker
 import com.nettarion.hyperborea.core.LicenseState
+import com.nettarion.hyperborea.core.adapter.HardwareAdapter
 import com.nettarion.hyperborea.core.orchestration.Orchestrator
 import com.nettarion.hyperborea.core.orchestration.OrchestratorState
+import com.nettarion.hyperborea.overlay.OverlayManager
 import dagger.hilt.android.AndroidEntryPoint
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
@@ -23,16 +25,28 @@ import javax.inject.Inject
 class HyperboreaService : Service() {
 
     @Inject lateinit var orchestrator: Orchestrator
+    @Inject lateinit var hardwareAdapter: HardwareAdapter
     @Inject lateinit var logger: AppLogger
     @Inject lateinit var scope: CoroutineScope
     @Inject lateinit var licenseChecker: LicenseChecker
 
     private var stateObserverJob: Job? = null
+    private lateinit var overlayManager: OverlayManager
 
     override fun onCreate() {
         super.onCreate()
         @Suppress("DEPRECATION")
         startForeground(NOTIFICATION_ID, buildNotification("Starting…"))
+        overlayManager = OverlayManager(
+            context = this,
+            orchestrator = orchestrator,
+            hardwareAdapter = hardwareAdapter,
+            logger = logger,
+            scope = scope,
+            onPause = { pause() },
+            onResume = { resume() },
+            onStop = { deactivate(saveRide = true) },
+        )
         startStateObserver()
         logger.i(TAG, "Service created")
     }
@@ -45,6 +59,7 @@ class HyperboreaService : Service() {
             ACTION_DEACTIVATE_DISCARD -> deactivate(saveRide = false)
             ACTION_PAUSE -> pause()
             ACTION_RESUME -> resume()
+            ACTION_TOGGLE_OVERLAY -> overlayManager.toggle()
             ACTION_SHUTDOWN -> shutdown()
             else -> logger.i(TAG, "Started with no action — idle")
         }
@@ -54,6 +69,7 @@ class HyperboreaService : Service() {
     override fun onBind(intent: Intent?): IBinder? = null
 
     override fun onDestroy() {
+        overlayManager.destroy()
         stateObserverJob?.cancel()
         runBlocking {
             withTimeoutOrNull(STOP_TIMEOUT_MS) {
@@ -117,6 +133,7 @@ class HyperboreaService : Service() {
         stateObserverJob = scope.launch {
             orchestrator.state.collect { state ->
                 updateNotification(state)
+                overlayManager.onStateChanged(state)
             }
         }
     }
@@ -143,11 +160,18 @@ class HyperboreaService : Service() {
             this, 0, launchIntent, PendingIntent.FLAG_UPDATE_CURRENT,
         )
 
+        val overlayIntent = Intent(this, HyperboreaService::class.java).apply {
+            action = ACTION_TOGGLE_OVERLAY
+        }
+        val overlayPendingIntent = PendingIntent.getService(
+            this, 1, overlayIntent, PendingIntent.FLAG_UPDATE_CURRENT,
+        )
+
         val stopIntent = Intent(this, HyperboreaService::class.java).apply {
             action = ACTION_SHUTDOWN
         }
         val stopPendingIntent = PendingIntent.getService(
-            this, 1, stopIntent, PendingIntent.FLAG_UPDATE_CURRENT,
+            this, 2, stopIntent, PendingIntent.FLAG_UPDATE_CURRENT,
         )
 
         return Notification.Builder(this)
@@ -156,6 +180,11 @@ class HyperboreaService : Service() {
             .setContentText(contentText)
             .setContentIntent(contentIntent)
             .setOngoing(true)
+            .addAction(
+                Notification.Action.Builder(
+                    null, "Overlay", overlayPendingIntent,
+                ).build(),
+            )
             .addAction(
                 Notification.Action.Builder(
                     null, "Stop", stopPendingIntent,
@@ -171,6 +200,7 @@ class HyperboreaService : Service() {
         const val ACTION_DEACTIVATE_DISCARD = "com.nettarion.hyperborea.action.DEACTIVATE_DISCARD"
         const val ACTION_PAUSE = "com.nettarion.hyperborea.action.PAUSE"
         const val ACTION_RESUME = "com.nettarion.hyperborea.action.RESUME"
+        const val ACTION_TOGGLE_OVERLAY = "com.nettarion.hyperborea.action.TOGGLE_OVERLAY"
         const val ACTION_SHUTDOWN = "com.nettarion.hyperborea.action.SHUTDOWN"
 
         private const val NOTIFICATION_ID = 1

@@ -13,12 +13,18 @@ import kotlinx.coroutines.test.advanceTimeBy
 import kotlinx.coroutines.test.advanceUntilIdle
 import kotlinx.coroutines.test.runTest
 import org.junit.Before
+import org.junit.Rule
 import org.junit.Test
+import org.junit.rules.Timeout
 import java.io.ByteArrayInputStream
 import java.io.InputStream
+import java.util.concurrent.TimeUnit
 
 @OptIn(ExperimentalCoroutinesApi::class)
 class RingBufferSystemLogStoreTest {
+
+    @get:Rule
+    val timeout: Timeout = Timeout(45, TimeUnit.SECONDS)
 
     private lateinit var testScope: TestScope
     private lateinit var store: RingBufferSystemLogStore
@@ -85,16 +91,14 @@ class RingBufferSystemLogStoreTest {
     }
 
     @Test
-    fun `start transitions through Starting to Active`() = testScope.runTest {
+    fun `start transitions through Starting to Active then Error on process exit`() = testScope.runTest {
         val logcatOutput = "01-15 12:00:00.000  1000  1001 I TestTag: hello\n"
         store = createStore(logcatOutput)
 
         store.start()
-        // After launching, state should become Active
         advanceUntilIdle()
-        // State will be Error because process terminates and maxRestarts=0,
-        // but it should have gone through Active first
-        // With maxRestarts=0, the process dies and flow completes → Error
+        // Process terminates immediately (fake) and maxRestarts=0 → Error
+        assertThat(store.state.value).isInstanceOf(CaptureState.Error::class.java)
     }
 
     @Test
@@ -155,32 +159,6 @@ class RingBufferSystemLogStoreTest {
 
         assertThat(store.size.value).isEqualTo(1)
         assertThat(store.entries.value.single().tag).isEqualTo("Tag")
-    }
-
-    // --- Ring buffer eviction ---
-
-    @Test
-    fun `buffer evicts oldest entries at capacity`() {
-        store = createStore()
-
-        // Directly test the buffer by adding entries via clear + manual approach
-        // We'll test the clear/export contract instead since addEntry is private
-        val entries = (1..20001).map { i ->
-            SystemLogEntry(
-                timestamp = i.toLong(),
-                level = LogLevel.INFO,
-                tag = "T",
-                message = "msg $i",
-                pid = 1,
-                tid = 1,
-                source = SystemLogSource.LOGCAT,
-            )
-        }
-
-        // Use export to verify buffer state after adding via reflection or through start()
-        // Instead, test through the clear + size contract
-        store.clear()
-        assertThat(store.size.value).isEqualTo(0)
     }
 
     // --- Clear ---

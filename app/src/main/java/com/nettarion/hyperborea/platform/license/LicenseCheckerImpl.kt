@@ -6,15 +6,14 @@ import com.nettarion.hyperborea.core.AppLogger
 import com.nettarion.hyperborea.core.Ed25519Verifier
 import com.nettarion.hyperborea.core.LicenseChecker
 import com.nettarion.hyperborea.core.LicenseState
-import com.nettarion.hyperborea.core.LinkResult
+import com.nettarion.hyperborea.core.PairingSession
+import com.nettarion.hyperborea.core.PairingStatus
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.withContext
 import org.json.JSONObject
-import java.net.HttpURLConnection
-import java.net.URL
 import java.util.UUID
 import javax.inject.Inject
 import javax.inject.Singleton
@@ -23,30 +22,36 @@ import javax.inject.Singleton
 class LicenseCheckerImpl @Inject constructor(
     private val prefs: SharedPreferences,
     private val logger: AppLogger,
+    private val httpClient: LicenseHttpClient,
 ) : LicenseChecker {
 
     private val _state = MutableStateFlow<LicenseState>(LicenseState.Checking)
     override val state: StateFlow<LicenseState> = _state.asStateFlow()
 
     override suspend fun check() {
+        logger.d(TAG, "check() starting")
         _state.value = LicenseState.Checking
         val authToken = prefs.getString(KEY_AUTH_TOKEN, null)
         if (authToken == null) {
+            logger.d(TAG, "No auth token, setting Unlicensed")
             _state.value = LicenseState.Unlicensed
             return
         }
 
         try {
-            val response = withContext(Dispatchers.IO) {
-                fetchStatus(authToken)
+            logger.d(TAG, "Fetching status from server")
+            val responseBody = withContext(Dispatchers.IO) {
+                httpClient.fetchStatus(authToken)
             }
 
-            if (response == null) {
-                // Network error — check cache
+            if (responseBody == null) {
+                logger.w(TAG, "Server returned null, falling back to cache")
                 useCachedState()
                 return
             }
 
+            logger.d(TAG, "Got response: ${responseBody.take(200)}")
+            val response = JSONObject(responseBody)
             val payload = response.getString("payload")
             val signature = response.getString("signature")
 
@@ -56,7 +61,7 @@ class LicenseCheckerImpl @Inject constructor(
             val valid = Ed25519Verifier.verify(payload.toByteArray(), sigBytes, publicKey)
 
             if (!valid) {
-                logger.w(TAG, "License response signature verification failed")
+                logger.w(TAG, "Signature verification failed")
                 _state.value = LicenseState.Unlicensed
                 return
             }
@@ -66,12 +71,16 @@ class LicenseCheckerImpl @Inject constructor(
             val expiresAt = payloadJson.getString("expiresAt")
             val expiresAtMillis = parseIso8601(expiresAt)
 
+            logger.d(TAG, "active=$active expiresAtMillis=$expiresAtMillis now=${System.currentTimeMillis()}")
+
             if (active && expiresAtMillis > System.currentTimeMillis()) {
                 prefs.edit().putLong(KEY_CACHED_EXPIRES_AT, expiresAtMillis).apply()
                 _state.value = LicenseState.Licensed(expiresAtMillis)
+                logger.i(TAG, "Licensed until $expiresAtMillis")
             } else {
                 prefs.edit().remove(KEY_CACHED_EXPIRES_AT).apply()
                 _state.value = LicenseState.Unlicensed
+                logger.w(TAG, "Not active or expired")
             }
         } catch (e: Exception) {
             logger.e(TAG, "License check failed", e)
@@ -79,75 +88,75 @@ class LicenseCheckerImpl @Inject constructor(
         }
     }
 
-    override suspend fun linkWithCode(code: String): LinkResult {
-        return link(mapOf("deviceUuid" to getDeviceUuid(), "code" to code))
-    }
-
-    override suspend fun linkWithQrToken(qrToken: String): LinkResult {
-        return link(mapOf("deviceUuid" to getDeviceUuid(), "qrToken" to qrToken))
-    }
-
-    private suspend fun link(body: Map<String, String>): LinkResult {
+    override suspend fun requestPairing(): PairingSession {
         return try {
-            val result = withContext(Dispatchers.IO) {
-                postLink(body)
+            val responseBody = withContext(Dispatchers.IO) {
+                httpClient.requestPairing(getDeviceUuid())
             }
-            if (result != null) {
-                prefs.edit().putString(KEY_AUTH_TOKEN, result).apply()
-                check()
-                LinkResult.Success(result)
+            if (responseBody != null) {
+                val json = JSONObject(responseBody)
+                val pairingToken = json.getString("pairingToken")
+                val pairingCode = json.getString("pairingCode")
+                val expiresAt = json.getLong("expiresAt")
+                _state.value = LicenseState.Pairing(pairingToken, pairingCode, expiresAt)
+                PairingSession.Created(pairingToken, pairingCode, expiresAt)
             } else {
-                LinkResult.Error("Invalid or expired code")
+                PairingSession.Error("Failed to create pairing request")
             }
         } catch (e: Exception) {
-            logger.e(TAG, "Device linking failed", e)
-            LinkResult.Error(e.message ?: "Unknown error")
+            logger.e(TAG, "Pairing request failed", e)
+            PairingSession.Error(e.message ?: "Unknown error")
         }
     }
 
-    private fun fetchStatus(authToken: String): JSONObject? {
-        val url = URL("${BuildConfig.SERVER_URL}/api/device/status")
-        val connection = url.openConnection() as HttpURLConnection
-        try {
-            connection.connectTimeout = TIMEOUT_MS
-            connection.readTimeout = TIMEOUT_MS
-            connection.requestMethod = "GET"
-            connection.setRequestProperty("Authorization", "Bearer $authToken")
-
-            if (connection.responseCode != HttpURLConnection.HTTP_OK) {
-                logger.w(TAG, "Status check returned HTTP ${connection.responseCode}")
-                return null
+    override suspend fun pollPairing(pairingToken: String): PairingStatus {
+        return try {
+            val responseBody = withContext(Dispatchers.IO) {
+                httpClient.pollPairingStatus(pairingToken)
             }
-
-            val responseBody = connection.inputStream.bufferedReader().use { it.readText() }
-            return JSONObject(responseBody)
-        } finally {
-            connection.disconnect()
+            if (responseBody == null) {
+                return PairingStatus.Error("Network error")
+            }
+            val json = JSONObject(responseBody)
+            val status = json.getString("status")
+            when (status) {
+                "pending" -> PairingStatus.Pending
+                "linked" -> {
+                    val authToken = json.getString("authToken")
+                    prefs.edit().putString(KEY_AUTH_TOKEN, authToken).apply()
+                    check()
+                    PairingStatus.Linked(authToken)
+                }
+                "expired" -> {
+                    _state.value = LicenseState.Unlicensed
+                    PairingStatus.Expired
+                }
+                else -> PairingStatus.Error("Unknown status: $status")
+            }
+        } catch (e: Exception) {
+            logger.e(TAG, "Pairing poll failed", e)
+            PairingStatus.Error(e.message ?: "Unknown error")
         }
     }
 
-    private fun postLink(body: Map<String, String>): String? {
-        val url = URL("${BuildConfig.SERVER_URL}/api/device/link")
-        val connection = url.openConnection() as HttpURLConnection
-        try {
-            connection.connectTimeout = TIMEOUT_MS
-            connection.readTimeout = TIMEOUT_MS
-            connection.requestMethod = "POST"
-            connection.setRequestProperty("Content-Type", "application/json")
-            connection.doOutput = true
+    override suspend fun unlink() {
+        val authToken = prefs.getString(KEY_AUTH_TOKEN, null)
+        // Clear local credentials first so the device is unlicensed even if the server call fails
+        prefs.edit()
+            .remove(KEY_AUTH_TOKEN)
+            .remove(KEY_CACHED_EXPIRES_AT)
+            .apply()
+        _state.value = LicenseState.Unlicensed
+        logger.i(TAG, "Device unlinked locally")
 
-            val json = JSONObject(body).toString()
-            connection.outputStream.bufferedWriter().use { it.write(json) }
-
-            if (connection.responseCode != HttpURLConnection.HTTP_OK) {
-                logger.w(TAG, "Link returned HTTP ${connection.responseCode}")
-                return null
+        if (authToken != null) {
+            try {
+                withContext(Dispatchers.IO) {
+                    httpClient.unlink(authToken)
+                }
+            } catch (e: Exception) {
+                logger.w(TAG, "Server unlink failed (device already unlinked locally): ${e.message}")
             }
-
-            val responseBody = connection.inputStream.bufferedReader().use { it.readText() }
-            return JSONObject(responseBody).getString("authToken")
-        } finally {
-            connection.disconnect()
         }
     }
 
@@ -195,6 +204,5 @@ class LicenseCheckerImpl @Inject constructor(
         private const val KEY_AUTH_TOKEN = "license_auth_token"
         private const val KEY_DEVICE_UUID = "license_device_uuid"
         private const val KEY_CACHED_EXPIRES_AT = "license_cached_expires_at"
-        private const val TIMEOUT_MS = 15_000
     }
 }

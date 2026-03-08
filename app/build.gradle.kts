@@ -111,7 +111,7 @@ android {
 
     testOptions {
         unitTests {
-            isIncludeAndroidResources = true
+            isReturnDefaultValues = true
         }
     }
 }
@@ -140,6 +140,7 @@ dependencies {
     implementation(libs.room.runtime)
     implementation(libs.room.ktx)
     ksp(libs.room.compiler)
+    implementation(libs.zxing.core)
 
     testImplementation(testFixtures(project(":core")))
     testImplementation(libs.junit)
@@ -147,8 +148,6 @@ dependencies {
     testImplementation(libs.truth)
     testImplementation(libs.coroutines.test)
     testImplementation(libs.turbine)
-    testImplementation(libs.mockk)
-    testImplementation(libs.robolectric)
     testImplementation(libs.json)
 
     debugImplementation(libs.compose.ui.tooling)

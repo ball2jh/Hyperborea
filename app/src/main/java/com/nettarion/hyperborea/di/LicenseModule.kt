@@ -3,7 +3,9 @@ package com.nettarion.hyperborea.di
 import android.content.Context
 import android.content.SharedPreferences
 import com.nettarion.hyperborea.core.LicenseChecker
+import com.nettarion.hyperborea.platform.license.HttpUrlConnectionLicenseClient
 import com.nettarion.hyperborea.platform.license.LicenseCheckerImpl
+import com.nettarion.hyperborea.platform.license.LicenseHttpClient
 import dagger.Binds
 import dagger.Module
 import dagger.Provides
@@ -19,6 +21,10 @@ abstract class LicenseModule {
     @Binds
     @Singleton
     abstract fun bindLicenseChecker(impl: LicenseCheckerImpl): LicenseChecker
+
+    @Binds
+    @Singleton
+    abstract fun bindLicenseHttpClient(impl: HttpUrlConnectionLicenseClient): LicenseHttpClient
 
     companion object {
         @Provides
