@@ -3,11 +3,10 @@ package com.nettarion.hyperborea.broadcast.ftms
 import android.bluetooth.BluetoothGattCharacteristic
 import android.bluetooth.BluetoothGattDescriptor
 import android.bluetooth.BluetoothGattService
-import com.nettarion.hyperborea.core.ByteUtils.sint16LE
-import com.nettarion.hyperborea.core.ByteUtils.uint16LE
 import com.nettarion.hyperborea.core.DeviceInfo
 import com.nettarion.hyperborea.core.DeviceType
 import com.nettarion.hyperborea.core.FtmsDataEncoder
+import com.nettarion.hyperborea.core.FtmsServiceMetadata
 import java.util.UUID
 
 object FtmsServiceBuilder {
@@ -17,30 +16,25 @@ object FtmsServiceBuilder {
         UUID.fromString(String.format("0000%04X-0000-1000-8000-00805F9B34FB", shortUuid))
 
     // Service UUIDs
-    val FTMS_SERVICE_UUID: UUID = bleUuid(0x1826)
-    val CPS_SERVICE_UUID: UUID = bleUuid(0x1818)
+    val FTMS_SERVICE_UUID: UUID = bleUuid(FtmsServiceMetadata.FTMS_SERVICE)
+    val CPS_SERVICE_UUID: UUID = bleUuid(FtmsServiceMetadata.CPS_SERVICE)
 
     // FTMS characteristic UUIDs
-    val FTMS_FEATURE_UUID: UUID = bleUuid(0x2ACC)
-    val SUPPORTED_RESISTANCE_UUID: UUID = bleUuid(0x2AD6)
-    val SUPPORTED_INCLINATION_UUID: UUID = bleUuid(0x2AD5)
-    val SUPPORTED_POWER_UUID: UUID = bleUuid(0x2AD7)
-    val FTMS_CONTROL_POINT_UUID: UUID = bleUuid(0x2AD9)
-    val TRAINING_STATUS_UUID: UUID = bleUuid(0x2AD3)
-    val FITNESS_MACHINE_STATUS_UUID: UUID = bleUuid(0x2ADA)
+    val FTMS_FEATURE_UUID: UUID = bleUuid(FtmsServiceMetadata.FTMS_FEATURE)
+    val SUPPORTED_RESISTANCE_UUID: UUID = bleUuid(FtmsServiceMetadata.SUPPORTED_RESISTANCE)
+    val SUPPORTED_INCLINATION_UUID: UUID = bleUuid(FtmsServiceMetadata.SUPPORTED_INCLINATION)
+    val SUPPORTED_POWER_UUID: UUID = bleUuid(FtmsServiceMetadata.SUPPORTED_POWER)
+    val FTMS_CONTROL_POINT_UUID: UUID = bleUuid(FtmsServiceMetadata.FTMS_CONTROL_POINT)
+    val TRAINING_STATUS_UUID: UUID = bleUuid(FtmsServiceMetadata.TRAINING_STATUS)
+    val FITNESS_MACHINE_STATUS_UUID: UUID = bleUuid(FtmsServiceMetadata.FITNESS_MACHINE_STATUS)
 
     // CPS characteristic UUIDs
-    val CPS_FEATURE_UUID: UUID = bleUuid(0x2A65)
-    val SENSOR_LOCATION_UUID: UUID = bleUuid(0x2A5D)
-    val CPS_MEASUREMENT_UUID: UUID = bleUuid(0x2A63)
+    val CPS_FEATURE_UUID: UUID = bleUuid(FtmsServiceMetadata.CPS_FEATURE)
+    val SENSOR_LOCATION_UUID: UUID = bleUuid(FtmsServiceMetadata.SENSOR_LOCATION)
+    val CPS_MEASUREMENT_UUID: UUID = bleUuid(FtmsServiceMetadata.CPS_MEASUREMENT)
 
     // CCCD
-    val CCCD_UUID: UUID = bleUuid(0x2902)
-
-    // Static read values
-    val TRAINING_STATUS_VALUE = byteArrayOf(0x00, 0x01)
-    val CPS_FEATURE_VALUE = byteArrayOf(0x0C, 0x00, 0x00, 0x00)
-    val SENSOR_LOCATION_VALUE = byteArrayOf(0x0D)
+    val CCCD_UUID: UUID = bleUuid(FtmsServiceMetadata.CCCD)
 
     // Default CCCD value (notifications/indications disabled)
     val CCCD_DISABLED = byteArrayOf(0x00, 0x00)
@@ -48,25 +42,11 @@ object FtmsServiceBuilder {
     fun dataCharacteristicUuid(deviceType: DeviceType): UUID =
         bleUuid(FtmsDataEncoder.dataCharacteristicShortUuid(deviceType))
 
-    // Both BLE and WFTNP paths advertise the same feature set.
-    fun ftmsFeatureValue(deviceType: DeviceType): ByteArray = when (deviceType) {
-        DeviceType.BIKE -> byteArrayOf(
-            0x8F.toByte(), 0x56, 0x00, 0x00, 0x0E, 0xE0.toByte(), 0x00, 0x00,
-        )
-        DeviceType.TREADMILL -> TODO("Treadmill FTMS feature value")
-        DeviceType.ROWER -> TODO("Rower FTMS feature value")
-        DeviceType.ELLIPTICAL -> TODO("Cross Trainer FTMS feature value")
-    }
+    fun ftmsFeatureValue(deviceType: DeviceType): ByteArray =
+        FtmsServiceMetadata.ftmsFeatureValue(deviceType)
 
-    // Service Data AD Type (Section 3.1): Flags + Fitness Machine Type
-    // Flags: bit 0 = Fitness Machine Available (1 = true)
-    // Machine Type bits: 0=Treadmill, 1=Cross Trainer, 4=Rower, 5=Indoor Bike
-    fun serviceDataAdValue(deviceType: DeviceType): ByteArray = when (deviceType) {
-        DeviceType.BIKE -> byteArrayOf(0x01, 0x20, 0x00)       // bit 5
-        DeviceType.TREADMILL -> byteArrayOf(0x01, 0x01, 0x00)  // bit 0
-        DeviceType.ROWER -> byteArrayOf(0x01, 0x10, 0x00)      // bit 4
-        DeviceType.ELLIPTICAL -> byteArrayOf(0x01, 0x02, 0x00) // bit 1
-    }
+    fun serviceDataAdValue(deviceType: DeviceType): ByteArray =
+        FtmsServiceMetadata.serviceDataAdValue(deviceType)
 
     fun buildFtmsService(deviceType: DeviceType): BluetoothGattService {
         val service = BluetoothGattService(
@@ -138,22 +118,22 @@ object FtmsServiceBuilder {
     }
 
     fun resistanceRangeValue(info: DeviceInfo): ByteArray =
-        sint16LE(info.minResistance * 10) + sint16LE(info.maxResistance * 10) + uint16LE(10)
+        FtmsServiceMetadata.resistanceRangeValue(info)
 
     fun inclinationRangeValue(info: DeviceInfo): ByteArray =
-        sint16LE((info.minIncline * 10).toInt()) + sint16LE((info.maxIncline * 10).toInt()) + uint16LE(5)
+        FtmsServiceMetadata.inclinationRangeValue(info)
 
     fun powerRangeValue(info: DeviceInfo): ByteArray =
-        sint16LE(0) + sint16LE(info.maxPower) + uint16LE(1)
+        FtmsServiceMetadata.powerRangeValue(info)
 
     fun staticValueFor(charUuid: UUID, deviceInfo: DeviceInfo): ByteArray? = when (charUuid) {
-        FTMS_FEATURE_UUID -> ftmsFeatureValue(deviceInfo.type)
-        SUPPORTED_RESISTANCE_UUID -> resistanceRangeValue(deviceInfo)
-        SUPPORTED_INCLINATION_UUID -> inclinationRangeValue(deviceInfo)
-        SUPPORTED_POWER_UUID -> powerRangeValue(deviceInfo)
-        TRAINING_STATUS_UUID -> TRAINING_STATUS_VALUE.copyOf()
-        CPS_FEATURE_UUID -> CPS_FEATURE_VALUE.copyOf()
-        SENSOR_LOCATION_UUID -> SENSOR_LOCATION_VALUE.copyOf()
+        FTMS_FEATURE_UUID -> FtmsServiceMetadata.ftmsFeatureValue(deviceInfo.type)
+        SUPPORTED_RESISTANCE_UUID -> FtmsServiceMetadata.resistanceRangeValue(deviceInfo)
+        SUPPORTED_INCLINATION_UUID -> FtmsServiceMetadata.inclinationRangeValue(deviceInfo)
+        SUPPORTED_POWER_UUID -> FtmsServiceMetadata.powerRangeValue(deviceInfo)
+        TRAINING_STATUS_UUID -> FtmsServiceMetadata.TRAINING_STATUS_VALUE.copyOf()
+        CPS_FEATURE_UUID -> FtmsServiceMetadata.CPS_FEATURE_VALUE.copyOf()
+        SENSOR_LOCATION_UUID -> FtmsServiceMetadata.SENSOR_LOCATION_VALUE.copyOf()
         else -> null
     }
 

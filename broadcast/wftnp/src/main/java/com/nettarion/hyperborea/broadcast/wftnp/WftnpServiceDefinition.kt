@@ -1,33 +1,18 @@
 package com.nettarion.hyperborea.broadcast.wftnp
 
-import com.nettarion.hyperborea.core.ByteUtils.sint16LE
-import com.nettarion.hyperborea.core.ByteUtils.uint16LE
 import com.nettarion.hyperborea.core.DeviceInfo
-import com.nettarion.hyperborea.core.DeviceType
 import com.nettarion.hyperborea.core.FtmsDataEncoder
+import com.nettarion.hyperborea.core.FtmsServiceMetadata
 
 class WftnpServiceDefinition(deviceInfo: DeviceInfo) {
 
     val dataCharacteristic = ShortUuid(FtmsDataEncoder.dataCharacteristicShortUuid(deviceInfo.type))
 
-    // Same feature set as BLE (FtmsServiceBuilder.ftmsFeatureValue).
-    val ftmsFeatureValue: ByteArray = when (deviceInfo.type) {
-        DeviceType.BIKE -> byteArrayOf(
-            0x8F.toByte(), 0x56, 0x00, 0x00, 0x0E, 0xE0.toByte(), 0x00, 0x00,
-        )
-        DeviceType.TREADMILL -> TODO("Treadmill WFTNP feature value")
-        DeviceType.ROWER -> TODO("Rower WFTNP feature value")
-        DeviceType.ELLIPTICAL -> TODO("Cross Trainer WFTNP feature value")
-    }
+    val ftmsFeatureValue: ByteArray = FtmsServiceMetadata.ftmsFeatureValue(deviceInfo.type)
 
-    private val resistanceRangeValue: ByteArray =
-        sint16LE(deviceInfo.minResistance * 10) + sint16LE(deviceInfo.maxResistance * 10) + uint16LE(10)
-
-    private val inclinationRangeValue: ByteArray =
-        sint16LE((deviceInfo.minIncline * 10).toInt()) + sint16LE((deviceInfo.maxIncline * 10).toInt()) + uint16LE(5)
-
-    private val powerRangeValue: ByteArray =
-        sint16LE(0) + sint16LE(deviceInfo.maxPower) + uint16LE(1)
+    private val resistanceRangeValue: ByteArray = FtmsServiceMetadata.resistanceRangeValue(deviceInfo)
+    private val inclinationRangeValue: ByteArray = FtmsServiceMetadata.inclinationRangeValue(deviceInfo)
+    private val powerRangeValue: ByteArray = FtmsServiceMetadata.powerRangeValue(deviceInfo)
 
     private val ftmsChars = listOf(
         CharDef(FTMS_FEATURE, PROP_READ, ftmsFeatureValue),
@@ -37,12 +22,12 @@ class WftnpServiceDefinition(deviceInfo: DeviceInfo) {
         CharDef(FTMS_CONTROL_POINT, (PROP_WRITE.toInt() or PROP_INDICATE.toInt()).toByte(), null),
         CharDef(WAHOO_CONTROL, PROP_WRITE, null),
         CharDef(dataCharacteristic, PROP_NOTIFY, null),
-        CharDef(TRAINING_STATUS, PROP_READ, TRAINING_STATUS_VALUE),
+        CharDef(TRAINING_STATUS, PROP_READ, FtmsServiceMetadata.TRAINING_STATUS_VALUE),
     )
 
     private val cpsChars = listOf(
-        CharDef(CPS_FEATURE, PROP_READ, CPS_FEATURE_VALUE),
-        CharDef(SENSOR_LOCATION, PROP_READ, SENSOR_LOCATION_VALUE),
+        CharDef(CPS_FEATURE, PROP_READ, FtmsServiceMetadata.CPS_FEATURE_VALUE),
+        CharDef(SENSOR_LOCATION, PROP_READ, FtmsServiceMetadata.SENSOR_LOCATION_VALUE),
         CharDef(CPS_MEASUREMENT, PROP_NOTIFY, null),
     )
 
@@ -81,28 +66,23 @@ class WftnpServiceDefinition(deviceInfo: DeviceInfo) {
         const val PROP_NOTIFY: Byte = 0x04
         const val PROP_INDICATE: Byte = 0x08
 
-        // Services
-        val FTMS_SERVICE = ShortUuid(0x1826)
-        val CPS_SERVICE = ShortUuid(0x1818)
+        // Services — derived from FtmsServiceMetadata
+        val FTMS_SERVICE = ShortUuid(FtmsServiceMetadata.FTMS_SERVICE)
+        val CPS_SERVICE = ShortUuid(FtmsServiceMetadata.CPS_SERVICE)
 
         // FTMS characteristics
-        val FTMS_FEATURE = ShortUuid(0x2ACC)
-        val SUPPORTED_RESISTANCE = ShortUuid(0x2AD6)
-        val SUPPORTED_INCLINATION = ShortUuid(0x2AD5)
-        val SUPPORTED_POWER = ShortUuid(0x2AD7)
-        val FTMS_CONTROL_POINT = ShortUuid(0x2AD9)
-        val WAHOO_CONTROL = ShortUuid(0xE005)
-        val TRAINING_STATUS = ShortUuid(0x2AD3)
+        val FTMS_FEATURE = ShortUuid(FtmsServiceMetadata.FTMS_FEATURE)
+        val SUPPORTED_RESISTANCE = ShortUuid(FtmsServiceMetadata.SUPPORTED_RESISTANCE)
+        val SUPPORTED_INCLINATION = ShortUuid(FtmsServiceMetadata.SUPPORTED_INCLINATION)
+        val SUPPORTED_POWER = ShortUuid(FtmsServiceMetadata.SUPPORTED_POWER)
+        val FTMS_CONTROL_POINT = ShortUuid(FtmsServiceMetadata.FTMS_CONTROL_POINT)
+        val WAHOO_CONTROL = ShortUuid(FtmsServiceMetadata.WAHOO_CONTROL)
+        val TRAINING_STATUS = ShortUuid(FtmsServiceMetadata.TRAINING_STATUS)
 
         // CPS characteristics
-        val CPS_FEATURE = ShortUuid(0x2A65)
-        val SENSOR_LOCATION = ShortUuid(0x2A5D)
-        val CPS_MEASUREMENT = ShortUuid(0x2A63)
-
-        // Static read values (device-independent)
-        val TRAINING_STATUS_VALUE = byteArrayOf(0x00, 0x01)
-        val CPS_FEATURE_VALUE = byteArrayOf(0x0C, 0x00, 0x00, 0x00)
-        val SENSOR_LOCATION_VALUE = byteArrayOf(0x0D)
+        val CPS_FEATURE = ShortUuid(FtmsServiceMetadata.CPS_FEATURE)
+        val SENSOR_LOCATION = ShortUuid(FtmsServiceMetadata.SENSOR_LOCATION)
+        val CPS_MEASUREMENT = ShortUuid(FtmsServiceMetadata.CPS_MEASUREMENT)
 
         val services: List<ShortUuid> = listOf(FTMS_SERVICE, CPS_SERVICE)
     }
