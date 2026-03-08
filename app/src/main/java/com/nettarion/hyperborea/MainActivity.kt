@@ -9,6 +9,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import com.nettarion.hyperborea.ui.AppScreen
+import com.nettarion.hyperborea.ui.activation.ActivationScreen
 import com.nettarion.hyperborea.ui.dashboard.DashboardScreen
 import com.nettarion.hyperborea.ui.profile.ProfileEditScreen
 import com.nettarion.hyperborea.ui.profile.ProfilePickerScreen
@@ -27,6 +28,9 @@ class MainActivity : ComponentActivity() {
                 var currentScreen by remember { mutableStateOf<AppScreen>(AppScreen.ProfilePicker) }
 
                 when (val screen = currentScreen) {
+                    is AppScreen.Activation -> ActivationScreen(
+                        onActivated = { currentScreen = AppScreen.ProfilePicker },
+                    )
                     is AppScreen.ProfilePicker -> ProfilePickerScreen(
                         onProfileSelected = { currentScreen = AppScreen.Dashboard },
                         onCreateProfile = { currentScreen = AppScreen.ProfileEdit(null) },
