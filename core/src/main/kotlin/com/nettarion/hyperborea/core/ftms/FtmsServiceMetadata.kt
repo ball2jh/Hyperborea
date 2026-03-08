@@ -41,9 +41,15 @@ object FtmsServiceMetadata {
         DeviceType.BIKE -> byteArrayOf(
             0x8F.toByte(), 0x56, 0x00, 0x00, 0x0E, 0xE0.toByte(), 0x00, 0x00,
         )
-        DeviceType.TREADMILL -> TODO("Treadmill FTMS feature value")
-        DeviceType.ROWER -> TODO("Rower FTMS feature value")
-        DeviceType.ELLIPTICAL -> TODO("Cross Trainer FTMS feature value")
+        DeviceType.TREADMILL -> byteArrayOf(
+            0x0D, 0xD6.toByte(), 0x00, 0x00, 0x0A, 0x00, 0x00, 0x00,
+        )
+        DeviceType.ROWER -> byteArrayOf(
+            0x87.toByte(), 0x56, 0x00, 0x00, 0x0C, 0x00, 0x00, 0x00,
+        )
+        DeviceType.ELLIPTICAL -> byteArrayOf(
+            0x8F.toByte(), 0x56, 0x00, 0x00, 0x0E, 0x00, 0x00, 0x00,
+        )
     }
 
     // Service Data AD Type (Section 3.1): Flags + Fitness Machine Type
@@ -55,11 +61,11 @@ object FtmsServiceMetadata {
     }
 
     fun resistanceRangeValue(info: DeviceInfo): ByteArray =
-        sint16LE(info.minResistance * 10) + sint16LE(info.maxResistance * 10) + uint16LE(10)
+        sint16LE(info.minResistance * 10) + sint16LE(info.maxResistance * 10) + uint16LE((info.resistanceStep * 10).toInt())
 
     fun inclinationRangeValue(info: DeviceInfo): ByteArray =
-        sint16LE((info.minIncline * 10).toInt()) + sint16LE((info.maxIncline * 10).toInt()) + uint16LE(5)
+        sint16LE((info.minIncline * 10).toInt()) + sint16LE((info.maxIncline * 10).toInt()) + uint16LE((info.inclineStep * 10).toInt())
 
     fun powerRangeValue(info: DeviceInfo): ByteArray =
-        sint16LE(0) + sint16LE(info.maxPower) + uint16LE(1)
+        sint16LE(info.minPower) + sint16LE(info.maxPower) + uint16LE(info.powerStep)
 }

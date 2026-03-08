@@ -10,25 +10,18 @@ import com.nettarion.hyperborea.core.adapter.BroadcastAdapter
 import com.nettarion.hyperborea.core.adapter.BroadcastId
 import com.nettarion.hyperborea.core.model.ClientInfo
 import com.nettarion.hyperborea.core.adapter.HardwareAdapter
-import com.nettarion.hyperborea.core.LicenseChecker
-import com.nettarion.hyperborea.core.LicenseState
-import com.nettarion.hyperborea.core.PairingSession
-import com.nettarion.hyperborea.core.PairingStatus
 import com.nettarion.hyperborea.core.orchestration.Orchestrator
 import com.nettarion.hyperborea.core.profile.ProfileRepository
 import com.nettarion.hyperborea.core.system.SystemMonitor
 import com.nettarion.hyperborea.core.profile.UserPreferences
 import dagger.hilt.android.lifecycle.HiltViewModel
 import dagger.hilt.android.qualifiers.ApplicationContext
-import kotlinx.coroutines.Job
-import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
-import kotlinx.coroutines.launch
 import javax.inject.Inject
 
 @HiltViewModel
@@ -39,22 +32,8 @@ class DashboardViewModel @Inject constructor(
     private val systemMonitor: SystemMonitor,
     private val userPreferences: UserPreferences,
     private val profileRepository: ProfileRepository,
-    private val licenseChecker: LicenseChecker,
     @param:ApplicationContext private val context: Context,
 ) : ViewModel() {
-
-    val licenseState: StateFlow<LicenseState> = licenseChecker.state
-        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), LicenseState.Checking)
-
-    init {
-        // Periodic license re-check every 4 hours
-        viewModelScope.launch {
-            while (true) {
-                delay(LICENSE_RECHECK_INTERVAL_MS)
-                licenseChecker.check()
-            }
-        }
-    }
 
     private val broadcastsFlow: Flow<List<BroadcastUiState>> = combine(
         buildList<Flow<*>> {
@@ -147,55 +126,5 @@ class DashboardViewModel @Inject constructor(
 
     fun toggleBroadcast(id: BroadcastId, enabled: Boolean) {
         userPreferences.setBroadcastEnabled(id, enabled)
-    }
-
-    private var pollingJob: Job? = null
-
-    fun requestPairing() {
-        viewModelScope.launch {
-            val result = licenseChecker.requestPairing()
-            if (result is PairingSession.Created) {
-                startPolling(result.pairingToken, result.expiresAt)
-            }
-        }
-    }
-
-    private fun startPolling(token: String, expiresAt: Long) {
-        pollingJob?.cancel()
-        pollingJob = viewModelScope.launch {
-            while (System.currentTimeMillis() < expiresAt) {
-                delay(3000)
-                when (licenseChecker.pollPairing(token)) {
-                    is PairingStatus.Linked -> break
-                    is PairingStatus.Expired -> break
-                    is PairingStatus.Error -> break
-                    is PairingStatus.Pending -> continue
-                }
-            }
-        }
-    }
-
-    fun unlinkDevice() {
-        viewModelScope.launch {
-            // Stop broadcasting before unlinking
-            val intent = Intent(context, HyperboreaService::class.java).apply {
-                action = HyperboreaService.ACTION_DEACTIVATE_DISCARD
-            }
-            context.startService(intent)
-            licenseChecker.unlink()
-        }
-    }
-
-    fun cancelPairing() {
-        pollingJob?.cancel()
-        pollingJob = null
-        viewModelScope.launch {
-            // Reset to unlicensed state — re-check will pick up the right state
-            licenseChecker.check()
-        }
-    }
-
-    companion object {
-        private const val LICENSE_RECHECK_INTERVAL_MS = 4 * 60 * 60 * 1000L // 4 hours
     }
 }

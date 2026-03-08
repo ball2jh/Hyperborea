@@ -2,8 +2,11 @@ package com.nettarion.hyperborea.ui.admin
 
 import android.content.Context
 import android.content.Intent
+import android.content.SharedPreferences
 import android.os.Environment
 import androidx.lifecycle.ViewModel
+import androidx.lifecycle.viewModelScope
+import com.nettarion.hyperborea.BuildConfig
 import com.nettarion.hyperborea.core.adapter.AdapterState
 import com.nettarion.hyperborea.core.AppLogger
 import com.nettarion.hyperborea.core.adapter.BroadcastAdapter
@@ -19,15 +22,20 @@ import com.nettarion.hyperborea.core.system.SystemLogStore
 import com.nettarion.hyperborea.core.system.SystemMonitor
 import com.nettarion.hyperborea.core.system.SystemSnapshot
 import com.nettarion.hyperborea.core.profile.UserPreferences
+import com.nettarion.hyperborea.platform.support.SupportHttpClient
 import com.nettarion.hyperborea.platform.update.TrackState
 import com.nettarion.hyperborea.platform.update.UpdateManager
 import dagger.hilt.android.lifecycle.HiltViewModel
 import dagger.hilt.android.qualifiers.ApplicationContext
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.launch
+import org.json.JSONArray
+import org.json.JSONObject
 import java.io.File
 import java.text.SimpleDateFormat
 import java.util.Date
@@ -43,6 +51,8 @@ class AdminViewModel @Inject constructor(
     private val broadcastAdapters: Set<@JvmSuppressWildcards BroadcastAdapter>,
     private val updateManager: UpdateManager,
     private val userPreferences: UserPreferences,
+    private val supportHttpClient: SupportHttpClient,
+    private val licensePreferences: SharedPreferences,
     private val logger: AppLogger,
     @param:ApplicationContext private val context: Context,
 ) : ViewModel() {
@@ -74,6 +84,9 @@ class AdminViewModel @Inject constructor(
 
     private val _exportResult = MutableStateFlow<ExportResult?>(null)
     val exportResult: StateFlow<ExportResult?> = _exportResult.asStateFlow()
+
+    private val _supportUploadState = MutableStateFlow<SupportUploadState>(SupportUploadState.Idle)
+    val supportUploadState: StateFlow<SupportUploadState> = _supportUploadState.asStateFlow()
 
     fun clearLogs() = logStore.clear()
     fun clearSystemLogs() = systemLogStore.clear()
@@ -151,9 +164,105 @@ class AdminViewModel @Inject constructor(
     fun toggleBroadcast(id: BroadcastId, enabled: Boolean) =
         userPreferences.setBroadcastEnabled(id, enabled)
 
+    fun uploadSupport() {
+        if (_supportUploadState.value is SupportUploadState.Uploading) return
+        _supportUploadState.value = SupportUploadState.Uploading
+
+        viewModelScope.launch(Dispatchers.IO) {
+            try {
+                val deviceUuid = licensePreferences.getString("license_device_uuid", null)
+                val authToken = licensePreferences.getString("license_auth_token", null)
+
+                if (authToken.isNullOrEmpty()) {
+                    _supportUploadState.value = SupportUploadState.Error("Device not linked")
+                    return@launch
+                }
+
+                val snapshot = systemMonitor.snapshot.value
+                val identity = hardwareAdapter.deviceIdentity.value
+
+                val diagnostics = JSONObject().apply {
+                    // Device identity
+                    identity?.let {
+                        put("serialNumber", it.serialNumber ?: JSONObject.NULL)
+                        put("firmwareVersion", it.firmwareVersion ?: JSONObject.NULL)
+                        put("hardwareVersion", it.hardwareVersion ?: JSONObject.NULL)
+                        put("model", it.model ?: JSONObject.NULL)
+                    }
+                    // System status
+                    val status = snapshot.status
+                    put("bleAdvertisingSupported", status.isBluetoothLeAdvertisingSupported)
+                    put("bleEnabled", status.isBluetoothLeEnabled)
+                    put("wifiEnabled", status.isWifiEnabled)
+                    put("usbHostAvailable", status.isUsbHostAvailable)
+                    put("adbEnabled", status.isAdbEnabled)
+                    put("rootAvailable", status.isRootAvailable)
+                    // USB devices
+                    put("usbDevices", JSONArray().apply {
+                        snapshot.usbDevices.forEach { device ->
+                            put(JSONObject().apply {
+                                put("vendorId", "%04X".format(device.vendorId))
+                                put("productId", "%04X".format(device.productId))
+                                put("productName", device.productName ?: JSONObject.NULL)
+                            })
+                        }
+                    })
+                    // Broadcast adapters
+                    put("broadcastAdapters", JSONArray().apply {
+                        broadcastAdapters.sortedBy { it.id.ordinal }.forEach { adapter ->
+                            put(JSONObject().apply {
+                                put("id", adapter.id.name)
+                                put("state", adapter.state.value.javaClass.simpleName)
+                                put("clientCount", adapter.connectedClients.value.size)
+                            })
+                        }
+                    })
+                    // Components summary
+                    put("componentCount", snapshot.components.size)
+                }
+
+                val json = JSONObject().apply {
+                    put("deviceUuid", deviceUuid ?: JSONObject.NULL)
+                    put("appVersion", BuildConfig.VERSION_NAME)
+                    put("timestamp", SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss'Z'", Locale.US).format(Date()))
+                    put("appLogs", logStore.export())
+                    put("systemLogs", systemLogStore.export())
+                    put("diagnostics", diagnostics)
+                }
+
+                val response = supportHttpClient.upload(authToken, json.toString())
+                if (response == null) {
+                    _supportUploadState.value = SupportUploadState.Error("Upload failed")
+                    return@launch
+                }
+
+                val code = JSONObject(response).optString("code", "")
+                if (code.isEmpty()) {
+                    _supportUploadState.value = SupportUploadState.Error("Invalid response")
+                } else {
+                    _supportUploadState.value = SupportUploadState.Success(code)
+                }
+            } catch (e: Exception) {
+                logger.e(TAG, "Support upload failed", e)
+                _supportUploadState.value = SupportUploadState.Error(e.message ?: "Unknown error")
+            }
+        }
+    }
+
+    fun dismissSupportUpload() {
+        _supportUploadState.value = SupportUploadState.Idle
+    }
+
     private companion object {
         const val TAG = "AdminViewModel"
     }
+}
+
+sealed interface SupportUploadState {
+    data object Idle : SupportUploadState
+    data object Uploading : SupportUploadState
+    data class Success(val code: String) : SupportUploadState
+    data class Error(val message: String) : SupportUploadState
 }
 
 data class ExportResult(

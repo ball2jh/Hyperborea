@@ -1,5 +1,6 @@
 package com.nettarion.hyperborea.platform.update
 
+import com.nettarion.hyperborea.BuildConfig
 import com.nettarion.hyperborea.core.AppLogger
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
@@ -20,6 +21,11 @@ class UpdateTrack internal constructor(
     private val httpClient: UpdateHttpClient,
     private val logger: AppLogger,
     private val scope: CoroutineScope,
+    private val allowedUrlPrefixes: List<String> = buildList {
+        add(BuildConfig.SERVER_URL)
+        val r2 = BuildConfig.R2_BASE_URL
+        if (r2.isNotEmpty()) add(r2)
+    },
 ) {
     private val _state = MutableStateFlow<TrackState>(TrackState.Idle)
     val state: StateFlow<TrackState> = _state.asStateFlow()
@@ -40,6 +46,12 @@ class UpdateTrack internal constructor(
         val info = current.info
         activeJob = scope.launch {
             try {
+                if (!isAllowedDownloadUrl(info.url)) {
+                    val msg = "Download URL not from allowed domain: ${info.url}"
+                    logger.e(TAG, "$name: $msg")
+                    _state.value = TrackState.Error(msg)
+                    return@launch
+                }
                 _state.value = TrackState.Downloading(info, DownloadProgress(0, 0))
                 logger.i(TAG, "$name: Starting download from ${info.url}")
 
@@ -142,6 +154,9 @@ class UpdateTrack internal constructor(
         activeJob?.cancel()
         activeJob = null
     }
+
+    private fun isAllowedDownloadUrl(url: String): Boolean =
+        allowedUrlPrefixes.any { url.startsWith(it) }
 
     companion object {
         private const val TAG = "Update"

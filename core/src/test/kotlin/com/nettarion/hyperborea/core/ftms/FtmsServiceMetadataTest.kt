@@ -14,12 +14,43 @@ class FtmsServiceMetadataTest {
         minIncline = -6f,
         maxIncline = 40f,
         maxPower = 2000,
+        minPower = 0,
+        powerStep = 1,
+        resistanceStep = 1.0f,
+        inclineStep = 0.5f,
     )
 
     @Test
     fun `ftmsFeatureValue for BIKE is 8 bytes`() {
         val value = FtmsServiceMetadata.ftmsFeatureValue(DeviceType.BIKE)
         assertThat(value.size).isEqualTo(8)
+    }
+
+    @Test
+    fun `ftmsFeatureValue for TREADMILL is 8 bytes with correct content`() {
+        val value = FtmsServiceMetadata.ftmsFeatureValue(DeviceType.TREADMILL)
+        assertThat(value.size).isEqualTo(8)
+        assertThat(value).isEqualTo(byteArrayOf(
+            0x0D, 0xD6.toByte(), 0x00, 0x00, 0x0A, 0x00, 0x00, 0x00,
+        ))
+    }
+
+    @Test
+    fun `ftmsFeatureValue for ROWER is 8 bytes with correct content`() {
+        val value = FtmsServiceMetadata.ftmsFeatureValue(DeviceType.ROWER)
+        assertThat(value.size).isEqualTo(8)
+        assertThat(value).isEqualTo(byteArrayOf(
+            0x87.toByte(), 0x56, 0x00, 0x00, 0x0C, 0x00, 0x00, 0x00,
+        ))
+    }
+
+    @Test
+    fun `ftmsFeatureValue for ELLIPTICAL is 8 bytes with correct content`() {
+        val value = FtmsServiceMetadata.ftmsFeatureValue(DeviceType.ELLIPTICAL)
+        assertThat(value.size).isEqualTo(8)
+        assertThat(value).isEqualTo(byteArrayOf(
+            0x8F.toByte(), 0x56, 0x00, 0x00, 0x0E, 0x00, 0x00, 0x00,
+        ))
     }
 
     @Test

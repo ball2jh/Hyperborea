@@ -20,6 +20,9 @@ val serverUrl = localProperties.getProperty("server.url")
 val licensePublicKey = localProperties.getProperty("license.public.key")
     ?: findProperty("license.public.key") as String?
     ?: ""
+val r2BaseUrl = localProperties.getProperty("r2.base.url")
+    ?: findProperty("r2.base.url") as String?
+    ?: ""
 
 fun signingConfigFingerprint(config: com.android.build.api.dsl.ApkSigningConfig): String {
     val file = config.storeFile ?: return ""
@@ -46,6 +49,7 @@ android {
 
         buildConfigField("String", "SERVER_URL", "\"$serverUrl\"")
         buildConfigField("String", "LICENSE_PUBLIC_KEY", "\"$licensePublicKey\"")
+        buildConfigField("String", "R2_BASE_URL", "\"$r2BaseUrl\"")
         buildConfigField("String", "SIGNING_CERTIFICATE_SHA256", "\"\"")
     }
 

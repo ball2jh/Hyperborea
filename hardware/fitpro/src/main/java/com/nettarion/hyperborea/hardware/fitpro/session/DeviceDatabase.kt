@@ -15,6 +15,9 @@ object DeviceDatabase {
         val minIncline: Float,
         val maxIncline: Float,
         val maxPower: Int,
+        val minPower: Int,
+        val powerStep: Int,
+        val resistanceStep: Float,
         val inclineStep: Float,
         val speedStep: Float,
         val maxSpeed: Float,
@@ -26,21 +29,306 @@ object DeviceDatabase {
         Metric.DISTANCE, Metric.CALORIES,
     )
 
+    private val STANDARD_TREADMILL_METRICS = setOf(
+        Metric.POWER, Metric.SPEED, Metric.INCLINE,
+        Metric.DISTANCE, Metric.CALORIES,
+    )
+
+    private val STANDARD_ROWER_METRICS = setOf(
+        Metric.POWER, Metric.CADENCE, Metric.SPEED,
+        Metric.RESISTANCE,
+        Metric.DISTANCE, Metric.CALORIES,
+    )
+
+    private val STANDARD_ELLIPTICAL_METRICS = setOf(
+        Metric.POWER, Metric.CADENCE, Metric.SPEED,
+        Metric.RESISTANCE, Metric.INCLINE,
+        Metric.DISTANCE, Metric.CALORIES,
+    )
+
     // Known model numbers from V1 handshake SystemInfoResponse.
-    // Add entries as devices are encountered and verified.
+    // Only model 2117 (S22i) is hardware-verified. All other model numbers are
+    // inferred from the ICON model number pattern (e.g. NTEX02117 → 2117).
+    // Specs are from marketing materials.
     private val knownModels: Map<Int, DeviceRecord> = mapOf(
+        // ── NordicTrack Bikes ──
         2117 to DeviceRecord(
             name = "NordicTrack S22i",
             type = DeviceType.BIKE,
             supportedMetrics = STANDARD_BIKE_METRICS,
-            maxResistance = 24,
-            minResistance = 1,
-            minIncline = -6f,
-            maxIncline = 40f,
-            maxPower = 2000,
-            inclineStep = 0.5f,
-            speedStep = 0.5f,
-            maxSpeed = 60f,
+            maxResistance = 24, minResistance = 1,
+            minIncline = -10f, maxIncline = 20f,
+            maxPower = 2000, minPower = 0, powerStep = 1, resistanceStep = 1.0f, inclineStep = 0.5f, speedStep = 0.5f, maxSpeed = 60f,
+        ),
+        2121 to DeviceRecord(
+            name = "NordicTrack S22i",
+            type = DeviceType.BIKE,
+            supportedMetrics = STANDARD_BIKE_METRICS,
+            maxResistance = 24, minResistance = 1,
+            minIncline = -10f, maxIncline = 20f,
+            maxPower = 2000, minPower = 0, powerStep = 1, resistanceStep = 1.0f, inclineStep = 0.5f, speedStep = 0.5f, maxSpeed = 60f,
+        ),
+        2422 to DeviceRecord(
+            name = "NordicTrack S22i",
+            type = DeviceType.BIKE,
+            supportedMetrics = STANDARD_BIKE_METRICS,
+            maxResistance = 24, minResistance = 1,
+            minIncline = -10f, maxIncline = 20f,
+            maxPower = 2000, minPower = 0, powerStep = 1, resistanceStep = 1.0f, inclineStep = 0.5f, speedStep = 0.5f, maxSpeed = 60f,
+        ),
+        2722 to DeviceRecord(
+            name = "NordicTrack S27i",
+            type = DeviceType.BIKE,
+            supportedMetrics = STANDARD_BIKE_METRICS,
+            maxResistance = 24, minResistance = 1,
+            minIncline = -10f, maxIncline = 20f,
+            maxPower = 2000, minPower = 0, powerStep = 1, resistanceStep = 1.0f, inclineStep = 0.5f, speedStep = 0.5f, maxSpeed = 60f,
+        ),
+        5119 to DeviceRecord(
+            name = "NordicTrack S15i",
+            type = DeviceType.BIKE,
+            supportedMetrics = STANDARD_BIKE_METRICS,
+            maxResistance = 22, minResistance = 1,
+            minIncline = -10f, maxIncline = 20f,
+            maxPower = 2000, minPower = 0, powerStep = 1, resistanceStep = 1.0f, inclineStep = 0.5f, speedStep = 0.5f, maxSpeed = 60f,
+        ),
+        3121 to DeviceRecord(
+            name = "NordicTrack S10i",
+            type = DeviceType.BIKE,
+            supportedMetrics = STANDARD_BIKE_METRICS,
+            maxResistance = 22, minResistance = 1,
+            minIncline = -10f, maxIncline = 20f,
+            maxPower = 2000, minPower = 0, powerStep = 1, resistanceStep = 1.0f, inclineStep = 0.5f, speedStep = 0.5f, maxSpeed = 60f,
+        ),
+
+        // ── NordicTrack Treadmills ──
+        39225 to DeviceRecord(
+            name = "NordicTrack Commercial X32i",
+            type = DeviceType.TREADMILL,
+            supportedMetrics = STANDARD_TREADMILL_METRICS,
+            maxResistance = 0, minResistance = 0,
+            minIncline = -6f, maxIncline = 40f,
+            maxPower = 2000, minPower = 0, powerStep = 1, resistanceStep = 1.0f, inclineStep = 0.5f, speedStep = 0.5f, maxSpeed = 22f,
+        ),
+        29221 to DeviceRecord(
+            name = "NordicTrack X22i",
+            type = DeviceType.TREADMILL,
+            supportedMetrics = STANDARD_TREADMILL_METRICS,
+            maxResistance = 0, minResistance = 0,
+            minIncline = -6f, maxIncline = 40f,
+            maxPower = 2000, minPower = 0, powerStep = 1, resistanceStep = 1.0f, inclineStep = 0.5f, speedStep = 0.5f, maxSpeed = 22f,
+        ),
+        19221 to DeviceRecord(
+            name = "NordicTrack Commercial 2950",
+            type = DeviceType.TREADMILL,
+            supportedMetrics = STANDARD_TREADMILL_METRICS,
+            maxResistance = 0, minResistance = 0,
+            minIncline = -3f, maxIncline = 15f,
+            maxPower = 2000, minPower = 0, powerStep = 1, resistanceStep = 1.0f, inclineStep = 0.5f, speedStep = 0.5f, maxSpeed = 22f,
+        ),
+        19125 to DeviceRecord(
+            name = "NordicTrack Commercial 2450",
+            type = DeviceType.TREADMILL,
+            supportedMetrics = STANDARD_TREADMILL_METRICS,
+            maxResistance = 0, minResistance = 0,
+            minIncline = -3f, maxIncline = 12f,
+            maxPower = 2000, minPower = 0, powerStep = 1, resistanceStep = 1.0f, inclineStep = 0.5f, speedStep = 0.5f, maxSpeed = 22f,
+        ),
+        14119 to DeviceRecord(
+            name = "NordicTrack Commercial 1750",
+            type = DeviceType.TREADMILL,
+            supportedMetrics = STANDARD_TREADMILL_METRICS,
+            maxResistance = 0, minResistance = 0,
+            minIncline = -3f, maxIncline = 15f,
+            maxPower = 2000, minPower = 0, powerStep = 1, resistanceStep = 1.0f, inclineStep = 0.5f, speedStep = 0.5f, maxSpeed = 22f,
+        ),
+
+        // ── NordicTrack Rowers ──
+        19425 to DeviceRecord(
+            name = "NordicTrack RW900",
+            type = DeviceType.ROWER,
+            supportedMetrics = STANDARD_ROWER_METRICS,
+            maxResistance = 26, minResistance = 1,
+            minIncline = 0f, maxIncline = 0f,
+            maxPower = 2000, minPower = 0, powerStep = 1, resistanceStep = 1.0f, inclineStep = 0f, speedStep = 0f, maxSpeed = 0f,
+        ),
+        15125 to DeviceRecord(
+            name = "NordicTrack RW700",
+            type = DeviceType.ROWER,
+            supportedMetrics = STANDARD_ROWER_METRICS,
+            maxResistance = 26, minResistance = 1,
+            minIncline = 0f, maxIncline = 0f,
+            maxPower = 2000, minPower = 0, powerStep = 1, resistanceStep = 1.0f, inclineStep = 0f, speedStep = 0f, maxSpeed = 0f,
+        ),
+
+        // ── NordicTrack Ellipticals ──
+        71620 to DeviceRecord(
+            name = "NordicTrack FS14i",
+            type = DeviceType.ELLIPTICAL,
+            supportedMetrics = STANDARD_ELLIPTICAL_METRICS,
+            maxResistance = 26, minResistance = 1,
+            minIncline = -10f, maxIncline = 10f,
+            maxPower = 2000, minPower = 0, powerStep = 1, resistanceStep = 1.0f, inclineStep = 0.5f, speedStep = 0.5f, maxSpeed = 60f,
+        ),
+        71423 to DeviceRecord(
+            name = "NordicTrack AirGlide 14i",
+            type = DeviceType.ELLIPTICAL,
+            supportedMetrics = STANDARD_ELLIPTICAL_METRICS,
+            maxResistance = 26, minResistance = 1,
+            minIncline = -5f, maxIncline = 15f,
+            maxPower = 2000, minPower = 0, powerStep = 1, resistanceStep = 1.0f, inclineStep = 0.5f, speedStep = 0.5f, maxSpeed = 60f,
+        ),
+
+        // ── ProForm Bikes (no incline) ──
+        92220 to DeviceRecord(
+            name = "ProForm Studio Bike Pro 22",
+            type = DeviceType.BIKE,
+            supportedMetrics = STANDARD_BIKE_METRICS,
+            maxResistance = 24, minResistance = 1,
+            minIncline = 0f, maxIncline = 0f,
+            maxPower = 2000, minPower = 0, powerStep = 1, resistanceStep = 1.0f, inclineStep = 0f, speedStep = 0.5f, maxSpeed = 60f,
+        ),
+        16723 to DeviceRecord(
+            name = "ProForm Studio Bike Pro 14",
+            type = DeviceType.BIKE,
+            supportedMetrics = STANDARD_BIKE_METRICS,
+            maxResistance = 22, minResistance = 1,
+            minIncline = 0f, maxIncline = 0f,
+            maxPower = 2000, minPower = 0, powerStep = 1, resistanceStep = 1.0f, inclineStep = 0f, speedStep = 0.5f, maxSpeed = 60f,
+        ),
+        16718 to DeviceRecord(
+            name = "ProForm Studio Bike Pro",
+            type = DeviceType.BIKE,
+            supportedMetrics = STANDARD_BIKE_METRICS,
+            maxResistance = 22, minResistance = 1,
+            minIncline = 0f, maxIncline = 0f,
+            maxPower = 2000, minPower = 0, powerStep = 1, resistanceStep = 1.0f, inclineStep = 0f, speedStep = 0.5f, maxSpeed = 60f,
+        ),
+        68919 to DeviceRecord(
+            name = "ProForm Studio Bike Limited",
+            type = DeviceType.BIKE,
+            supportedMetrics = STANDARD_BIKE_METRICS,
+            maxResistance = 22, minResistance = 1,
+            minIncline = 0f, maxIncline = 0f,
+            maxPower = 2000, minPower = 0, powerStep = 1, resistanceStep = 1.0f, inclineStep = 0f, speedStep = 0.5f, maxSpeed = 60f,
+        ),
+        16725 to DeviceRecord(
+            name = "ProForm Carbon Pro 10 Studio Bike",
+            type = DeviceType.BIKE,
+            supportedMetrics = STANDARD_BIKE_METRICS,
+            maxResistance = 22, minResistance = 1,
+            minIncline = 0f, maxIncline = 0f,
+            maxPower = 2000, minPower = 0, powerStep = 1, resistanceStep = 1.0f, inclineStep = 0f, speedStep = 0.5f, maxSpeed = 60f,
+        ),
+        79920 to DeviceRecord(
+            name = "ProForm Studio Bike Pro TC",
+            type = DeviceType.BIKE,
+            supportedMetrics = STANDARD_BIKE_METRICS,
+            maxResistance = 22, minResistance = 1,
+            minIncline = 0f, maxIncline = 0f,
+            maxPower = 2000, minPower = 0, powerStep = 1, resistanceStep = 1.0f, inclineStep = 0f, speedStep = 0.5f, maxSpeed = 60f,
+        ),
+
+        // ── ProForm Treadmills ──
+        15820 to DeviceRecord(
+            name = "ProForm Pro 9000",
+            type = DeviceType.TREADMILL,
+            supportedMetrics = STANDARD_TREADMILL_METRICS,
+            maxResistance = 0, minResistance = 0,
+            minIncline = -3f, maxIncline = 12f,
+            maxPower = 2000, minPower = 0, powerStep = 1, resistanceStep = 1.0f, inclineStep = 0.5f, speedStep = 0.5f, maxSpeed = 19.3f,
+        ),
+        17116 to DeviceRecord(
+            name = "ProForm Pro 9000",
+            type = DeviceType.TREADMILL,
+            supportedMetrics = STANDARD_TREADMILL_METRICS,
+            maxResistance = 0, minResistance = 0,
+            minIncline = -3f, maxIncline = 12f,
+            maxPower = 2000, minPower = 0, powerStep = 1, resistanceStep = 1.0f, inclineStep = 0.5f, speedStep = 0.5f, maxSpeed = 19.3f,
+        ),
+        16925 to DeviceRecord(
+            name = "ProForm Carbon Pro 9000",
+            type = DeviceType.TREADMILL,
+            supportedMetrics = STANDARD_TREADMILL_METRICS,
+            maxResistance = 0, minResistance = 0,
+            minIncline = 0f, maxIncline = 12f,
+            maxPower = 2000, minPower = 0, powerStep = 1, resistanceStep = 1.0f, inclineStep = 0.5f, speedStep = 0.5f, maxSpeed = 19.3f,
+        ),
+        12820 to DeviceRecord(
+            name = "ProForm Pro 2000",
+            type = DeviceType.TREADMILL,
+            supportedMetrics = STANDARD_TREADMILL_METRICS,
+            maxResistance = 0, minResistance = 0,
+            minIncline = -3f, maxIncline = 12f,
+            maxPower = 2000, minPower = 0, powerStep = 1, resistanceStep = 1.0f, inclineStep = 0.5f, speedStep = 0.5f, maxSpeed = 19.3f,
+        ),
+        10925 to DeviceRecord(
+            name = "ProForm Carbon Pro 2000",
+            type = DeviceType.TREADMILL,
+            supportedMetrics = STANDARD_TREADMILL_METRICS,
+            maxResistance = 0, minResistance = 0,
+            minIncline = 0f, maxIncline = 12f,
+            maxPower = 2000, minPower = 0, powerStep = 1, resistanceStep = 1.0f, inclineStep = 0.5f, speedStep = 0.5f, maxSpeed = 19.3f,
+        ),
+        14823 to DeviceRecord(
+            name = "ProForm Trainer 14.0",
+            type = DeviceType.TREADMILL,
+            supportedMetrics = STANDARD_TREADMILL_METRICS,
+            maxResistance = 0, minResistance = 0,
+            minIncline = 0f, maxIncline = 12f,
+            maxPower = 2000, minPower = 0, powerStep = 1, resistanceStep = 1.0f, inclineStep = 0.5f, speedStep = 0.5f, maxSpeed = 19.3f,
+        ),
+        12823 to DeviceRecord(
+            name = "ProForm Carbon T14",
+            type = DeviceType.TREADMILL,
+            supportedMetrics = STANDARD_TREADMILL_METRICS,
+            maxResistance = 0, minResistance = 0,
+            minIncline = 0f, maxIncline = 12f,
+            maxPower = 2000, minPower = 0, powerStep = 1, resistanceStep = 1.0f, inclineStep = 0.5f, speedStep = 0.5f, maxSpeed = 16.1f,
+        ),
+        99920 to DeviceRecord(
+            name = "ProForm Carbon T10",
+            type = DeviceType.TREADMILL,
+            supportedMetrics = STANDARD_TREADMILL_METRICS,
+            maxResistance = 0, minResistance = 0,
+            minIncline = 0f, maxIncline = 12f,
+            maxPower = 2000, minPower = 0, powerStep = 1, resistanceStep = 1.0f, inclineStep = 0.5f, speedStep = 0.5f, maxSpeed = 16.1f,
+        ),
+        99721 to DeviceRecord(
+            name = "ProForm Trainer 12.0",
+            type = DeviceType.TREADMILL,
+            supportedMetrics = STANDARD_TREADMILL_METRICS,
+            maxResistance = 0, minResistance = 0,
+            minIncline = 0f, maxIncline = 12f,
+            maxPower = 2000, minPower = 0, powerStep = 1, resistanceStep = 1.0f, inclineStep = 0.5f, speedStep = 0.5f, maxSpeed = 19.3f,
+        ),
+        10724 to DeviceRecord(
+            name = "ProForm Trainer 1000",
+            type = DeviceType.TREADMILL,
+            supportedMetrics = STANDARD_TREADMILL_METRICS,
+            maxResistance = 0, minResistance = 0,
+            minIncline = 0f, maxIncline = 12f,
+            maxPower = 2000, minPower = 0, powerStep = 1, resistanceStep = 1.0f, inclineStep = 0.5f, speedStep = 0.5f, maxSpeed = 19.3f,
+        ),
+
+        // ── ProForm Rower ──
+        98120 to DeviceRecord(
+            name = "ProForm Pro R10",
+            type = DeviceType.ROWER,
+            supportedMetrics = STANDARD_ROWER_METRICS,
+            maxResistance = 24, minResistance = 1,
+            minIncline = 0f, maxIncline = 0f,
+            maxPower = 2000, minPower = 0, powerStep = 1, resistanceStep = 1.0f, inclineStep = 0f, speedStep = 0f, maxSpeed = 0f,
+        ),
+
+        // ── ProForm Elliptical ──
+        1420 to DeviceRecord(
+            name = "ProForm Pro HIIT H14",
+            type = DeviceType.ELLIPTICAL,
+            supportedMetrics = STANDARD_ELLIPTICAL_METRICS,
+            maxResistance = 26, minResistance = 1,
+            minIncline = 0f, maxIncline = 0f,
+            maxPower = 2000, minPower = 0, powerStep = 1, resistanceStep = 1.0f, inclineStep = 0f, speedStep = 0.5f, maxSpeed = 60f,
         ),
     )
 
@@ -57,9 +345,12 @@ object DeviceDatabase {
         supportedMetrics = STANDARD_BIKE_METRICS,
         maxResistance = 24,
         minResistance = 1,
-        minIncline = -6f,
-        maxIncline = 40f,
+        minIncline = -10f,
+        maxIncline = 20f,
         maxPower = 2000,
+        minPower = 0,
+        powerStep = 1,
+        resistanceStep = 1.0f,
         inclineStep = 0.5f,
         speedStep = 0.5f,
         maxSpeed = 60f,
@@ -83,6 +374,9 @@ object DeviceDatabase {
         minIncline = minIncline,
         maxIncline = maxIncline,
         maxPower = maxPower,
+        minPower = minPower,
+        powerStep = powerStep,
+        resistanceStep = resistanceStep,
         inclineStep = inclineStep,
         speedStep = speedStep,
         maxSpeed = maxSpeed,

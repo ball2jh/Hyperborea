@@ -13,12 +13,14 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.systemBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Close
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.FilterChipDefaults
 import androidx.compose.material3.HorizontalDivider
@@ -61,6 +63,7 @@ fun FullScreenLogViewer(
 
         val appLogs by viewModel.logEntries.collectAsStateWithLifecycle()
         val systemLogs by viewModel.systemLogEntries.collectAsStateWithLifecycle()
+        val supportState by viewModel.supportUploadState.collectAsStateWithLifecycle()
 
         Column(
             modifier = Modifier
@@ -94,6 +97,8 @@ fun FullScreenLogViewer(
                 }) {
                     Text("Export")
                 }
+                Spacer(Modifier.width(8.dp))
+                FullScreenGetHelpButton(supportState, viewModel)
                 Spacer(Modifier.width(8.dp))
                 IconButton(onClick = onClose) {
                     Icon(Icons.Default.Close, "Close", tint = colors.textMedium)
@@ -174,6 +179,46 @@ fun FullScreenLogViewer(
                         SystemLogEntryRow(entry)
                     }
                 }
+            }
+        }
+    }
+}
+
+@Composable
+private fun FullScreenGetHelpButton(state: SupportUploadState, viewModel: AdminViewModel) {
+    val colors = LocalHyperboreaColors.current
+    when (state) {
+        is SupportUploadState.Idle -> {
+            OutlinedButton(onClick = { viewModel.uploadSupport() }) {
+                Text("Get Help")
+            }
+        }
+        is SupportUploadState.Uploading -> {
+            OutlinedButton(onClick = {}, enabled = false) {
+                CircularProgressIndicator(
+                    modifier = Modifier.size(16.dp),
+                    strokeWidth = 2.dp,
+                )
+            }
+        }
+        is SupportUploadState.Success -> {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                Text(
+                    text = state.code,
+                    style = MaterialTheme.typography.titleMedium,
+                    color = colors.statusActive,
+                )
+                OutlinedButton(onClick = { viewModel.dismissSupportUpload() }) {
+                    Text("Done")
+                }
+            }
+        }
+        is SupportUploadState.Error -> {
+            OutlinedButton(onClick = { viewModel.uploadSupport() }) {
+                Text("Retry")
             }
         }
     }

@@ -28,9 +28,9 @@ class LicenseCheckerImpl @Inject constructor(
     private val _state = MutableStateFlow<LicenseState>(LicenseState.Checking)
     override val state: StateFlow<LicenseState> = _state.asStateFlow()
 
-    override suspend fun check() {
-        logger.d(TAG, "check() starting")
-        _state.value = LicenseState.Checking
+    override suspend fun check(silent: Boolean) {
+        logger.d(TAG, "check() starting (silent=$silent)")
+        if (!silent) _state.value = LicenseState.Checking
         val authToken = prefs.getString(KEY_AUTH_TOKEN, null)
         if (authToken == null) {
             logger.d(TAG, "No auth token, setting Unlicensed")

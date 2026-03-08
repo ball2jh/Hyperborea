@@ -5,8 +5,8 @@ import kotlinx.coroutines.flow.StateFlow
 interface LicenseChecker {
     val state: StateFlow<LicenseState>
 
-    /** Check license status with the server. Updates [state]. */
-    suspend fun check()
+    /** Check license status with the server. Updates [state]. When [silent] is true, skips emitting [LicenseState.Checking]. */
+    suspend fun check(silent: Boolean = false)
 
     /** Request a new pairing session. Updates [state] to Pairing on success. */
     suspend fun requestPairing(): PairingSession

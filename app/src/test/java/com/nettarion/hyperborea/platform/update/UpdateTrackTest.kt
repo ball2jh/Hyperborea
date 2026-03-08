@@ -48,6 +48,7 @@ class UpdateTrackTest {
             httpClient = httpClient,
             logger = logger,
             scope = scope,
+            allowedUrlPrefixes = listOf("https://example.com"),
         )
     }
 
@@ -115,6 +116,19 @@ class UpdateTrackTest {
         val state = track.state.value
         assertThat(state).isInstanceOf(TrackState.Error::class.java)
         assertThat((state as TrackState.Error).message).contains("Download failed")
+    }
+
+    @Test
+    fun `download with disallowed URL transitions to Error`() = runTest {
+        track = createTrack(UnconfinedTestDispatcher(testScheduler))
+        val info = sampleInfo.copy(url = "https://evil.com/update.bin", sha256 = "abc")
+
+        track.setAvailable(info)
+        track.download()
+
+        val state = track.state.value
+        assertThat(state).isInstanceOf(TrackState.Error::class.java)
+        assertThat((state as TrackState.Error).message).contains("not from allowed domain")
     }
 
     @Test

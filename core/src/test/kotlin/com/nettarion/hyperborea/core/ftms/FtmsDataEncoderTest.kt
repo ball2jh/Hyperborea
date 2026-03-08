@@ -13,6 +13,7 @@ class FtmsDataEncoderTest {
         cadence: Int? = null,
         speed: Float? = null,
         resistance: Int? = null,
+        incline: Float? = null,
         heartRate: Int? = null,
         distance: Float? = null,
         calories: Int? = null,
@@ -22,7 +23,7 @@ class FtmsDataEncoderTest {
         cadence = cadence,
         speed = speed,
         resistance = resistance,
-        incline = null,
+        incline = incline,
         heartRate = heartRate,
         distance = distance,
         calories = calories,
@@ -44,9 +45,9 @@ class FtmsDataEncoderTest {
     @Test
     fun `dataCharacteristicShortUuid returns correct UUID for each type`() {
         assertThat(FtmsDataEncoder.dataCharacteristicShortUuid(DeviceType.BIKE)).isEqualTo(0x2AD2)
-        assertThat(FtmsDataEncoder.dataCharacteristicShortUuid(DeviceType.TREADMILL)).isEqualTo(0x2AD1)
-        assertThat(FtmsDataEncoder.dataCharacteristicShortUuid(DeviceType.ROWER)).isEqualTo(0x2AD8)
-        assertThat(FtmsDataEncoder.dataCharacteristicShortUuid(DeviceType.ELLIPTICAL)).isEqualTo(0x2AD4)
+        assertThat(FtmsDataEncoder.dataCharacteristicShortUuid(DeviceType.TREADMILL)).isEqualTo(0x2ACD)
+        assertThat(FtmsDataEncoder.dataCharacteristicShortUuid(DeviceType.ROWER)).isEqualTo(0x2AD1)
+        assertThat(FtmsDataEncoder.dataCharacteristicShortUuid(DeviceType.ELLIPTICAL)).isEqualTo(0x2ACE)
     }
 
     // --- Indoor Bike Data ---
@@ -149,6 +150,346 @@ class FtmsDataEncoderTest {
         val result = FtmsDataEncoder.encodeIndoorBikeData(data)
         val flags = uint16LE(result, 0)
         assertThat(flags and (1 shl 11)).isEqualTo(0)
+    }
+
+    // --- encodeData dispatch for other types ---
+
+    @Test
+    fun `encodeData with TREADMILL delegates to encodeTreadmillData`() {
+        val data = exerciseData(speed = 12.0f, power = 100)
+        val dispatched = FtmsDataEncoder.encodeData(DeviceType.TREADMILL, data)
+        val direct = FtmsDataEncoder.encodeTreadmillData(data)
+        assertThat(dispatched).isEqualTo(direct)
+    }
+
+    @Test
+    fun `encodeData with ROWER delegates to encodeRowerData`() {
+        val data = exerciseData(cadence = 30, power = 150)
+        val dispatched = FtmsDataEncoder.encodeData(DeviceType.ROWER, data)
+        val direct = FtmsDataEncoder.encodeRowerData(data)
+        assertThat(dispatched).isEqualTo(direct)
+    }
+
+    @Test
+    fun `encodeData with ELLIPTICAL delegates to encodeCrossTrainerData`() {
+        val data = exerciseData(speed = 8.0f, cadence = 60)
+        val dispatched = FtmsDataEncoder.encodeData(DeviceType.ELLIPTICAL, data)
+        val direct = FtmsDataEncoder.encodeCrossTrainerData(data)
+        assertThat(dispatched).isEqualTo(direct)
+    }
+
+    // --- Treadmill Data ---
+
+    @Test
+    fun `encodeTreadmillData with all null fields produces minimal packet`() {
+        val data = exerciseData()
+        val result = FtmsDataEncoder.encodeTreadmillData(data)
+        // Flags (2 bytes) + speed (2 bytes) = 4 bytes minimum
+        assertThat(result.size).isEqualTo(4)
+        assertThat(uint16LE(result, 0)).isEqualTo(0x0000)
+        assertThat(uint16LE(result, 2)).isEqualTo(0)
+    }
+
+    @Test
+    fun `encodeTreadmillData encodes speed at 0_01 resolution`() {
+        val data = exerciseData(speed = 12.5f)
+        val result = FtmsDataEncoder.encodeTreadmillData(data)
+        assertThat(uint16LE(result, 2)).isEqualTo(1250)
+    }
+
+    @Test
+    fun `encodeTreadmillData with distance sets bit 2`() {
+        val data = exerciseData(distance = 3.0f) // 3 km = 3000 m
+        val result = FtmsDataEncoder.encodeTreadmillData(data)
+        val flags = uint16LE(result, 0)
+        assertThat(flags and (1 shl 2)).isNotEqualTo(0)
+        assertThat(uint24LE(result, 4)).isEqualTo(3000)
+    }
+
+    @Test
+    fun `encodeTreadmillData with incline sets bit 3 and encodes inclination plus ramp angle`() {
+        val data = exerciseData(incline = 5.0f)
+        val result = FtmsDataEncoder.encodeTreadmillData(data)
+        val flags = uint16LE(result, 0)
+        assertThat(flags and (1 shl 3)).isNotEqualTo(0)
+        // Inclination: 5.0 * 10 = 50
+        assertThat(sint16LE(result, 4)).isEqualTo(50)
+        // Ramp angle: 0
+        assertThat(sint16LE(result, 6)).isEqualTo(0)
+    }
+
+    @Test
+    fun `encodeTreadmillData with calories sets bit 7`() {
+        val data = exerciseData(calories = 200)
+        val result = FtmsDataEncoder.encodeTreadmillData(data)
+        val flags = uint16LE(result, 0)
+        assertThat(flags and (1 shl 7)).isNotEqualTo(0)
+        assertThat(uint16LE(result, 4)).isEqualTo(200)
+        assertThat(uint16LE(result, 6)).isEqualTo(0xFFFF)
+        assertThat(result[8].toInt() and 0xFF).isEqualTo(0xFF)
+    }
+
+    @Test
+    fun `encodeTreadmillData with heart rate sets bit 8`() {
+        val data = exerciseData(heartRate = 155)
+        val result = FtmsDataEncoder.encodeTreadmillData(data)
+        val flags = uint16LE(result, 0)
+        assertThat(flags and (1 shl 8)).isNotEqualTo(0)
+        assertThat(result[4].toInt() and 0xFF).isEqualTo(155)
+    }
+
+    @Test
+    fun `encodeTreadmillData with elapsed time sets bit 10`() {
+        val data = exerciseData(elapsedTime = 1800L)
+        val result = FtmsDataEncoder.encodeTreadmillData(data)
+        val flags = uint16LE(result, 0)
+        assertThat(flags and (1 shl 10)).isNotEqualTo(0)
+        assertThat(uint16LE(result, 4)).isEqualTo(1800)
+    }
+
+    @Test
+    fun `encodeTreadmillData with power sets bit 12 with force on belt`() {
+        val data = exerciseData(power = 250)
+        val result = FtmsDataEncoder.encodeTreadmillData(data)
+        val flags = uint16LE(result, 0)
+        assertThat(flags and (1 shl 12)).isNotEqualTo(0)
+        // Force on belt = 0
+        assertThat(sint16LE(result, 4)).isEqualTo(0)
+        // Power = 250
+        assertThat(sint16LE(result, 6)).isEqualTo(250)
+    }
+
+    @Test
+    fun `encodeTreadmillData with all fields`() {
+        val data = exerciseData(
+            speed = 10.0f, incline = 3.0f, power = 200,
+            heartRate = 140, distance = 5.0f, calories = 300, elapsedTime = 2400L,
+        )
+        val result = FtmsDataEncoder.encodeTreadmillData(data)
+        val flags = uint16LE(result, 0)
+        assertThat(flags and (1 shl 2)).isNotEqualTo(0)  // distance
+        assertThat(flags and (1 shl 3)).isNotEqualTo(0)  // inclination
+        assertThat(flags and (1 shl 7)).isNotEqualTo(0)  // energy
+        assertThat(flags and (1 shl 8)).isNotEqualTo(0)  // heart rate
+        assertThat(flags and (1 shl 10)).isNotEqualTo(0) // elapsed time
+        assertThat(flags and (1 shl 12)).isNotEqualTo(0) // force on belt + power
+    }
+
+    // --- Rower Data ---
+
+    @Test
+    fun `encodeRowerData with all null fields produces minimal packet`() {
+        val data = exerciseData()
+        val result = FtmsDataEncoder.encodeRowerData(data)
+        // Flags only (2 bytes), no mandatory speed field
+        assertThat(result.size).isEqualTo(2)
+        assertThat(uint16LE(result, 0)).isEqualTo(0x0000)
+    }
+
+    @Test
+    fun `encodeRowerData with cadence sets bit 0 and encodes stroke rate plus count`() {
+        val data = exerciseData(cadence = 30)
+        val result = FtmsDataEncoder.encodeRowerData(data)
+        val flags = uint16LE(result, 0)
+        assertThat(flags and (1 shl 0)).isNotEqualTo(0)
+        // Stroke rate at 0.5 spm: 30 * 2 = 60
+        assertThat(result[2].toInt() and 0xFF).isEqualTo(60)
+        // Stroke count = 0
+        assertThat(uint16LE(result, 3)).isEqualTo(0)
+    }
+
+    @Test
+    fun `encodeRowerData with distance sets bit 2`() {
+        val data = exerciseData(distance = 1.5f) // 1.5 km = 1500 m
+        val result = FtmsDataEncoder.encodeRowerData(data)
+        val flags = uint16LE(result, 0)
+        assertThat(flags and (1 shl 2)).isNotEqualTo(0)
+        assertThat(uint24LE(result, 2)).isEqualTo(1500)
+    }
+
+    @Test
+    fun `encodeRowerData with power sets bit 5`() {
+        val data = exerciseData(power = 180)
+        val result = FtmsDataEncoder.encodeRowerData(data)
+        val flags = uint16LE(result, 0)
+        assertThat(flags and (1 shl 5)).isNotEqualTo(0)
+        assertThat(sint16LE(result, 2)).isEqualTo(180)
+    }
+
+    @Test
+    fun `encodeRowerData with resistance sets bit 7`() {
+        val data = exerciseData(resistance = 8)
+        val result = FtmsDataEncoder.encodeRowerData(data)
+        val flags = uint16LE(result, 0)
+        assertThat(flags and (1 shl 7)).isNotEqualTo(0)
+        // Resistance at 0.1 resolution: 8 * 10 = 80
+        assertThat(sint16LE(result, 2)).isEqualTo(80)
+    }
+
+    @Test
+    fun `encodeRowerData with calories sets bit 8`() {
+        val data = exerciseData(calories = 100)
+        val result = FtmsDataEncoder.encodeRowerData(data)
+        val flags = uint16LE(result, 0)
+        assertThat(flags and (1 shl 8)).isNotEqualTo(0)
+        assertThat(uint16LE(result, 2)).isEqualTo(100)
+        assertThat(uint16LE(result, 4)).isEqualTo(0xFFFF)
+        assertThat(result[6].toInt() and 0xFF).isEqualTo(0xFF)
+    }
+
+    @Test
+    fun `encodeRowerData with heart rate sets bit 9`() {
+        val data = exerciseData(heartRate = 130)
+        val result = FtmsDataEncoder.encodeRowerData(data)
+        val flags = uint16LE(result, 0)
+        assertThat(flags and (1 shl 9)).isNotEqualTo(0)
+        assertThat(result[2].toInt() and 0xFF).isEqualTo(130)
+    }
+
+    @Test
+    fun `encodeRowerData with elapsed time sets bit 11`() {
+        val data = exerciseData(elapsedTime = 900L)
+        val result = FtmsDataEncoder.encodeRowerData(data)
+        val flags = uint16LE(result, 0)
+        assertThat(flags and (1 shl 11)).isNotEqualTo(0)
+        assertThat(uint16LE(result, 2)).isEqualTo(900)
+    }
+
+    @Test
+    fun `encodeRowerData with all fields`() {
+        val data = exerciseData(
+            cadence = 28, resistance = 6, power = 200,
+            heartRate = 145, distance = 2.0f, calories = 180, elapsedTime = 1200L,
+        )
+        val result = FtmsDataEncoder.encodeRowerData(data)
+        val flags = uint16LE(result, 0)
+        assertThat(flags and (1 shl 0)).isNotEqualTo(0)  // stroke rate
+        assertThat(flags and (1 shl 2)).isNotEqualTo(0)  // distance
+        assertThat(flags and (1 shl 5)).isNotEqualTo(0)  // power
+        assertThat(flags and (1 shl 7)).isNotEqualTo(0)  // resistance
+        assertThat(flags and (1 shl 8)).isNotEqualTo(0)  // energy
+        assertThat(flags and (1 shl 9)).isNotEqualTo(0)  // heart rate
+        assertThat(flags and (1 shl 11)).isNotEqualTo(0) // elapsed time
+    }
+
+    // --- Cross Trainer Data ---
+
+    @Test
+    fun `encodeCrossTrainerData with all null fields produces minimal packet`() {
+        val data = exerciseData()
+        val result = FtmsDataEncoder.encodeCrossTrainerData(data)
+        // Flags (3 bytes) + speed (2 bytes) = 5 bytes minimum
+        assertThat(result.size).isEqualTo(5)
+        assertThat(result[0].toInt() and 0xFF).isEqualTo(0)
+        assertThat(result[1].toInt() and 0xFF).isEqualTo(0)
+        assertThat(result[2].toInt() and 0xFF).isEqualTo(0)
+        assertThat(uint16LE(result, 3)).isEqualTo(0)
+    }
+
+    @Test
+    fun `encodeCrossTrainerData encodes speed at 0_01 resolution`() {
+        val data = exerciseData(speed = 8.5f)
+        val result = FtmsDataEncoder.encodeCrossTrainerData(data)
+        assertThat(uint16LE(result, 3)).isEqualTo(850)
+    }
+
+    @Test
+    fun `encodeCrossTrainerData with distance sets bit 2`() {
+        val data = exerciseData(distance = 4.0f) // 4 km = 4000 m
+        val result = FtmsDataEncoder.encodeCrossTrainerData(data)
+        val flags = result[0].toInt() and 0xFF
+        assertThat(flags and (1 shl 2)).isNotEqualTo(0)
+        assertThat(uint24LE(result, 5)).isEqualTo(4000)
+    }
+
+    @Test
+    fun `encodeCrossTrainerData with cadence sets bit 3 and encodes step rate plus avg`() {
+        val data = exerciseData(cadence = 60)
+        val result = FtmsDataEncoder.encodeCrossTrainerData(data)
+        val flags = result[0].toInt() and 0xFF
+        assertThat(flags and (1 shl 3)).isNotEqualTo(0)
+        // Step/min at 1 step/min resolution: 60
+        assertThat(uint16LE(result, 5)).isEqualTo(60)
+        // Average step rate = 0
+        assertThat(uint16LE(result, 7)).isEqualTo(0)
+    }
+
+    @Test
+    fun `encodeCrossTrainerData with incline sets bit 6`() {
+        val data = exerciseData(incline = 4.0f)
+        val result = FtmsDataEncoder.encodeCrossTrainerData(data)
+        val flags = result[0].toInt() and 0xFF
+        assertThat(flags and (1 shl 6)).isNotEqualTo(0)
+        // Inclination: 4.0 * 10 = 40
+        assertThat(sint16LE(result, 5)).isEqualTo(40)
+        // Ramp angle: 0
+        assertThat(sint16LE(result, 7)).isEqualTo(0)
+    }
+
+    @Test
+    fun `encodeCrossTrainerData with resistance sets bit 7`() {
+        val data = exerciseData(resistance = 10)
+        val result = FtmsDataEncoder.encodeCrossTrainerData(data)
+        val flags = result[0].toInt() and 0xFF
+        assertThat(flags and (1 shl 7)).isNotEqualTo(0)
+        assertThat(sint16LE(result, 5)).isEqualTo(100)
+    }
+
+    @Test
+    fun `encodeCrossTrainerData with power sets bit 8`() {
+        val data = exerciseData(power = 175)
+        val result = FtmsDataEncoder.encodeCrossTrainerData(data)
+        val flags1 = result[1].toInt() and 0xFF
+        assertThat(flags1 and (1 shl 0)).isNotEqualTo(0) // bit 8 = byte[1] bit 0
+        assertThat(sint16LE(result, 5)).isEqualTo(175)
+    }
+
+    @Test
+    fun `encodeCrossTrainerData with calories sets bit 10`() {
+        val data = exerciseData(calories = 250)
+        val result = FtmsDataEncoder.encodeCrossTrainerData(data)
+        val flags1 = result[1].toInt() and 0xFF
+        assertThat(flags1 and (1 shl 2)).isNotEqualTo(0) // bit 10 = byte[1] bit 2
+        assertThat(uint16LE(result, 5)).isEqualTo(250)
+        assertThat(uint16LE(result, 7)).isEqualTo(0xFFFF)
+        assertThat(result[9].toInt() and 0xFF).isEqualTo(0xFF)
+    }
+
+    @Test
+    fun `encodeCrossTrainerData with heart rate sets bit 11`() {
+        val data = exerciseData(heartRate = 160)
+        val result = FtmsDataEncoder.encodeCrossTrainerData(data)
+        val flags1 = result[1].toInt() and 0xFF
+        assertThat(flags1 and (1 shl 3)).isNotEqualTo(0) // bit 11 = byte[1] bit 3
+        assertThat(result[5].toInt() and 0xFF).isEqualTo(160)
+    }
+
+    @Test
+    fun `encodeCrossTrainerData with elapsed time sets bit 13`() {
+        val data = exerciseData(elapsedTime = 2700L)
+        val result = FtmsDataEncoder.encodeCrossTrainerData(data)
+        val flags1 = result[1].toInt() and 0xFF
+        assertThat(flags1 and (1 shl 5)).isNotEqualTo(0) // bit 13 = byte[1] bit 5
+        assertThat(uint16LE(result, 5)).isEqualTo(2700)
+    }
+
+    @Test
+    fun `encodeCrossTrainerData with all fields`() {
+        val data = exerciseData(
+            speed = 7.0f, cadence = 55, resistance = 8, power = 160, incline = 2.0f,
+            heartRate = 135, distance = 3.5f, calories = 220, elapsedTime = 1500L,
+        )
+        val result = FtmsDataEncoder.encodeCrossTrainerData(data)
+        val flags0 = result[0].toInt() and 0xFF
+        val flags1 = result[1].toInt() and 0xFF
+        assertThat(flags0 and (1 shl 2)).isNotEqualTo(0) // distance
+        assertThat(flags0 and (1 shl 3)).isNotEqualTo(0) // step rate
+        assertThat(flags0 and (1 shl 6)).isNotEqualTo(0) // inclination
+        assertThat(flags0 and (1 shl 7)).isNotEqualTo(0) // resistance
+        assertThat(flags1 and (1 shl 0)).isNotEqualTo(0) // power (bit 8)
+        assertThat(flags1 and (1 shl 2)).isNotEqualTo(0) // energy (bit 10)
+        assertThat(flags1 and (1 shl 3)).isNotEqualTo(0) // heart rate (bit 11)
+        assertThat(flags1 and (1 shl 5)).isNotEqualTo(0) // elapsed time (bit 13)
     }
 
     // --- CPS Measurement ---

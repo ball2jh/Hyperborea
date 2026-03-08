@@ -37,6 +37,7 @@ import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.TextButton
@@ -228,6 +229,7 @@ private fun LogsSection(viewModel: AdminViewModel, onExpand: () -> Unit) {
 
     val appLogs by viewModel.logEntries.collectAsStateWithLifecycle()
     val systemLogs by viewModel.systemLogEntries.collectAsStateWithLifecycle()
+    val supportState by viewModel.supportUploadState.collectAsStateWithLifecycle()
 
     CollapsibleSection("Logs") {
         // Tab row
@@ -301,6 +303,7 @@ private fun LogsSection(viewModel: AdminViewModel, onExpand: () -> Unit) {
             }) {
                 Text("Export")
             }
+            GetHelpButton(supportState, viewModel)
             Spacer(Modifier.weight(1f))
             OutlinedButton(onClick = onExpand) {
                 Text("Full Screen")
@@ -480,6 +483,46 @@ private fun DiagRow(label: String, value: String) {
             style = MaterialTheme.typography.bodyMedium,
             color = colors.textHigh,
         )
+    }
+}
+
+@Composable
+private fun GetHelpButton(state: SupportUploadState, viewModel: AdminViewModel) {
+    val colors = LocalHyperboreaColors.current
+    when (state) {
+        is SupportUploadState.Idle -> {
+            OutlinedButton(onClick = { viewModel.uploadSupport() }) {
+                Text("Get Help")
+            }
+        }
+        is SupportUploadState.Uploading -> {
+            OutlinedButton(onClick = {}, enabled = false) {
+                CircularProgressIndicator(
+                    modifier = Modifier.size(16.dp),
+                    strokeWidth = 2.dp,
+                )
+            }
+        }
+        is SupportUploadState.Success -> {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                Text(
+                    text = state.code,
+                    style = MaterialTheme.typography.titleMedium,
+                    color = colors.statusActive,
+                )
+                OutlinedButton(onClick = { viewModel.dismissSupportUpload() }) {
+                    Text("Done")
+                }
+            }
+        }
+        is SupportUploadState.Error -> {
+            OutlinedButton(onClick = { viewModel.uploadSupport() }) {
+                Text("Retry")
+            }
+        }
     }
 }
 

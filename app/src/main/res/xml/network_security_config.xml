@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<network-security-config>
+    <base-config cleartextTrafficPermitted="false" />
+
+    <!-- Uncomment and update when the server is deployed:
+    <domain-config>
+        <domain includeSubdomains="true">hyperborea.dev</domain>
+        <pin-set expiration="2027-06-01">
+            <pin digest="SHA-256">PLACEHOLDER_SERVER_PIN=</pin>
+            <pin digest="SHA-256">PLACEHOLDER_BACKUP_PIN=</pin>
+        </pin-set>
+    </domain-config>
+    -->
+</network-security-config>

@@ -13,6 +13,10 @@ class FtmsServiceBuilderTest {
         minIncline = -10f,
         maxIncline = 20f,
         maxPower = 2000,
+        minPower = 0,
+        powerStep = 1,
+        resistanceStep = 1.0f,
+        inclineStep = 0.5f,
     )
 
     @Test

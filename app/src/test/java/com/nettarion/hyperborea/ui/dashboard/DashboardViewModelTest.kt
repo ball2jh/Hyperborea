@@ -1,14 +1,9 @@
 package com.nettarion.hyperborea.ui.dashboard
 
 import android.content.ContextWrapper
-import androidx.lifecycle.viewModelScope
 import com.google.common.truth.Truth.assertThat
 import com.nettarion.hyperborea.MainDispatcherRule
 import com.nettarion.hyperborea.core.AppLogger
-import com.nettarion.hyperborea.core.LicenseChecker
-import com.nettarion.hyperborea.core.LicenseState
-import com.nettarion.hyperborea.core.PairingSession
-import com.nettarion.hyperborea.core.PairingStatus
 import com.nettarion.hyperborea.core.adapter.AdapterState
 import com.nettarion.hyperborea.core.adapter.BroadcastAdapter
 import com.nettarion.hyperborea.core.adapter.BroadcastId
@@ -36,15 +31,12 @@ import com.nettarion.hyperborea.core.test.buildSystemSnapshot
 import app.cash.turbine.test
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.ExperimentalCoroutinesApi
-import kotlinx.coroutines.cancel
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.emptyFlow
 import kotlinx.coroutines.flow.flowOf
-import kotlinx.coroutines.test.TestScope
 import kotlinx.coroutines.test.runTest
-import org.junit.After
 import org.junit.Before
 import org.junit.Rule
 import org.junit.Test
@@ -69,7 +61,6 @@ class DashboardViewModelTest {
     private val systemSnapshot = MutableStateFlow(buildSystemSnapshot())
     private val enabledBroadcasts = MutableStateFlow<Set<BroadcastId>>(emptySet())
     private val activeProfile = MutableStateFlow<Profile?>(null)
-    private val licenseState = MutableStateFlow<LicenseState>(LicenseState.Checking)
 
     private val toggledBroadcasts = mutableListOf<Pair<BroadcastId, Boolean>>()
 
@@ -109,14 +100,6 @@ class DashboardViewModelTest {
         override suspend fun saveRideSummary(summary: RideSummary, samples: List<WorkoutSample>) {}
         override suspend fun deleteRideSummary(id: Long) {}
         override fun getWorkoutSamples(rideId: Long): Flow<List<WorkoutSample>> = flowOf(emptyList())
-    }
-
-    private val fakeLicenseChecker = object : LicenseChecker {
-        override val state: StateFlow<LicenseState> = licenseState
-        override suspend fun check() {}
-        override suspend fun requestPairing(): PairingSession = PairingSession.Error("stub")
-        override suspend fun pollPairing(pairingToken: String): PairingStatus = PairingStatus.Error("stub")
-        override suspend fun unlink() {}
     }
 
     private fun createBroadcastAdapter(
@@ -184,7 +167,6 @@ class DashboardViewModelTest {
             systemMonitor = fakeSystemMonitor,
             userPreferences = fakeUserPreferences,
             profileRepository = fakeProfileRepository,
-            licenseChecker = fakeLicenseChecker,
             context = ContextWrapper(null),
         )
     }
@@ -192,28 +174,6 @@ class DashboardViewModelTest {
     @Before
     fun setUp() {
         toggledBroadcasts.clear()
-    }
-
-    @After
-    fun tearDown() {
-        if (::viewModel.isInitialized) {
-            viewModel.viewModelScope.cancel()
-        }
-    }
-
-    /**
-     * Runs a test that uses [runTest] and the ViewModel. Cancels viewModelScope
-     * before returning so runTest's advanceUntilIdle() doesn't spin on the
-     * ViewModel's infinite license-recheck loop.
-     */
-    private fun runViewModelTest(block: suspend TestScope.() -> Unit) = runTest {
-        try {
-            block()
-        } finally {
-            if (::viewModel.isInitialized) {
-                viewModel.viewModelScope.cancel()
-            }
-        }
     }
 
     @Test
@@ -231,7 +191,7 @@ class DashboardViewModelTest {
     }
 
     @Test
-    fun `uiState reflects hardware adapter state changes`() = runViewModelTest {
+    fun `uiState reflects hardware adapter state changes`() = runTest {
         createViewModel()
 
         viewModel.uiState.test {
@@ -243,7 +203,7 @@ class DashboardViewModelTest {
     }
 
     @Test
-    fun `uiState reflects exercise data updates`() = runViewModelTest {
+    fun `uiState reflects exercise data updates`() = runTest {
         createViewModel()
 
         viewModel.uiState.test {
@@ -256,7 +216,7 @@ class DashboardViewModelTest {
     }
 
     @Test
-    fun `broadcasts sorted by BroadcastId ordinal`() = runViewModelTest {
+    fun `broadcasts sorted by BroadcastId ordinal`() = runTest {
         val wftnpAdapter = createBroadcastAdapter(BroadcastId.WFTNP)
         val ftmsAdapter = createBroadcastAdapter(BroadcastId.FTMS)
         createViewModel(broadcastAdapters = setOf(wftnpAdapter, ftmsAdapter))
@@ -279,7 +239,7 @@ class DashboardViewModelTest {
     }
 
     @Test
-    fun `broadcast enabled state reflects user preferences`() = runViewModelTest {
+    fun `broadcast enabled state reflects user preferences`() = runTest {
         val ftmsAdapter = createBroadcastAdapter(BroadcastId.FTMS)
         enabledBroadcasts.value = setOf(BroadcastId.FTMS)
         createViewModel(broadcastAdapters = setOf(ftmsAdapter))
@@ -292,7 +252,7 @@ class DashboardViewModelTest {
     }
 
     @Test
-    fun `broadcast disabled when not in user preferences`() = runViewModelTest {
+    fun `broadcast disabled when not in user preferences`() = runTest {
         val ftmsAdapter = createBroadcastAdapter(BroadcastId.FTMS)
         enabledBroadcasts.value = emptySet()
         createViewModel(broadcastAdapters = setOf(ftmsAdapter))
@@ -321,7 +281,7 @@ class DashboardViewModelTest {
     }
 
     @Test
-    fun `currentElapsedSeconds returns elapsed time from exercise data`() = runViewModelTest {
+    fun `currentElapsedSeconds returns elapsed time from exercise data`() = runTest {
         createViewModel()
 
         viewModel.uiState.test {
@@ -342,7 +302,7 @@ class DashboardViewModelTest {
     }
 
     @Test
-    fun `uiState reflects profile name`() = runViewModelTest {
+    fun `uiState reflects profile name`() = runTest {
         createViewModel()
 
         viewModel.uiState.test {
@@ -354,7 +314,7 @@ class DashboardViewModelTest {
     }
 
     @Test
-    fun `broadcast client count reflects connected clients`() = runViewModelTest {
+    fun `broadcast client count reflects connected clients`() = runTest {
         val clients = MutableStateFlow<Set<ClientInfo>>(emptySet())
         val ftmsAdapter = createBroadcastAdapter(BroadcastId.FTMS, clients = clients)
         createViewModel(broadcastAdapters = setOf(ftmsAdapter))
@@ -371,7 +331,7 @@ class DashboardViewModelTest {
     }
 
     @Test
-    fun `broadcast state reflects adapter state changes`() = runViewModelTest {
+    fun `broadcast state reflects adapter state changes`() = runTest {
         val adapterState = MutableStateFlow<AdapterState>(AdapterState.Inactive)
         val ftmsAdapter = createBroadcastAdapter(BroadcastId.FTMS, state = adapterState)
         createViewModel(broadcastAdapters = setOf(ftmsAdapter))
@@ -385,19 +345,7 @@ class DashboardViewModelTest {
     }
 
     @Test
-    fun `licenseState exposes license checker state`() = runViewModelTest {
-        createViewModel()
-
-        viewModel.licenseState.test {
-            assertThat(awaitItem()).isEqualTo(LicenseState.Checking)
-
-            licenseState.value = LicenseState.Unlicensed
-            assertThat(awaitItem()).isEqualTo(LicenseState.Unlicensed)
-        }
-    }
-
-    @Test
-    fun `uiState reflects system status changes`() = runViewModelTest {
+    fun `uiState reflects system status changes`() = runTest {
         createViewModel()
 
         viewModel.uiState.test {
