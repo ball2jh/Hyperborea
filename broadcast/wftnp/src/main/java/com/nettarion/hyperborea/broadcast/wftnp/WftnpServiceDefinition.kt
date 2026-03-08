@@ -1,5 +1,7 @@
 package com.nettarion.hyperborea.broadcast.wftnp
 
+import com.nettarion.hyperborea.core.ByteUtils.sint16LE
+import com.nettarion.hyperborea.core.ByteUtils.uint16LE
 import com.nettarion.hyperborea.core.DeviceInfo
 import com.nettarion.hyperborea.core.DeviceType
 import com.nettarion.hyperborea.core.FtmsDataEncoder
@@ -103,13 +105,5 @@ class WftnpServiceDefinition(deviceInfo: DeviceInfo) {
         val SENSOR_LOCATION_VALUE = byteArrayOf(0x0D)
 
         val services: List<ShortUuid> = listOf(FTMS_SERVICE, CPS_SERVICE)
-
-        private fun uint16LE(value: Int): ByteArray =
-            byteArrayOf((value and 0xFF).toByte(), (value shr 8).toByte())
-
-        private fun sint16LE(value: Int): ByteArray {
-            val clamped = value.coerceIn(-32768, 32767)
-            return byteArrayOf((clamped and 0xFF).toByte(), (clamped shr 8).toByte())
-        }
     }
 }
