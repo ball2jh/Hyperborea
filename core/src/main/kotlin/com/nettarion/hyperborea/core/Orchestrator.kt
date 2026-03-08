@@ -272,30 +272,8 @@ class Orchestrator(
             if (current is OrchestratorState.Idle || current is OrchestratorState.Stopping) return
 
             _state.value = OrchestratorState.Stopping
-
             rideRecorder.stop(save = saveRide)
-
-            broadcastMonitorJobs.forEach { it.cancel() }
-            broadcastMonitorJobs = emptyList()
-            broadcastRetryAttempts.clear()
-
-            hardwareMonitorJob?.cancel()
-            hardwareMonitorJob = null
-            isReconnecting = false
-
-            commandPipelineJob?.cancel()
-            commandPipelineJob = null
-
-            for (adapter in activeBroadcasts) {
-                try {
-                    adapter.stop()
-                } catch (e: CancellationException) { throw e }
-                catch (e: Exception) {
-                    logger.e(TAG, "Failed to stop ${adapter.id.displayName}", e)
-                }
-            }
-            activeBroadcasts = emptyList()
-
+            teardownPipeline()
             hardwareAdapter.disconnect()
 
             _state.value = OrchestratorState.Idle
@@ -305,7 +283,13 @@ class Orchestrator(
 
     private suspend fun stopInternal(reason: String) = withContext(NonCancellable) {
         rideRecorder.stop()
+        teardownPipeline()
 
+        _state.value = OrchestratorState.Error(reason)
+        logger.i(TAG, "Orchestrator stopped: $reason")
+    }
+
+    private suspend fun teardownPipeline() {
         broadcastMonitorJobs.forEach { it.cancel() }
         broadcastMonitorJobs = emptyList()
         broadcastRetryAttempts.clear()
@@ -320,14 +304,12 @@ class Orchestrator(
         for (adapter in activeBroadcasts) {
             try {
                 adapter.stop()
-            } catch (e: Exception) {
+            } catch (e: CancellationException) { throw e }
+            catch (e: Exception) {
                 logger.e(TAG, "Failed to stop ${adapter.id.displayName}", e)
             }
         }
         activeBroadcasts = emptyList()
-
-        _state.value = OrchestratorState.Error(reason)
-        logger.i(TAG, "Orchestrator stopped: $reason")
     }
 
     private fun updateDegradedState() {
