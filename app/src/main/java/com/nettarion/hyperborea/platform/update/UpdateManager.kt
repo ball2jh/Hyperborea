@@ -1,6 +1,7 @@
 package com.nettarion.hyperborea.platform.update
 
 import android.content.Context
+import android.content.SharedPreferences
 import com.nettarion.hyperborea.BuildConfig
 import com.nettarion.hyperborea.core.AppLogger
 import dagger.hilt.android.qualifiers.ApplicationContext
@@ -20,6 +21,7 @@ class UpdateManager @Inject constructor(
     private val appInstaller: AppInstaller,
     private val logger: AppLogger,
     private val scope: CoroutineScope,
+    private val prefs: SharedPreferences,
 ) {
     private val _checking = MutableStateFlow(false)
     val checking: StateFlow<Boolean> = _checking.asStateFlow()
@@ -42,8 +44,15 @@ class UpdateManager @Inject constructor(
         scope.launch {
             _checking.value = true
             try {
-                logger.i(TAG, "Checking for updates at ${BuildConfig.UPDATE_MANIFEST_URL}")
-                val json = httpClient.fetchManifest(BuildConfig.UPDATE_MANIFEST_URL)
+                val manifestUrl = "${BuildConfig.SERVER_URL}/api/device/manifest"
+                val authToken = prefs.getString("license_auth_token", null)
+                val headers = if (authToken != null) {
+                    mapOf("Authorization" to "Bearer $authToken")
+                } else {
+                    emptyMap()
+                }
+                logger.i(TAG, "Checking for updates at $manifestUrl")
+                val json = httpClient.fetchManifest(manifestUrl, headers)
                 val manifest = UpdateManifest.parse(json)
 
                 manifest.app?.let { app ->

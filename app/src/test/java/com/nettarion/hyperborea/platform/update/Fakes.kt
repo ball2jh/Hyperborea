@@ -10,12 +10,12 @@ class FakeUpdateHttpClient : UpdateHttpClient {
     var downloadBytes: ByteArray = ByteArray(0)
     var downloadException: Exception? = null
 
-    override fun fetchManifest(url: String): String {
+    override fun fetchManifest(url: String, headers: Map<String, String>): String {
         manifestException?.let { throw it }
         return manifestResponse ?: throw IOException("No manifest configured")
     }
 
-    override fun openDownload(url: String): DownloadStream {
+    override fun openDownload(url: String, headers: Map<String, String>): DownloadStream {
         downloadException?.let { throw it }
         return DownloadStream(
             inputStream = ByteArrayInputStream(downloadBytes),
