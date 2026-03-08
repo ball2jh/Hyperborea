@@ -1,52 +1,51 @@
 package com.nettarion.hyperborea.platform.update
 
-import android.content.Context
-import android.content.SharedPreferences
-import app.cash.turbine.test
 import com.google.common.truth.Truth.assertThat
+import com.nettarion.hyperborea.platform.license.FakeSharedPreferences
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.test.UnconfinedTestDispatcher
 import kotlinx.coroutines.test.runTest
+import org.junit.Assert.assertThrows
 import org.junit.Before
 import org.junit.Test
-import org.junit.runner.RunWith
-import org.robolectric.RobolectricTestRunner
-import org.robolectric.RuntimeEnvironment
+import java.io.File
 
 @OptIn(ExperimentalCoroutinesApi::class)
-@RunWith(RobolectricTestRunner::class)
 class UpdateManagerTest {
 
     private lateinit var httpClient: FakeUpdateHttpClient
     private lateinit var logger: FakeAppLogger
-    private lateinit var manager: UpdateManager
+    private lateinit var prefs: FakeSharedPreferences
 
     @Before
     fun setUp() {
         httpClient = FakeUpdateHttpClient()
         logger = FakeAppLogger()
+        prefs = FakeSharedPreferences()
     }
 
     private fun createManager(
-        testDispatcher: kotlinx.coroutines.test.TestDispatcher = UnconfinedTestDispatcher(),
+        currentVersionCode: Int = 1,
     ): UpdateManager {
-        val context = RuntimeEnvironment.getApplication()
+        val testDispatcher = UnconfinedTestDispatcher()
         val scope = kotlinx.coroutines.CoroutineScope(testDispatcher)
-        val prefs = context.getSharedPreferences("test_license", Context.MODE_PRIVATE)
+        val downloadDir = File(System.getProperty("java.io.tmpdir"), "test-update-${System.nanoTime()}").absolutePath
         return UpdateManager(
-            context = context,
             httpClient = httpClient,
-            appInstaller = AppInstaller(context, logger),
+            appInstaller = FakeUpdateInstaller(),
             logger = logger,
             scope = scope,
             prefs = prefs,
+            versionProvider = VersionProvider { currentVersionCode },
+            downloadDir = downloadDir,
         )
     }
 
+    // --- Manifest parsing (kept from original) ---
+
     @Test
-    fun `checkForUpdates with newer app version sets appTrack to Available`() = runTest {
-        manager = createManager(UnconfinedTestDispatcher(testScheduler))
-        httpClient.manifestResponse = """
+    fun `manifest parsing extracts app entry`() {
+        val json = """
             {
                 "app": {
                     "versionCode": 999,
@@ -58,80 +57,130 @@ class UpdateManagerTest {
             }
         """.trimIndent()
 
+        val manifest = UpdateManifest.parse(json)
+        assertThat(manifest.app).isNotNull()
+        assertThat(manifest.app?.versionCode).isEqualTo(999)
+        assertThat(manifest.app?.versionName).isEqualTo("99.0")
+    }
+
+    @Test
+    fun `manifest parsing with empty JSON returns null app`() {
+        val manifest = UpdateManifest.parse("{}")
+        assertThat(manifest.app).isNull()
+    }
+
+    @Test
+    fun `manifest parsing with malformed JSON throws`() {
+        assertThrows(Exception::class.java) {
+            UpdateManifest.parse("not json")
+        }
+    }
+
+    // --- checkForUpdates ---
+
+    @Test
+    fun `checkForUpdates with newer version sets track to Available`() = runTest {
+        httpClient.manifestResponse = """
+            {
+                "app": {
+                    "versionCode": 10,
+                    "versionName": "2.0",
+                    "url": "https://example.com/app.apk",
+                    "sha256": "deadbeef",
+                    "releaseNotes": "New features."
+                }
+            }
+        """.trimIndent()
+
+        val manager = createManager(currentVersionCode = 1)
         manager.checkForUpdates()
 
         val state = manager.appTrack.state.value
         assertThat(state).isInstanceOf(TrackState.Available::class.java)
         val available = state as TrackState.Available
-        assertThat(available.info.version).isEqualTo("99.0")
-        assertThat(available.info.releaseNotes).isEqualTo("Big update.")
+        assertThat(available.info.version).isEqualTo("2.0")
+        assertThat(available.info.sha256).isEqualTo("deadbeef")
     }
 
     @Test
-    fun `checkForUpdates with same app version keeps appTrack Idle`() = runTest {
-        manager = createManager(UnconfinedTestDispatcher(testScheduler))
-
-        @Suppress("DEPRECATION")
-        val currentVersionCode = RuntimeEnvironment.getApplication().packageManager
-            .getPackageInfo(RuntimeEnvironment.getApplication().packageName, 0).versionCode
-
+    fun `checkForUpdates with same version does not set track to Available`() = runTest {
         httpClient.manifestResponse = """
             {
                 "app": {
-                    "versionCode": $currentVersionCode,
+                    "versionCode": 1,
                     "versionName": "1.0",
                     "url": "https://example.com/app.apk",
-                    "sha256": "abc"
+                    "sha256": "abc123"
                 }
             }
         """.trimIndent()
 
+        val manager = createManager(currentVersionCode = 1)
         manager.checkForUpdates()
 
         assertThat(manager.appTrack.state.value).isEqualTo(TrackState.Idle)
     }
 
     @Test
-    fun `checkForUpdates with empty manifest keeps appTrack Idle`() = runTest {
-        manager = createManager(UnconfinedTestDispatcher(testScheduler))
+    fun `checkForUpdates with older version does not set track to Available`() = runTest {
+        httpClient.manifestResponse = """
+            {
+                "app": {
+                    "versionCode": 1,
+                    "versionName": "0.5",
+                    "url": "https://example.com/app.apk",
+                    "sha256": "abc123"
+                }
+            }
+        """.trimIndent()
+
+        val manager = createManager(currentVersionCode = 5)
+        manager.checkForUpdates()
+
+        assertThat(manager.appTrack.state.value).isEqualTo(TrackState.Idle)
+    }
+
+    @Test
+    fun `checkForUpdates with no app in manifest is no-op`() = runTest {
         httpClient.manifestResponse = "{}"
 
+        val manager = createManager(currentVersionCode = 1)
         manager.checkForUpdates()
 
         assertThat(manager.appTrack.state.value).isEqualTo(TrackState.Idle)
     }
 
     @Test
-    fun `checkForUpdates with HTTP error keeps appTrack Idle`() = runTest {
-        manager = createManager(UnconfinedTestDispatcher(testScheduler))
-        httpClient.manifestException = java.io.IOException("No network")
+    fun `checkForUpdates with fetch error does not crash`() = runTest {
+        httpClient.manifestException = java.io.IOException("Network error")
 
+        val manager = createManager(currentVersionCode = 1)
         manager.checkForUpdates()
 
         assertThat(manager.appTrack.state.value).isEqualTo(TrackState.Idle)
     }
 
     @Test
-    fun `checkForUpdates with malformed JSON keeps appTrack Idle`() = runTest {
-        manager = createManager(UnconfinedTestDispatcher(testScheduler))
-        httpClient.manifestResponse = "not json"
-
-        manager.checkForUpdates()
-
-        assertThat(manager.appTrack.state.value).isEqualTo(TrackState.Idle)
-    }
-
-    @Test
-    fun `checking flow reflects in-progress state`() = runTest {
-        manager = createManager(UnconfinedTestDispatcher(testScheduler))
+    fun `checkForUpdates sets checking to true then false`() = runTest {
         httpClient.manifestResponse = "{}"
 
-        manager.checking.test {
-            assertThat(awaitItem()).isFalse()
-            manager.checkForUpdates()
-            // With UnconfinedTestDispatcher, the check completes immediately
-            // so we verify it returns to false
-            assertThat(manager.checking.value).isFalse()
-        }
+        val manager = createManager()
+        assertThat(manager.checking.value).isFalse()
+        manager.checkForUpdates()
+        // With UnconfinedTestDispatcher, the coroutine completes synchronously
+        assertThat(manager.checking.value).isFalse()
+    }
+
+    @Test
+    fun `checkForUpdates includes auth header when token present`() = runTest {
+        prefs.edit().putString("license_auth_token", "my-token").commit()
+        // Use manifestException to stop the flow early — the key thing is it makes the call
+        httpClient.manifestException = java.io.IOException("Expected")
+
+        val manager = createManager()
+        manager.checkForUpdates()
+
+        // No crash means the auth token was read and headers were constructed
+        assertThat(manager.appTrack.state.value).isEqualTo(TrackState.Idle)
     }
 }

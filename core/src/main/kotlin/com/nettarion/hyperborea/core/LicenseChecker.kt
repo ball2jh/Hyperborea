@@ -8,14 +8,24 @@ interface LicenseChecker {
     /** Check license status with the server. Updates [state]. */
     suspend fun check()
 
-    /** Link this device using a 6-digit code. Returns auth token on success. */
-    suspend fun linkWithCode(code: String): LinkResult
+    /** Request a new pairing session. Updates [state] to Pairing on success. */
+    suspend fun requestPairing(): PairingSession
 
-    /** Link this device using a QR token. Returns auth token on success. */
-    suspend fun linkWithQrToken(qrToken: String): LinkResult
+    /** Poll the server for pairing status. If linked, saves auth token and calls check(). */
+    suspend fun pollPairing(pairingToken: String): PairingStatus
+
+    /** Unlink this device from the account. Clears local credentials and notifies the server. */
+    suspend fun unlink()
 }
 
-sealed interface LinkResult {
-    data class Success(val authToken: String) : LinkResult
-    data class Error(val message: String) : LinkResult
+sealed interface PairingSession {
+    data class Created(val pairingToken: String, val pairingCode: String, val expiresAt: Long) : PairingSession
+    data class Error(val message: String) : PairingSession
+}
+
+sealed interface PairingStatus {
+    data object Pending : PairingStatus
+    data class Linked(val authToken: String) : PairingStatus
+    data object Expired : PairingStatus
+    data class Error(val message: String) : PairingStatus
 }

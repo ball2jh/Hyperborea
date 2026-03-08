@@ -1,10 +1,8 @@
 package com.nettarion.hyperborea.platform.update
 
-import android.content.Context
 import android.content.SharedPreferences
 import com.nettarion.hyperborea.BuildConfig
 import com.nettarion.hyperborea.core.AppLogger
-import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -12,23 +10,25 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 import javax.inject.Inject
+import javax.inject.Named
 import javax.inject.Singleton
 
 @Singleton
 class UpdateManager @Inject constructor(
-    @param:ApplicationContext private val context: Context,
     private val httpClient: UpdateHttpClient,
-    private val appInstaller: AppInstaller,
+    private val appInstaller: UpdateInstaller,
     private val logger: AppLogger,
     private val scope: CoroutineScope,
     private val prefs: SharedPreferences,
+    private val versionProvider: VersionProvider,
+    @param:Named("updateDir") private val downloadDir: String,
 ) {
     private val _checking = MutableStateFlow(false)
     val checking: StateFlow<Boolean> = _checking.asStateFlow()
 
     val appTrack: UpdateTrack = UpdateTrack(
         name = "app",
-        downloadDir = context.filesDir.resolve("update").absolutePath,
+        downloadDir = downloadDir,
         downloadFilename = "hyperborea.apk",
         installer = appInstaller,
         httpClient = httpClient,
@@ -56,9 +56,7 @@ class UpdateManager @Inject constructor(
                 val manifest = UpdateManifest.parse(json)
 
                 manifest.app?.let { app ->
-                    @Suppress("DEPRECATION")
-                    val currentVersionCode = context.packageManager
-                        .getPackageInfo(context.packageName, 0).versionCode
+                    val currentVersionCode = versionProvider.getVersionCode()
                     if (app.versionCode > currentVersionCode) {
                         logger.i(TAG, "App update available: ${app.versionName} (code ${app.versionCode})")
                         appTrack.setAvailable(

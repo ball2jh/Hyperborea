@@ -30,6 +30,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.KeyboardArrowUp
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.FilterChipDefaults
 import androidx.compose.material3.HorizontalDivider
@@ -38,6 +39,7 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.SwitchDefaults
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Tab
 import androidx.compose.material3.PrimaryTabRow
@@ -63,6 +65,7 @@ fun AdminDrawer(
     isOpen: Boolean,
     onClose: () -> Unit,
     onExpandLogs: () -> Unit = {},
+    onUnlinkDevice: () -> Unit = {},
     viewModel: AdminViewModel = hiltViewModel(),
 ) {
     val colors = LocalHyperboreaColors.current
@@ -130,6 +133,8 @@ fun AdminDrawer(
                     LogsSection(viewModel, onExpandLogs)
                     HorizontalDivider(color = colors.divider)
                     DiagnosticsSection(viewModel)
+                    HorizontalDivider(color = colors.divider)
+                    DeviceSection(onUnlinkDevice)
                 }
             }
         }
@@ -404,6 +409,54 @@ private fun DiagnosticsSection(viewModel: AdminViewModel) {
             onInstall = viewModel::installUpdate,
             onFinalize = viewModel::finalizeUpdate,
             onDismiss = viewModel::dismissUpdate,
+        )
+    }
+}
+
+@Composable
+private fun DeviceSection(onUnlinkDevice: () -> Unit) {
+    val colors = LocalHyperboreaColors.current
+    var showConfirmDialog by remember { mutableStateOf(false) }
+
+    CollapsibleSection("Device") {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 16.dp, vertical = 8.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    text = "Unlink Device",
+                    style = MaterialTheme.typography.bodyLarge,
+                    color = colors.textHigh,
+                )
+                Text(
+                    text = "Remove this device from your account",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = colors.textMedium,
+                )
+            }
+            OutlinedButton(onClick = { showConfirmDialog = true }) {
+                Text("Unlink")
+            }
+        }
+    }
+
+    if (showConfirmDialog) {
+        AlertDialog(
+            onDismissRequest = { showConfirmDialog = false },
+            title = { Text("Unlink device?") },
+            text = { Text("This will disconnect this device from your account. You can link it again later.") },
+            confirmButton = {
+                TextButton(onClick = {
+                    showConfirmDialog = false
+                    onUnlinkDevice()
+                }) { Text("Unlink") }
+            },
+            dismissButton = {
+                TextButton(onClick = { showConfirmDialog = false }) { Text("Cancel") }
+            },
         )
     }
 }

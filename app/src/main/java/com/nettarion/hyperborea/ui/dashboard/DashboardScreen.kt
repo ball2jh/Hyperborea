@@ -4,9 +4,10 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.navigationBarsPadding
+import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Snackbar
@@ -23,9 +24,12 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.nettarion.hyperborea.core.LicenseState
 import com.nettarion.hyperborea.ui.admin.AdminDrawer
 import com.nettarion.hyperborea.ui.admin.AdminViewModel
 import com.nettarion.hyperborea.ui.admin.FullScreenLogViewer
+import com.nettarion.hyperborea.ui.license.PairingScreen
+import com.nettarion.hyperborea.ui.license.UnlicensedScreen
 import com.nettarion.hyperborea.ui.theme.LocalHyperboreaColors
 import kotlinx.coroutines.delay
 
@@ -34,6 +38,46 @@ fun DashboardScreen(
     onProfileClick: (profileId: Long) -> Unit,
     viewModel: DashboardViewModel = hiltViewModel(),
     adminViewModel: AdminViewModel = hiltViewModel(),
+) {
+    val licenseState by viewModel.licenseState.collectAsStateWithLifecycle()
+
+    when (val state = licenseState) {
+        is LicenseState.Checking -> {
+            Box(
+                Modifier
+                    .fillMaxSize()
+                    .background(MaterialTheme.colorScheme.background),
+                contentAlignment = Alignment.Center,
+            ) {
+                CircularProgressIndicator()
+            }
+        }
+        is LicenseState.Unlicensed -> {
+            UnlicensedScreen(onLinkDevice = viewModel::requestPairing)
+        }
+        is LicenseState.Pairing -> {
+            PairingScreen(
+                pairingToken = state.pairingToken,
+                pairingCode = state.pairingCode,
+                expiresAt = state.expiresAt,
+                onCancel = viewModel::cancelPairing,
+            )
+        }
+        is LicenseState.Licensed -> {
+            DashboardContent(
+                onProfileClick = onProfileClick,
+                viewModel = viewModel,
+                adminViewModel = adminViewModel,
+            )
+        }
+    }
+}
+
+@Composable
+private fun DashboardContent(
+    onProfileClick: (profileId: Long) -> Unit,
+    viewModel: DashboardViewModel,
+    adminViewModel: AdminViewModel,
 ) {
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
     var drawerOpen by remember { mutableStateOf(false) }
@@ -99,6 +143,10 @@ fun DashboardScreen(
             onExpandLogs = {
                 drawerOpen = false
                 logsExpanded = true
+            },
+            onUnlinkDevice = {
+                drawerOpen = false
+                viewModel.unlinkDevice()
             },
             viewModel = adminViewModel,
         )

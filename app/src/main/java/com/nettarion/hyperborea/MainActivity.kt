@@ -18,7 +18,6 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.nettarion.hyperborea.core.LicenseChecker
 import com.nettarion.hyperborea.core.LicenseState
 import com.nettarion.hyperborea.ui.AppScreen
-import com.nettarion.hyperborea.ui.activation.ActivationScreen
 import com.nettarion.hyperborea.ui.dashboard.DashboardScreen
 import com.nettarion.hyperborea.ui.profile.ProfileEditScreen
 import com.nettarion.hyperborea.ui.profile.ProfilePickerScreen
@@ -44,12 +43,10 @@ class MainActivity : ComponentActivity() {
                 LaunchedEffect(licenseState) {
                     when (licenseState) {
                         is LicenseState.Licensed -> {
-                            if (currentScreen == null || currentScreen is AppScreen.Activation) {
-                                currentScreen = AppScreen.ProfilePicker
-                            }
+                            currentScreen = AppScreen.ProfilePicker
                         }
-                        is LicenseState.Unlicensed -> {
-                            currentScreen = AppScreen.Activation
+                        is LicenseState.Unlicensed, is LicenseState.Pairing -> {
+                            currentScreen = AppScreen.Dashboard
                         }
                         is LicenseState.Checking -> {
                             // Stay on current screen or show nothing
@@ -67,9 +64,6 @@ class MainActivity : ComponentActivity() {
                             CircularProgressIndicator()
                         }
                     }
-                    is AppScreen.Activation -> ActivationScreen(
-                        onActivated = { currentScreen = AppScreen.ProfilePicker },
-                    )
                     is AppScreen.ProfilePicker -> ProfilePickerScreen(
                         onProfileSelected = { currentScreen = AppScreen.Dashboard },
                         onCreateProfile = { currentScreen = AppScreen.ProfileEdit(null) },

@@ -22,6 +22,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.ArrowBack
 import androidx.compose.material.icons.outlined.Delete
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
@@ -29,6 +30,7 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -208,10 +210,37 @@ private fun StatRow(label: String, value: String) {
 private fun RideRow(ride: RideSummary, useImperial: Boolean, onDelete: () -> Unit) {
     val colors = LocalHyperboreaColors.current
     var expanded by remember { mutableStateOf(false) }
+    var showDeleteConfirmation by remember { mutableStateOf(false) }
     val dateFormat = remember { SimpleDateFormat("MMM d, yyyy  HH:mm", Locale.US) }
 
     val distText = if (useImperial) String.format("%.1f mi", ride.distanceKm * 0.621371f) else String.format("%.1f km", ride.distanceKm)
     fun speedText(kph: Float) = if (useImperial) String.format("%.1f mph", kph * 0.621371f) else String.format("%.1f km/h", kph)
+
+    if (showDeleteConfirmation) {
+        AlertDialog(
+            onDismissRequest = { showDeleteConfirmation = false },
+            title = { Text("Delete Ride") },
+            text = {
+                Text(
+                    "Delete ride from ${dateFormat.format(Date(ride.startedAt))}? This cannot be undone.",
+                    color = colors.textMedium,
+                )
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    showDeleteConfirmation = false
+                    onDelete()
+                }) {
+                    Text("Delete", color = MaterialTheme.colorScheme.error)
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showDeleteConfirmation = false }) {
+                    Text("Cancel")
+                }
+            },
+        )
+    }
 
     Column(
         modifier = Modifier
@@ -237,7 +266,7 @@ private fun RideRow(ride: RideSummary, useImperial: Boolean, onDelete: () -> Uni
                 ride.avgPower?.let {
                     Text("${it}W avg", style = MaterialTheme.typography.bodySmall, color = colors.electricBlue)
                 }
-                IconButton(onClick = onDelete, modifier = Modifier.size(24.dp)) {
+                IconButton(onClick = { showDeleteConfirmation = true }, modifier = Modifier.size(24.dp)) {
                     Icon(Icons.Outlined.Delete, contentDescription = "Delete ride", tint = colors.textLow, modifier = Modifier.size(16.dp))
                 }
             }

@@ -18,6 +18,9 @@
     <!-- USB host -->
     <uses-feature android:name="android.hardware.usb.host" android:required="true" />
 
+    <!-- Overlay window (auto-granted as platform-signed priv-app) -->
+    <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />
+
     <!-- Foreground service -->
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
 

@@ -9,6 +9,12 @@ android {
     defaultConfig {
         minSdk = 25
     }
+
+    testOptions {
+        unitTests {
+            isReturnDefaultValues = true
+        }
+    }
 }
 
 dependencies {
@@ -22,5 +28,4 @@ dependencies {
     testImplementation(libs.coroutines.test)
     testImplementation(libs.turbine)
     testImplementation(libs.mockk)
-    testImplementation(libs.robolectric)
 }
