@@ -1,10 +1,10 @@
 package com.nettarion.hyperborea.hardware.fitpro.v2
 
 import com.nettarion.hyperborea.core.AppLogger
-import com.nettarion.hyperborea.core.DeviceCommand
-import com.nettarion.hyperborea.core.DeviceIdentity
-import com.nettarion.hyperborea.core.ExerciseData
-import com.nettarion.hyperborea.hardware.fitpro.session.DeviceCapabilities
+import com.nettarion.hyperborea.core.model.DeviceCommand
+import com.nettarion.hyperborea.core.model.DeviceIdentity
+import com.nettarion.hyperborea.core.model.DeviceInfo
+import com.nettarion.hyperborea.core.model.ExerciseData
 import com.nettarion.hyperborea.hardware.fitpro.session.ExerciseDataAccumulator
 import com.nettarion.hyperborea.hardware.fitpro.session.FitProSession
 import com.nettarion.hyperborea.hardware.fitpro.session.SessionState
@@ -24,7 +24,7 @@ class V2Session(
     private val transport: HidTransport,
     private val logger: AppLogger,
     private val scope: CoroutineScope,
-    private val capabilities: DeviceCapabilities,
+    private val deviceInfo: DeviceInfo,
     private val accumulator: ExerciseDataAccumulator = ExerciseDataAccumulator(),
 ) : FitProSession {
 
@@ -109,7 +109,7 @@ class V2Session(
                 command.level.toFloat(),
             )
             is DeviceCommand.SetIncline -> {
-                lastSentGrade = roundToStep(command.percent, capabilities.inclineStep)
+                lastSentGrade = roundToStep(command.percent, deviceInfo.inclineStep)
                 V2Message.Outgoing.WriteFeature(V2FeatureId.TARGET_GRADE, lastSentGrade)
             }
             is DeviceCommand.SetTargetSpeed -> {
@@ -117,13 +117,13 @@ class V2Session(
                 V2Message.Outgoing.WriteFeature(V2FeatureId.TARGET_KPH, command.kph)
             }
             is DeviceCommand.AdjustIncline -> {
-                lastSentGrade += if (command.increase) capabilities.inclineStep else -capabilities.inclineStep
-                lastSentGrade = lastSentGrade.coerceIn(-10f, 40f)
+                lastSentGrade += if (command.increase) deviceInfo.inclineStep else -deviceInfo.inclineStep
+                lastSentGrade = lastSentGrade.coerceIn(deviceInfo.minIncline, deviceInfo.maxIncline)
                 V2Message.Outgoing.WriteFeature(V2FeatureId.TARGET_GRADE, lastSentGrade)
             }
             is DeviceCommand.AdjustSpeed -> {
-                lastSentSpeed += if (command.increase) 0.5f else -0.5f
-                lastSentSpeed = lastSentSpeed.coerceIn(0f, 60f)
+                lastSentSpeed += if (command.increase) deviceInfo.speedStep else -deviceInfo.speedStep
+                lastSentSpeed = lastSentSpeed.coerceIn(0f, deviceInfo.maxSpeed)
                 V2Message.Outgoing.WriteFeature(V2FeatureId.TARGET_KPH, lastSentSpeed)
             }
             is DeviceCommand.SetTargetPower -> V2Message.Outgoing.WriteFeature(

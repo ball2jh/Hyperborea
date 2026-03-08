@@ -7,7 +7,7 @@ import android.content.pm.PackageManager
 import android.hardware.usb.UsbDevice
 import android.hardware.usb.UsbManager
 import com.nettarion.hyperborea.core.AppLogger
-import com.nettarion.hyperborea.core.SystemController
+import com.nettarion.hyperborea.core.system.SystemController
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import javax.inject.Inject

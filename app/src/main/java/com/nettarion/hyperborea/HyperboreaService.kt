@@ -9,12 +9,14 @@ import android.os.IBinder
 import com.nettarion.hyperborea.core.AppLogger
 import com.nettarion.hyperborea.core.LicenseChecker
 import com.nettarion.hyperborea.core.LicenseState
-import com.nettarion.hyperborea.core.Orchestrator
-import com.nettarion.hyperborea.core.OrchestratorState
+import com.nettarion.hyperborea.core.orchestration.Orchestrator
+import com.nettarion.hyperborea.core.orchestration.OrchestratorState
 import dagger.hilt.android.AndroidEntryPoint
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.withTimeoutOrNull
 import javax.inject.Inject
 
 @AndroidEntryPoint
@@ -53,7 +55,11 @@ class HyperboreaService : Service() {
 
     override fun onDestroy() {
         stateObserverJob?.cancel()
-        scope.launch { orchestrator.stop() }
+        runBlocking {
+            withTimeoutOrNull(STOP_TIMEOUT_MS) {
+                orchestrator.stop()
+            } ?: logger.w(TAG, "Orchestrator stop timed out in onDestroy")
+        }
         logger.i(TAG, "Service destroyed")
         super.onDestroy()
     }
@@ -168,6 +174,7 @@ class HyperboreaService : Service() {
         const val ACTION_SHUTDOWN = "com.nettarion.hyperborea.action.SHUTDOWN"
 
         private const val NOTIFICATION_ID = 1
+        private const val STOP_TIMEOUT_MS = 3000L
         private const val TAG = "Service"
     }
 }

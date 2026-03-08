@@ -2,11 +2,11 @@ package com.nettarion.hyperborea.platform.systemlog
 
 import android.os.SystemClock
 import com.nettarion.hyperborea.core.AppLogger
-import com.nettarion.hyperborea.core.CaptureConfig
-import com.nettarion.hyperborea.core.CaptureState
-import com.nettarion.hyperborea.core.SystemLogCapture
-import com.nettarion.hyperborea.core.SystemLogEntry
-import com.nettarion.hyperborea.core.SystemLogStore
+import com.nettarion.hyperborea.core.system.CaptureConfig
+import com.nettarion.hyperborea.core.system.CaptureState
+import com.nettarion.hyperborea.core.system.SystemLogCapture
+import com.nettarion.hyperborea.core.system.SystemLogEntry
+import com.nettarion.hyperborea.core.system.SystemLogStore
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay

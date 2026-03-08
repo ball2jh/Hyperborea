@@ -3,8 +3,8 @@ package com.nettarion.hyperborea.di
 import com.google.common.truth.Truth.assertThat
 import com.nettarion.hyperborea.core.AppLogger
 import com.nettarion.hyperborea.core.LogStore
-import com.nettarion.hyperborea.core.SystemLogCapture
-import com.nettarion.hyperborea.core.SystemLogStore
+import com.nettarion.hyperborea.core.system.SystemLogCapture
+import com.nettarion.hyperborea.core.system.SystemLogStore
 import com.nettarion.hyperborea.platform.RingBufferLogStore
 import com.nettarion.hyperborea.platform.systemlog.RingBufferSystemLogStore
 import kotlinx.coroutines.SupervisorJob

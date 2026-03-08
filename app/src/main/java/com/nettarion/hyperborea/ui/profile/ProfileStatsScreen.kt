@@ -41,7 +41,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import com.nettarion.hyperborea.core.RideSummary
+import com.nettarion.hyperborea.core.model.RideSummary
 import com.nettarion.hyperborea.ui.theme.LocalHyperboreaColors
 import java.text.SimpleDateFormat
 import java.util.Date

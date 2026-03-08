@@ -1,9 +1,10 @@
 package com.nettarion.hyperborea.hardware.fitpro.session
 
-import com.nettarion.hyperborea.core.ExerciseData
+import com.nettarion.hyperborea.core.model.ExerciseData
 
 class ExerciseDataAccumulator(
     private val clock: () -> Long = System::currentTimeMillis,
+    initialElapsedSeconds: Long = 0L,
 ) {
     private var power: Int? = null
     private var cadence: Int? = null
@@ -23,12 +24,16 @@ class ExerciseDataAccumulator(
     private var lifetimeCalories: Int? = null
 
     // Elapsed time tracking — own clock, pausable
-    private var accumulatedSeconds: Long = 0L
+    private var accumulatedSeconds: Long = initialElapsedSeconds
     private var runningStartTime: Long = 0L
     private var paused: Boolean = false
 
     fun start() {
         // Clock starts lazily on first non-zero cadence
+    }
+
+    fun startTimer() {
+        if (runningStartTime == 0L && !paused) runningStartTime = clock()
     }
 
     fun pause() {

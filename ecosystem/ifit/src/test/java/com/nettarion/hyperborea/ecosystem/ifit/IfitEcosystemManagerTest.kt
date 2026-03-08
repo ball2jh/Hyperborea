@@ -1,11 +1,11 @@
 package com.nettarion.hyperborea.ecosystem.ifit
 
 import com.google.common.truth.Truth.assertThat
-import com.nettarion.hyperborea.core.ComponentState
-import com.nettarion.hyperborea.core.ComponentType
-import com.nettarion.hyperborea.core.DeclaredComponent
-import com.nettarion.hyperborea.core.FulfillResult
-import com.nettarion.hyperborea.core.SystemController
+import com.nettarion.hyperborea.core.system.ComponentState
+import com.nettarion.hyperborea.core.system.ComponentType
+import com.nettarion.hyperborea.core.system.DeclaredComponent
+import com.nettarion.hyperborea.core.orchestration.FulfillResult
+import com.nettarion.hyperborea.core.system.SystemController
 import com.nettarion.hyperborea.core.test.buildSystemSnapshot
 import kotlinx.coroutines.test.runTest
 import org.junit.Before

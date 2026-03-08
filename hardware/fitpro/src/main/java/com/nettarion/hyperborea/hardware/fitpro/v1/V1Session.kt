@@ -1,10 +1,10 @@
 package com.nettarion.hyperborea.hardware.fitpro.v1
 
 import com.nettarion.hyperborea.core.AppLogger
-import com.nettarion.hyperborea.core.DeviceCommand
-import com.nettarion.hyperborea.core.DeviceIdentity
-import com.nettarion.hyperborea.core.ExerciseData
-import com.nettarion.hyperborea.hardware.fitpro.session.DeviceCapabilities
+import com.nettarion.hyperborea.core.model.DeviceCommand
+import com.nettarion.hyperborea.core.model.DeviceIdentity
+import com.nettarion.hyperborea.core.model.DeviceInfo
+import com.nettarion.hyperborea.core.model.ExerciseData
 import com.nettarion.hyperborea.hardware.fitpro.session.ExerciseDataAccumulator
 import com.nettarion.hyperborea.hardware.fitpro.session.FitProSession
 import com.nettarion.hyperborea.hardware.fitpro.session.SessionState
@@ -26,7 +26,7 @@ class V1Session(
     private val transport: HidTransport,
     private val logger: AppLogger,
     private val scope: CoroutineScope,
-    private val capabilities: DeviceCapabilities,
+    private val deviceInfo: DeviceInfo,
     private val accumulator: ExerciseDataAccumulator = ExerciseDataAccumulator(),
 ) : FitProSession {
 
@@ -137,7 +137,7 @@ class V1Session(
                 mapOf(V1DataField.RESISTANCE to raw.toFloat())
             }
             is DeviceCommand.SetIncline -> {
-                lastSentGrade = roundToStep(command.percent, capabilities.inclineStep)
+                lastSentGrade = roundToStep(command.percent, deviceInfo.inclineStep)
                 mapOf(V1DataField.GRADE to lastSentGrade)
             }
             is DeviceCommand.SetTargetSpeed -> {
@@ -145,13 +145,13 @@ class V1Session(
                 mapOf(V1DataField.KPH to command.kph)
             }
             is DeviceCommand.AdjustIncline -> {
-                lastSentGrade += if (command.increase) capabilities.inclineStep else -capabilities.inclineStep
-                lastSentGrade = lastSentGrade.coerceIn(-10f, 40f)
+                lastSentGrade += if (command.increase) deviceInfo.inclineStep else -deviceInfo.inclineStep
+                lastSentGrade = lastSentGrade.coerceIn(deviceInfo.minIncline, deviceInfo.maxIncline)
                 mapOf(V1DataField.GRADE to lastSentGrade)
             }
             is DeviceCommand.AdjustSpeed -> {
-                lastSentSpeed += if (command.increase) 0.5f else -0.5f
-                lastSentSpeed = lastSentSpeed.coerceIn(0f, 60f)
+                lastSentSpeed += if (command.increase) deviceInfo.speedStep else -deviceInfo.speedStep
+                lastSentSpeed = lastSentSpeed.coerceIn(0f, deviceInfo.maxSpeed)
                 mapOf(V1DataField.KPH to lastSentSpeed)
             }
             is DeviceCommand.SetTargetPower -> {
@@ -318,6 +318,11 @@ class V1Session(
         if (decoded is V1Message.Incoming.DataResponse) {
             if (decoded.status == V1Message.STATUS_SECURITY_BLOCK) {
                 logger.w(TAG, "Security block — re-verifying")
+                if (writeFields.isNotEmpty()) {
+                    pendingWriteMutex.withLock {
+                        pendingWriteFields = writeFields + pendingWriteFields
+                    }
+                }
                 verifySecurity()
                 return
             }
@@ -349,7 +354,13 @@ class V1Session(
         for ((field, value) in fields) {
             when (field) {
                 V1DataField.WATTS -> accumulator.updatePower(value.toInt())
-                V1DataField.RPM -> accumulator.updateCadence(value.toInt())
+                V1DataField.RPM -> {
+                    val prev = accumulator.snapshot().cadence
+                    accumulator.updateCadence(value.toInt())
+                    if ((prev == null || prev == 0) && value.toInt() > 0) {
+                        logger.d(TAG, "Cadence went non-zero: ${value.toInt()} rpm")
+                    }
+                }
                 V1DataField.ACTUAL_KPH -> accumulator.updateSpeed(value)
                 V1DataField.KPH -> accumulator.updateTargetSpeed(value)
                 V1DataField.RESISTANCE -> {
@@ -368,7 +379,10 @@ class V1Session(
                     if (previousMode != mode) {
                         when (mode) {
                             WORKOUT_MODE_PAUSE.toInt() -> accumulator.pause()
-                            WORKOUT_MODE_RUNNING.toInt() -> accumulator.resume()
+                            WORKOUT_MODE_RUNNING.toInt() -> {
+                                accumulator.resume()
+                                accumulator.startTimer()
+                            }
                         }
                     }
                     accumulator.updateWorkoutMode(mode)
@@ -398,7 +412,7 @@ class V1Session(
         (value / step).roundToInt() * step
 
     // GlassOS ResistanceConverter: raw = max(0, level * ratio - 1)
-    private val resistanceRatio = 10000 / capabilities.maxResistance
+    private val resistanceRatio = 10000 / deviceInfo.maxResistance
 
     private fun resistanceLevelToRaw(level: Int): Int =
         maxOf(0, level * resistanceRatio - 1)

@@ -3,10 +3,10 @@ package com.nettarion.hyperborea.broadcast.ftms
 import android.bluetooth.BluetoothGattCharacteristic
 import android.bluetooth.BluetoothGattDescriptor
 import android.bluetooth.BluetoothGattService
-import com.nettarion.hyperborea.core.DeviceInfo
-import com.nettarion.hyperborea.core.DeviceType
-import com.nettarion.hyperborea.core.FtmsDataEncoder
-import com.nettarion.hyperborea.core.FtmsServiceMetadata
+import com.nettarion.hyperborea.core.model.DeviceInfo
+import com.nettarion.hyperborea.core.model.DeviceType
+import com.nettarion.hyperborea.core.ftms.FtmsDataEncoder
+import com.nettarion.hyperborea.core.ftms.FtmsServiceMetadata
 import java.util.UUID
 
 object FtmsServiceBuilder {

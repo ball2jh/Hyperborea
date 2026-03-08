@@ -53,8 +53,8 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import com.nettarion.hyperborea.core.AdapterState
-import com.nettarion.hyperborea.core.BroadcastId
+import com.nettarion.hyperborea.core.adapter.AdapterState
+import com.nettarion.hyperborea.core.adapter.BroadcastId
 import com.nettarion.hyperborea.core.LogLevel
 import com.nettarion.hyperborea.ui.theme.LocalHyperboreaColors
 

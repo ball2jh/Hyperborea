@@ -14,12 +14,13 @@ import android.content.pm.PackageManager
 import android.os.Build
 import android.os.ParcelUuid
 import com.nettarion.hyperborea.core.AppLogger
-import com.nettarion.hyperborea.core.ClientInfo
-import com.nettarion.hyperborea.core.DeviceCommand
-import com.nettarion.hyperborea.core.DeviceInfo
-import com.nettarion.hyperborea.core.ExerciseData
-import com.nettarion.hyperborea.core.FtmsDataEncoder
-import com.nettarion.hyperborea.core.RevolutionCounter
+import com.nettarion.hyperborea.core.model.ClientInfo
+import com.nettarion.hyperborea.core.model.DeviceCommand
+import com.nettarion.hyperborea.core.model.DeviceInfo
+import com.nettarion.hyperborea.core.model.ExerciseData
+import com.nettarion.hyperborea.core.ftms.FtmsDataEncoder
+import com.nettarion.hyperborea.core.ftms.RevolutionCounter
+import android.os.RemoteException
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.withTimeout
 
@@ -39,6 +40,7 @@ class FtmsBleServer(
     private var gattServer: BluetoothGattServer? = null
     private var callback: FtmsGattCallback? = null
     @Volatile private var connectedDevice: BluetoothDevice? = null
+    @Volatile private var isStopped = false
     private var advertiseCallback: AdvertiseCallback? = null
     private val revCounter = RevolutionCounter()
     private var lastTrainingStatus: Byte = 0x01 // Idle
@@ -49,6 +51,7 @@ class FtmsBleServer(
     @SuppressLint("MissingPermission") // Checked by requireBluetoothPermission() below
     suspend fun start(deviceName: String) {
         requireBluetoothPermission()
+        isStopped = false
 
         bluetoothAdapter.name = deviceName
 
@@ -93,6 +96,7 @@ class FtmsBleServer(
 
     @SuppressLint("MissingPermission") // Permission verified during start()
     fun stop() {
+        isStopped = true
         stopAdvertising()
 
         gattServer?.close()
@@ -105,57 +109,64 @@ class FtmsBleServer(
 
     @SuppressLint("MissingPermission") // Permission verified during start()
     fun broadcastData(data: ExerciseData) {
+        if (isStopped) return
         val server = gattServer ?: return
         val device = connectedDevice ?: return
         val cb = callback ?: return
 
-        // Data characteristic notification (device-type-specific)
-        val dataUuid = FtmsServiceBuilder.dataCharacteristicUuid(deviceInfo.type)
-        if (cb.isSubscribed(dataUuid)) {
-            val encodedData = FtmsDataEncoder.encodeData(deviceInfo.type, data)
-            val char = server.getService(FtmsServiceBuilder.FTMS_SERVICE_UUID)
-                ?.getCharacteristic(dataUuid)
-            if (char != null) {
-                char.value = encodedData
-                if (!server.notifyCharacteristicChanged(device, char, false)) {
-                    logger.w(TAG, "Failed to send data notification")
+        try {
+            // Data characteristic notification (device-type-specific)
+            val dataUuid = FtmsServiceBuilder.dataCharacteristicUuid(deviceInfo.type)
+            if (cb.isSubscribed(dataUuid)) {
+                val encodedData = FtmsDataEncoder.encodeData(deviceInfo.type, data)
+                val char = server.getService(FtmsServiceBuilder.FTMS_SERVICE_UUID)
+                    ?.getCharacteristic(dataUuid)
+                if (char != null) {
+                    char.value = encodedData
+                    if (!server.notifyCharacteristicChanged(device, char, false)) {
+                        logger.w(TAG, "Failed to send data notification")
+                    }
                 }
             }
-        }
 
-        // Training Status notification (on mode change)
-        val trainingStatus = FtmsDataEncoder.encodeTrainingStatus(data.workoutMode)
-        if (trainingStatus[1] != lastTrainingStatus) {
-            lastTrainingStatus = trainingStatus[1]
-            if (cb.isSubscribed(FtmsServiceBuilder.TRAINING_STATUS_UUID)) {
-                val tsChar = server.getService(FtmsServiceBuilder.FTMS_SERVICE_UUID)
-                    ?.getCharacteristic(FtmsServiceBuilder.TRAINING_STATUS_UUID)
-                if (tsChar != null) {
-                    tsChar.value = trainingStatus
-                    server.notifyCharacteristicChanged(device, tsChar, false)
+            // Training Status notification (on mode change)
+            val trainingStatus = FtmsDataEncoder.encodeTrainingStatus(data.workoutMode)
+            if (trainingStatus[1] != lastTrainingStatus) {
+                lastTrainingStatus = trainingStatus[1]
+                if (cb.isSubscribed(FtmsServiceBuilder.TRAINING_STATUS_UUID)) {
+                    val tsChar = server.getService(FtmsServiceBuilder.FTMS_SERVICE_UUID)
+                        ?.getCharacteristic(FtmsServiceBuilder.TRAINING_STATUS_UUID)
+                    if (tsChar != null) {
+                        tsChar.value = trainingStatus
+                        if (!server.notifyCharacteristicChanged(device, tsChar, false)) {
+                            logger.w(TAG, "Failed to send Training Status notification")
+                        }
+                    }
                 }
             }
-        }
 
-        // CPS Measurement notification
-        if (cb.isSubscribed(FtmsServiceBuilder.CPS_MEASUREMENT_UUID)) {
-            val now = System.currentTimeMillis()
-            revCounter.update(data, now)
-            val cpsMeasurement = FtmsDataEncoder.encodeCpsMeasurement(
-                data,
-                revCounter.cumulativeWheelRevs,
-                revCounter.lastWheelEventTime,
-                revCounter.cumulativeCrankRevs,
-                revCounter.lastCrankEventTime,
-            )
-            val char = server.getService(FtmsServiceBuilder.CPS_SERVICE_UUID)
-                ?.getCharacteristic(FtmsServiceBuilder.CPS_MEASUREMENT_UUID)
-            if (char != null) {
-                char.value = cpsMeasurement
-                if (!server.notifyCharacteristicChanged(device, char, false)) {
-                    logger.w(TAG, "Failed to send CPS Measurement notification")
+            // CPS Measurement notification
+            if (cb.isSubscribed(FtmsServiceBuilder.CPS_MEASUREMENT_UUID)) {
+                val now = System.currentTimeMillis()
+                revCounter.update(data, now)
+                val cpsMeasurement = FtmsDataEncoder.encodeCpsMeasurement(
+                    data,
+                    revCounter.cumulativeWheelRevs,
+                    revCounter.lastWheelEventTime,
+                    revCounter.cumulativeCrankRevs,
+                    revCounter.lastCrankEventTime,
+                )
+                val char = server.getService(FtmsServiceBuilder.CPS_SERVICE_UUID)
+                    ?.getCharacteristic(FtmsServiceBuilder.CPS_MEASUREMENT_UUID)
+                if (char != null) {
+                    char.value = cpsMeasurement
+                    if (!server.notifyCharacteristicChanged(device, char, false)) {
+                        logger.w(TAG, "Failed to send CPS Measurement notification")
+                    }
                 }
             }
+        } catch (e: RemoteException) {
+            logger.d(TAG, "GATT server closed during broadcast: ${e.message}")
         }
     }
 

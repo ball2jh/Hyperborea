@@ -1,8 +1,8 @@
 package com.nettarion.hyperborea.hardware.fitpro.session
 
-import com.nettarion.hyperborea.core.DeviceInfo
-import com.nettarion.hyperborea.core.DeviceType
-import com.nettarion.hyperborea.core.Metric
+import com.nettarion.hyperborea.core.model.DeviceInfo
+import com.nettarion.hyperborea.core.model.DeviceType
+import com.nettarion.hyperborea.core.model.Metric
 
 object DeviceDatabase {
 
@@ -15,6 +15,9 @@ object DeviceDatabase {
         val minIncline: Float,
         val maxIncline: Float,
         val maxPower: Int,
+        val inclineStep: Float,
+        val speedStep: Float,
+        val maxSpeed: Float,
     )
 
     private val STANDARD_BIKE_METRICS = setOf(
@@ -35,6 +38,9 @@ object DeviceDatabase {
             minIncline = -6f,
             maxIncline = 40f,
             maxPower = 2000,
+            inclineStep = 0.5f,
+            speedStep = 0.5f,
+            maxSpeed = 60f,
         ),
     )
 
@@ -54,7 +60,19 @@ object DeviceDatabase {
         minIncline = -6f,
         maxIncline = 40f,
         maxPower = 2000,
+        inclineStep = 0.5f,
+        speedStep = 0.5f,
+        maxSpeed = 60f,
     )
+
+    private val productIdToModel: Map<Int, Int> = mapOf(
+        2 to 2117, 3 to 2117, 4 to 2117,
+    )
+
+    fun fromProductId(productId: Int): DeviceInfo? {
+        val modelNumber = productIdToModel[productId] ?: return null
+        return fromModel(modelNumber)
+    }
 
     private fun DeviceRecord.toDeviceInfo() = DeviceInfo(
         name = name,
@@ -65,5 +83,8 @@ object DeviceDatabase {
         minIncline = minIncline,
         maxIncline = maxIncline,
         maxPower = maxPower,
+        inclineStep = inclineStep,
+        speedStep = speedStep,
+        maxSpeed = maxSpeed,
     )
 }

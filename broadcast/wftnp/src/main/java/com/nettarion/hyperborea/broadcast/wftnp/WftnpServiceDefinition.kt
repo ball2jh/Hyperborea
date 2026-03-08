@@ -1,8 +1,8 @@
 package com.nettarion.hyperborea.broadcast.wftnp
 
-import com.nettarion.hyperborea.core.DeviceInfo
-import com.nettarion.hyperborea.core.FtmsDataEncoder
-import com.nettarion.hyperborea.core.FtmsServiceMetadata
+import com.nettarion.hyperborea.core.model.DeviceInfo
+import com.nettarion.hyperborea.core.ftms.FtmsDataEncoder
+import com.nettarion.hyperborea.core.ftms.FtmsServiceMetadata
 
 class WftnpServiceDefinition(deviceInfo: DeviceInfo) {
 

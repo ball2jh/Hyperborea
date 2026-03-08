@@ -1,7 +1,7 @@
 package com.nettarion.hyperborea.broadcast.wftnp
 
 import com.google.common.truth.Truth.assertThat
-import com.nettarion.hyperborea.core.AdapterState
+import com.nettarion.hyperborea.core.adapter.AdapterState
 import com.nettarion.hyperborea.core.AppLogger
 import com.nettarion.hyperborea.core.test.buildDeviceInfo
 import com.nettarion.hyperborea.core.test.buildSystemSnapshot

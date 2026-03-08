@@ -1,17 +1,17 @@
 package com.nettarion.hyperborea.core.test
 
-import com.nettarion.hyperborea.core.DeclaredComponent
-import com.nettarion.hyperborea.core.DeviceInfo
-import com.nettarion.hyperborea.core.DeviceType
-import com.nettarion.hyperborea.core.ExerciseData
-import com.nettarion.hyperborea.core.Metric
-import com.nettarion.hyperborea.core.InstalledPackage
+import com.nettarion.hyperborea.core.system.DeclaredComponent
+import com.nettarion.hyperborea.core.model.DeviceInfo
+import com.nettarion.hyperborea.core.model.DeviceType
+import com.nettarion.hyperborea.core.model.ExerciseData
+import com.nettarion.hyperborea.core.model.Metric
+import com.nettarion.hyperborea.core.system.InstalledPackage
 import com.nettarion.hyperborea.core.LogLevel
-import com.nettarion.hyperborea.core.SystemLogEntry
-import com.nettarion.hyperborea.core.SystemLogSource
-import com.nettarion.hyperborea.core.SystemSnapshot
-import com.nettarion.hyperborea.core.SystemStatus
-import com.nettarion.hyperborea.core.UsbDeviceInfo
+import com.nettarion.hyperborea.core.system.SystemLogEntry
+import com.nettarion.hyperborea.core.system.SystemLogSource
+import com.nettarion.hyperborea.core.system.SystemSnapshot
+import com.nettarion.hyperborea.core.system.SystemStatus
+import com.nettarion.hyperborea.core.system.UsbDeviceInfo
 
 fun buildSystemSnapshot(
     isBluetoothLeEnabled: Boolean = false,
@@ -52,6 +52,9 @@ fun buildDeviceInfo(
     minIncline: Float = -6f,
     maxIncline: Float = 40f,
     maxPower: Int = 2000,
+    inclineStep: Float = 0.5f,
+    speedStep: Float = 0.5f,
+    maxSpeed: Float = 60f,
 ): DeviceInfo = DeviceInfo(
     name = name,
     type = type,
@@ -61,6 +64,9 @@ fun buildDeviceInfo(
     minIncline = minIncline,
     maxIncline = maxIncline,
     maxPower = maxPower,
+    inclineStep = inclineStep,
+    speedStep = speedStep,
+    maxSpeed = maxSpeed,
 )
 
 fun buildExerciseData(

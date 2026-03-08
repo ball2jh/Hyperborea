@@ -35,7 +35,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import com.nettarion.hyperborea.core.Profile
+import com.nettarion.hyperborea.core.model.Profile
 import com.nettarion.hyperborea.ui.theme.LocalHyperboreaColors
 
 @Composable

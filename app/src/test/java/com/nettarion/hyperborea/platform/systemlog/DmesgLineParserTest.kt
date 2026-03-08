@@ -2,7 +2,7 @@ package com.nettarion.hyperborea.platform.systemlog
 
 import com.google.common.truth.Truth.assertThat
 import com.nettarion.hyperborea.core.LogLevel
-import com.nettarion.hyperborea.core.SystemLogSource
+import com.nettarion.hyperborea.core.system.SystemLogSource
 import org.junit.Test
 
 class DmesgLineParserTest {

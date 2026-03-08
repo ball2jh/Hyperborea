@@ -1,15 +1,21 @@
 package com.nettarion.hyperborea.broadcast.wftnp
 
 import com.nettarion.hyperborea.core.AppLogger
-import com.nettarion.hyperborea.core.ControlPointParser
-import com.nettarion.hyperborea.core.DeviceCommand
-import com.nettarion.hyperborea.core.DeviceType
-import com.nettarion.hyperborea.core.ExerciseData
-import com.nettarion.hyperborea.core.FtmsDataEncoder
-import com.nettarion.hyperborea.core.RevolutionCounter
+import com.nettarion.hyperborea.core.ftms.ControlPointParser
+import com.nettarion.hyperborea.core.model.DeviceCommand
+import com.nettarion.hyperborea.core.model.DeviceType
+import com.nettarion.hyperborea.core.model.ExerciseData
+import com.nettarion.hyperborea.core.ftms.FtmsDataEncoder
+import com.nettarion.hyperborea.core.ftms.RevolutionCounter
 import java.io.InputStream
 import java.io.OutputStream
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.filterNotNull
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
@@ -20,16 +26,20 @@ class WftnpClientHandler(
     private val output: OutputStream,
     private val deviceType: DeviceType,
     private val serviceDef: WftnpServiceDefinition,
+    private val scope: CoroutineScope,
     private val onCommand: (DeviceCommand) -> Unit,
     private val logger: AppLogger,
 ) {
-    private val enabledNotifications: MutableSet<ShortUuid> =
+    internal val enabledNotifications: MutableSet<ShortUuid> =
         java.util.Collections.newSetFromMap(java.util.concurrent.ConcurrentHashMap())
     private val writeMutex = Mutex()
     @Volatile var isClosed = false
         private set
 
     private val revCounter = RevolutionCounter()
+    private val pendingData = MutableStateFlow<ExerciseData?>(null)
+    private var sendJob: Job? = null
+    private var consecutiveWriteErrors = 0
 
     suspend fun runReadLoop() = withContext(Dispatchers.IO) {
         try {
@@ -46,13 +56,26 @@ class WftnpClientHandler(
         }
     }
 
-    suspend fun sendNotifications(data: ExerciseData) {
+    fun updateData(data: ExerciseData) {
+        pendingData.value = data
+    }
+
+    fun startSendLoop() {
+        sendJob = scope.launch {
+            pendingData.filterNotNull().collect { data ->
+                sendNotificationsInternal(data)
+                delay(NOTIFICATION_INTERVAL_MS)
+            }
+        }
+    }
+
+    private suspend fun sendNotificationsInternal(data: ExerciseData) {
         if (isClosed) return
         val now = System.currentTimeMillis()
 
         if (enabledNotifications.contains(serviceDef.dataCharacteristic)) {
             val value = FtmsDataEncoder.encodeData(deviceType, data)
-            send(WftnpCodec.encodeNotification(serviceDef.dataCharacteristic, value))
+            sendNotification(WftnpCodec.encodeNotification(serviceDef.dataCharacteristic, value))
         }
 
         if (enabledNotifications.contains(WftnpServiceDefinition.CPS_MEASUREMENT)) {
@@ -64,12 +87,14 @@ class WftnpClientHandler(
                 revCounter.cumulativeCrankRevs,
                 revCounter.lastCrankEventTime,
             )
-            send(WftnpCodec.encodeNotification(WftnpServiceDefinition.CPS_MEASUREMENT, value))
+            sendNotification(WftnpCodec.encodeNotification(WftnpServiceDefinition.CPS_MEASUREMENT, value))
         }
     }
 
     fun close() {
         isClosed = true
+        sendJob?.cancel()
+        sendJob = null
         runCatching { input.close() }
         runCatching { output.close() }
     }
@@ -174,6 +199,25 @@ class WftnpClientHandler(
         send(WftnpCodec.encodeResponse(WftnpCodec.ID_ENABLE_NOTIFICATIONS, request.sequence, WftnpCodec.RESP_SUCCESS))
     }
 
+    private suspend fun sendNotification(bytes: ByteArray) {
+        if (isClosed) return
+        try {
+            writeMutex.withLock {
+                withContext(Dispatchers.IO) {
+                    output.write(bytes)
+                    output.flush()
+                }
+            }
+            consecutiveWriteErrors = 0
+        } catch (e: Exception) {
+            consecutiveWriteErrors++
+            logger.d(TAG, "Client $clientId notification write error ($consecutiveWriteErrors/$MAX_CONSECUTIVE_WRITE_ERRORS): ${e.message}")
+            if (consecutiveWriteErrors >= MAX_CONSECUTIVE_WRITE_ERRORS) {
+                isClosed = true
+            }
+        }
+    }
+
     private suspend fun send(bytes: ByteArray) {
         if (isClosed) return
         try {
@@ -191,5 +235,7 @@ class WftnpClientHandler(
 
     private companion object {
         const val TAG = "WftnpClient"
+        const val NOTIFICATION_INTERVAL_MS = 250L
+        const val MAX_CONSECUTIVE_WRITE_ERRORS = 3
     }
 }

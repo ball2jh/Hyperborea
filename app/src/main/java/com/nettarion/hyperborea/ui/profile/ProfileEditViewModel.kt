@@ -2,8 +2,8 @@ package com.nettarion.hyperborea.ui.profile
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
-import com.nettarion.hyperborea.core.Profile
-import com.nettarion.hyperborea.core.ProfileRepository
+import com.nettarion.hyperborea.core.model.Profile
+import com.nettarion.hyperborea.core.profile.ProfileRepository
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow

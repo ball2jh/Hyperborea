@@ -1,7 +1,7 @@
 package com.nettarion.hyperborea.ui.dashboard
 
 import com.google.common.truth.Truth.assertThat
-import com.nettarion.hyperborea.core.ExerciseData
+import com.nettarion.hyperborea.core.model.ExerciseData
 import org.junit.Test
 
 class ControlModeLabelTest {

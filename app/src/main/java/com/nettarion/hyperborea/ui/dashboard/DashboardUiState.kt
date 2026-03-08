@@ -1,11 +1,11 @@
 package com.nettarion.hyperborea.ui.dashboard
 
-import com.nettarion.hyperborea.core.AdapterState
-import com.nettarion.hyperborea.core.BroadcastId
-import com.nettarion.hyperborea.core.DeviceInfo
-import com.nettarion.hyperborea.core.ExerciseData
-import com.nettarion.hyperborea.core.OrchestratorState
-import com.nettarion.hyperborea.core.SystemStatus
+import com.nettarion.hyperborea.core.adapter.AdapterState
+import com.nettarion.hyperborea.core.adapter.BroadcastId
+import com.nettarion.hyperborea.core.model.DeviceInfo
+import com.nettarion.hyperborea.core.model.ExerciseData
+import com.nettarion.hyperborea.core.orchestration.OrchestratorState
+import com.nettarion.hyperborea.core.system.SystemStatus
 
 data class DashboardUiState(
     val orchestratorState: OrchestratorState,

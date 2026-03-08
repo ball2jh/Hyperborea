@@ -2,9 +2,9 @@ package com.nettarion.hyperborea.ui.profile
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
-import com.nettarion.hyperborea.core.Profile
-import com.nettarion.hyperborea.core.ProfileRepository
-import com.nettarion.hyperborea.core.RideSummary
+import com.nettarion.hyperborea.core.model.Profile
+import com.nettarion.hyperborea.core.profile.ProfileRepository
+import com.nettarion.hyperborea.core.model.RideSummary
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.SharingStarted

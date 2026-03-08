@@ -1,10 +1,10 @@
 package com.nettarion.hyperborea.ecosystem.ifit
 
-import com.nettarion.hyperborea.core.ComponentState
-import com.nettarion.hyperborea.core.ComponentType
-import com.nettarion.hyperborea.core.EcosystemManager
-import com.nettarion.hyperborea.core.FulfillResult
-import com.nettarion.hyperborea.core.Prerequisite
+import com.nettarion.hyperborea.core.system.ComponentState
+import com.nettarion.hyperborea.core.system.ComponentType
+import com.nettarion.hyperborea.core.orchestration.EcosystemManager
+import com.nettarion.hyperborea.core.orchestration.FulfillResult
+import com.nettarion.hyperborea.core.orchestration.Prerequisite
 import javax.inject.Inject
 import javax.inject.Singleton
 

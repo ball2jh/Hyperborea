@@ -1,8 +1,8 @@
 package com.nettarion.hyperborea.hardware.fitpro.session
 
 import com.google.common.truth.Truth.assertThat
-import com.nettarion.hyperborea.core.DeviceType
-import com.nettarion.hyperborea.core.Metric
+import com.nettarion.hyperborea.core.model.DeviceType
+import com.nettarion.hyperborea.core.model.Metric
 import org.junit.Test
 
 class DeviceDatabaseTest {

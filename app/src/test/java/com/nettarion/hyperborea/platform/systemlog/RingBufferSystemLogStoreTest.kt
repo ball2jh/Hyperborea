@@ -2,11 +2,11 @@ package com.nettarion.hyperborea.platform.systemlog
 
 import com.google.common.truth.Truth.assertThat
 import com.nettarion.hyperborea.core.AppLogger
-import com.nettarion.hyperborea.core.CaptureConfig
-import com.nettarion.hyperborea.core.CaptureState
+import com.nettarion.hyperborea.core.system.CaptureConfig
+import com.nettarion.hyperborea.core.system.CaptureState
 import com.nettarion.hyperborea.core.LogLevel
-import com.nettarion.hyperborea.core.SystemLogEntry
-import com.nettarion.hyperborea.core.SystemLogSource
+import com.nettarion.hyperborea.core.system.SystemLogEntry
+import com.nettarion.hyperborea.core.system.SystemLogSource
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.test.TestScope
 import kotlinx.coroutines.test.advanceTimeBy
