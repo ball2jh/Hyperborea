@@ -5,6 +5,7 @@ plugins {
 
 dependencies {
     api(libs.coroutines.core)
+    implementation(libs.bouncycastle)
 
     testFixturesImplementation(libs.coroutines.core)
 

@@ -8,8 +8,8 @@ import javax.inject.Singleton
 @Singleton
 class HttpUrlConnectionClient @Inject constructor() : UpdateHttpClient {
 
-    override fun fetchManifest(url: String): String {
-        val connection = openConnection(url)
+    override fun fetchManifest(url: String, headers: Map<String, String>): String {
+        val connection = openConnection(url, headers)
         try {
             return connection.inputStream.bufferedReader().use { it.readText() }
         } finally {
@@ -17,8 +17,8 @@ class HttpUrlConnectionClient @Inject constructor() : UpdateHttpClient {
         }
     }
 
-    override fun openDownload(url: String): DownloadStream {
-        val connection = openConnection(url)
+    override fun openDownload(url: String, headers: Map<String, String>): DownloadStream {
+        val connection = openConnection(url, headers)
         val contentLength = connection.contentLength.toLong()
         return DownloadStream(
             inputStream = connection.inputStream,
@@ -26,11 +26,14 @@ class HttpUrlConnectionClient @Inject constructor() : UpdateHttpClient {
         )
     }
 
-    private fun openConnection(url: String): HttpURLConnection {
+    private fun openConnection(url: String, headers: Map<String, String> = emptyMap()): HttpURLConnection {
         val connection = URL(url).openConnection() as HttpURLConnection
         connection.connectTimeout = CONNECT_TIMEOUT_MS
         connection.readTimeout = READ_TIMEOUT_MS
         connection.requestMethod = "GET"
+        headers.forEach { (key, value) ->
+            connection.setRequestProperty(key, value)
+        }
         val responseCode = connection.responseCode
         if (responseCode != HttpURLConnection.HTTP_OK) {
             connection.disconnect()

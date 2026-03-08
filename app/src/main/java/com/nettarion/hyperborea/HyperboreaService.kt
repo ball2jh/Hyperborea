@@ -7,6 +7,8 @@ import android.content.Context
 import android.content.Intent
 import android.os.IBinder
 import com.nettarion.hyperborea.core.AppLogger
+import com.nettarion.hyperborea.core.LicenseChecker
+import com.nettarion.hyperborea.core.LicenseState
 import com.nettarion.hyperborea.core.Orchestrator
 import com.nettarion.hyperborea.core.OrchestratorState
 import dagger.hilt.android.AndroidEntryPoint
@@ -21,6 +23,7 @@ class HyperboreaService : Service() {
     @Inject lateinit var orchestrator: Orchestrator
     @Inject lateinit var logger: AppLogger
     @Inject lateinit var scope: CoroutineScope
+    @Inject lateinit var licenseChecker: LicenseChecker
 
     private var stateObserverJob: Job? = null
 
@@ -66,6 +69,11 @@ class HyperboreaService : Service() {
     private fun activate() {
         logger.i(TAG, "Activating orchestrator")
         scope.launch {
+            licenseChecker.check()
+            if (licenseChecker.state.value !is LicenseState.Licensed) {
+                logger.w(TAG, "Cannot activate: not licensed")
+                return@launch
+            }
             orchestrator.start()
         }
     }

@@ -14,6 +14,9 @@ import com.nettarion.hyperborea.core.DeviceInfo
 import com.nettarion.hyperborea.core.EcosystemManager
 import com.nettarion.hyperborea.core.ExerciseData
 import com.nettarion.hyperborea.core.HardwareAdapter
+import com.nettarion.hyperborea.core.LicenseChecker
+import com.nettarion.hyperborea.core.LicenseState
+import com.nettarion.hyperborea.core.LinkResult
 import com.nettarion.hyperborea.core.Orchestrator
 import com.nettarion.hyperborea.core.OrchestratorState
 import com.nettarion.hyperborea.core.Prerequisite
@@ -94,6 +97,7 @@ class DashboardViewModelTest {
             systemMonitor = fakeSystemMonitor,
             userPreferences = fakeUserPreferences,
             profileRepository = fakeProfileRepository,
+            licenseChecker = FakeLicenseChecker(),
             context = context,
         )
     }
@@ -251,6 +255,13 @@ class DashboardViewModelTest {
 
     private class FakeEcosystemManager : EcosystemManager {
         override val prerequisites: List<Prerequisite> = emptyList()
+    }
+
+    private class FakeLicenseChecker : LicenseChecker {
+        override val state = MutableStateFlow<LicenseState>(LicenseState.Licensed(Long.MAX_VALUE))
+        override suspend fun check() {}
+        override suspend fun linkWithCode(code: String) = LinkResult.Success("test-token")
+        override suspend fun linkWithQrToken(qrToken: String) = LinkResult.Success("test-token")
     }
 
     private class FakeProfileRepository : ProfileRepository {

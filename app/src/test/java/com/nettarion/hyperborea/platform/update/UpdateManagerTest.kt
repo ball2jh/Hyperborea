@@ -1,5 +1,7 @@
 package com.nettarion.hyperborea.platform.update
 
+import android.content.Context
+import android.content.SharedPreferences
 import app.cash.turbine.test
 import com.google.common.truth.Truth.assertThat
 import kotlinx.coroutines.ExperimentalCoroutinesApi
@@ -30,12 +32,14 @@ class UpdateManagerTest {
     ): UpdateManager {
         val context = RuntimeEnvironment.getApplication()
         val scope = kotlinx.coroutines.CoroutineScope(testDispatcher)
+        val prefs = context.getSharedPreferences("test_license", Context.MODE_PRIVATE)
         return UpdateManager(
             context = context,
             httpClient = httpClient,
             appInstaller = AppInstaller(context, logger),
             logger = logger,
             scope = scope,
+            prefs = prefs,
         )
     }
 
