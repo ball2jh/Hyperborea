@@ -16,19 +16,20 @@ class ActivationViewModel @Inject constructor(
     private val licenseChecker: LicenseChecker,
 ) : ViewModel() {
 
-    val codeInput = MutableStateFlow("")
+    private val _codeInput = MutableStateFlow("")
+    val codeInput: StateFlow<String> = _codeInput.asStateFlow()
 
     private val _linkingState = MutableStateFlow<LinkingState>(LinkingState.Idle)
     val linkingState: StateFlow<LinkingState> = _linkingState.asStateFlow()
 
     fun updateCode(code: String) {
         if (code.length <= 6 && code.all { it.isDigit() }) {
-            codeInput.value = code
+            _codeInput.value = code
         }
     }
 
     fun submitCode() {
-        val code = codeInput.value
+        val code = _codeInput.value
         if (code.length != 6) return
 
         _linkingState.value = LinkingState.Linking
