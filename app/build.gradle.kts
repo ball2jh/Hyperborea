@@ -14,9 +14,6 @@ val localPropertiesFile = rootProject.file("local.properties")
 if (localPropertiesFile.exists()) {
     localPropertiesFile.inputStream().use { stream -> localProperties.load(stream) }
 }
-val manifestUrl = localProperties.getProperty("update.manifest.url")
-    ?: findProperty("update.manifest.url") as String?
-    ?: "https://example.com/hyperborea/manifest.json"
 val serverUrl = localProperties.getProperty("server.url")
     ?: findProperty("server.url") as String?
     ?: "https://example.com"
@@ -47,7 +44,6 @@ android {
         versionCode = 1
         versionName = "1.0"
 
-        buildConfigField("String", "UPDATE_MANIFEST_URL", "\"$manifestUrl\"")
         buildConfigField("String", "SERVER_URL", "\"$serverUrl\"")
         buildConfigField("String", "LICENSE_PUBLIC_KEY", "\"$licensePublicKey\"")
         buildConfigField("String", "SIGNING_CERTIFICATE_SHA256", "\"\"")
