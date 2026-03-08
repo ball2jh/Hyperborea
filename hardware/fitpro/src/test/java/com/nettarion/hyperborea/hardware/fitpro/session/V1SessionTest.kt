@@ -668,4 +668,111 @@ class V1SessionTest {
         // Timer should have started due to WORKOUT_MODE=RUNNING
         assertThat(data.elapsedTime).isAtLeast(0L)
     }
+
+    // --- commandToFields: direct mapping tests ---
+
+    private fun createUnstartedSession(): V1Session =
+        V1Session(transport, logger, TestScope().backgroundScope, buildDeviceInfo(maxResistance = 24))
+
+    @Test
+    fun `commandToFields SetIncline rounds to 0_5 percent step`() {
+        val session = createUnstartedSession()
+        val fields = session.commandToFields(DeviceCommand.SetIncline(1.3f))
+        assertThat(fields).containsExactly(V1DataField.GRADE, 1.5f)
+    }
+
+    @Test
+    fun `commandToFields SetIncline rounds down when closer`() {
+        val session = createUnstartedSession()
+        val fields = session.commandToFields(DeviceCommand.SetIncline(1.2f))
+        assertThat(fields).containsExactly(V1DataField.GRADE, 1.0f)
+    }
+
+    @Test
+    fun `commandToFields SetIncline at exact step unchanged`() {
+        val session = createUnstartedSession()
+        val fields = session.commandToFields(DeviceCommand.SetIncline(3.0f))
+        assertThat(fields).containsExactly(V1DataField.GRADE, 3.0f)
+    }
+
+    @Test
+    fun `commandToFields AdjustIncline increase from zero`() {
+        val session = createUnstartedSession()
+        val fields = session.commandToFields(DeviceCommand.AdjustIncline(increase = true))
+        assertThat(fields).containsExactly(V1DataField.GRADE, 0.5f)
+    }
+
+    @Test
+    fun `commandToFields AdjustIncline two increases accumulate`() {
+        val session = createUnstartedSession()
+        session.commandToFields(DeviceCommand.AdjustIncline(increase = true))
+        val fields = session.commandToFields(DeviceCommand.AdjustIncline(increase = true))
+        assertThat(fields).containsExactly(V1DataField.GRADE, 1.0f)
+    }
+
+    @Test
+    fun `commandToFields AdjustIncline clamped at maxIncline`() {
+        val session = createUnstartedSession()
+        session.commandToFields(DeviceCommand.SetIncline(40.0f))
+        val fields = session.commandToFields(DeviceCommand.AdjustIncline(increase = true))
+        assertThat(fields).containsExactly(V1DataField.GRADE, 40.0f)
+    }
+
+    @Test
+    fun `commandToFields AdjustIncline clamped at minIncline`() {
+        val session = createUnstartedSession()
+        session.commandToFields(DeviceCommand.SetIncline(-6.0f))
+        val fields = session.commandToFields(DeviceCommand.AdjustIncline(increase = false))
+        assertThat(fields).containsExactly(V1DataField.GRADE, -6.0f)
+    }
+
+    @Test
+    fun `commandToFields AdjustSpeed increase from zero`() {
+        val session = createUnstartedSession()
+        val fields = session.commandToFields(DeviceCommand.AdjustSpeed(increase = true))
+        assertThat(fields).containsExactly(V1DataField.KPH, 0.5f)
+    }
+
+    @Test
+    fun `commandToFields AdjustSpeed clamped at zero`() {
+        val session = createUnstartedSession()
+        val fields = session.commandToFields(DeviceCommand.AdjustSpeed(increase = false))
+        assertThat(fields).containsExactly(V1DataField.KPH, 0.0f)
+    }
+
+    @Test
+    fun `commandToFields AdjustSpeed clamped at maxSpeed`() {
+        val session = createUnstartedSession()
+        session.commandToFields(DeviceCommand.SetTargetSpeed(60.0f))
+        val fields = session.commandToFields(DeviceCommand.AdjustSpeed(increase = true))
+        assertThat(fields).containsExactly(V1DataField.KPH, 60.0f)
+    }
+
+    @Test
+    fun `commandToFields SetTargetPower maps to WATT_GOAL`() {
+        val session = createUnstartedSession()
+        val fields = session.commandToFields(DeviceCommand.SetTargetPower(200))
+        assertThat(fields).containsExactly(V1DataField.WATT_GOAL, 200f)
+    }
+
+    @Test
+    fun `commandToFields SetTargetSpeed maps to KPH`() {
+        val session = createUnstartedSession()
+        val fields = session.commandToFields(DeviceCommand.SetTargetSpeed(25.5f))
+        assertThat(fields).containsExactly(V1DataField.KPH, 25.5f)
+    }
+
+    @Test
+    fun `commandToFields PauseWorkout maps to WORKOUT_MODE 3`() {
+        val session = createUnstartedSession()
+        val fields = session.commandToFields(DeviceCommand.PauseWorkout)
+        assertThat(fields).containsExactly(V1DataField.WORKOUT_MODE, 3f)
+    }
+
+    @Test
+    fun `commandToFields ResumeWorkout maps to WORKOUT_MODE 2`() {
+        val session = createUnstartedSession()
+        val fields = session.commandToFields(DeviceCommand.ResumeWorkout)
+        assertThat(fields).containsExactly(V1DataField.WORKOUT_MODE, 2f)
+    }
 }

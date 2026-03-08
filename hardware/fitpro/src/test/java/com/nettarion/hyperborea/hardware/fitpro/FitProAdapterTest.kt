@@ -285,6 +285,27 @@ class FitProAdapterTest {
     }
 
     @Test
+    fun `deviceInfo reflects S22i after V1 connect with model 2117`() = runTest {
+        val adapter = createAdapter(this, productId = 2)
+
+        backgroundScope.launch {
+            transport.emitIncoming(buildConnectAck())
+            transport.emitIncoming(buildDeviceInfoResponse())
+            transport.emitIncoming(buildSystemInfoResponse(model = 2117))
+            transport.emitIncoming(buildVersionInfoResponse())
+            transport.emitIncoming(buildSecurityUnlockedResponse())
+        }
+
+        adapter.connect()
+        advanceUntilIdle()
+
+        assertThat(adapter.state.value).isEqualTo(AdapterState.Active)
+        assertThat(adapter.deviceInfo.value).isNotNull()
+        assertThat(adapter.deviceInfo.value!!.name).isEqualTo("NordicTrack S22i")
+        assertThat(adapter.deviceInfo.value!!.maxResistance).isEqualTo(24)
+    }
+
+    @Test
     fun `connect sets Error for transport factory failure`() = runTest {
         val failingFactory = object : HidTransportFactory {
             override fun create(vendorId: Int, productId: Int): HidTransportResult {
@@ -341,12 +362,12 @@ class FitProAdapterTest {
         return data + V1Codec.checksum(data)
     }
 
-    private fun buildSystemInfoResponse(): ByteArray {
+    private fun buildSystemInfoResponse(model: Int = 100): ByteArray {
         val data = byteArrayOf(
             0x02, 0x10, 0x82.toByte(), 0x02,
             0, 0,
             0,
-            100, 0, 0, 0,
+            (model and 0xFF).toByte(), ((model shr 8) and 0xFF).toByte(), ((model shr 16) and 0xFF).toByte(), ((model shr 24) and 0xFF).toByte(),
             200.toByte(), 0, 0, 0,
         )
         return data + V1Codec.checksum(data)

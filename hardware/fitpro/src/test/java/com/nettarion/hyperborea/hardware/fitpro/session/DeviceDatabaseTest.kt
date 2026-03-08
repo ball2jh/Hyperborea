@@ -30,4 +30,14 @@ class DeviceDatabaseTest {
         assertThat(info.name).isEqualTo("FitPro Device")
         assertThat(info.type).isEqualTo(DeviceType.BIKE)
     }
+
+    @Test
+    fun `fromModel 2117 returns NordicTrack S22i with correct capabilities`() {
+        val info = DeviceDatabase.fromModel(2117)
+        assertThat(info.name).isEqualTo("NordicTrack S22i")
+        assertThat(info.type).isEqualTo(DeviceType.BIKE)
+        assertThat(info.maxResistance).isEqualTo(24)
+        assertThat(info.minIncline).isEqualTo(-6f)
+        assertThat(info.maxIncline).isEqualTo(40f)
+    }
 }
