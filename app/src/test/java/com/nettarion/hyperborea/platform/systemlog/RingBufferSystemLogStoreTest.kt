@@ -14,13 +14,10 @@ import kotlinx.coroutines.test.advanceUntilIdle
 import kotlinx.coroutines.test.runTest
 import org.junit.Before
 import org.junit.Test
-import org.junit.runner.RunWith
-import org.robolectric.RobolectricTestRunner
 import java.io.ByteArrayInputStream
 import java.io.InputStream
 
 @OptIn(ExperimentalCoroutinesApi::class)
-@RunWith(RobolectricTestRunner::class)
 class RingBufferSystemLogStoreTest {
 
     private lateinit var testScope: TestScope

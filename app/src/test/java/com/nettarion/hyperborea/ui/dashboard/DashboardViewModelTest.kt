@@ -32,6 +32,7 @@ import com.nettarion.hyperborea.core.profile.UserPreferences
 import com.nettarion.hyperborea.core.test.buildDeviceInfo
 import com.nettarion.hyperborea.core.test.buildExerciseData
 import com.nettarion.hyperborea.core.test.buildSystemSnapshot
+import io.mockk.mockk
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.Flow
@@ -45,12 +46,8 @@ import kotlinx.coroutines.test.setMain
 import org.junit.After
 import org.junit.Before
 import org.junit.Test
-import org.junit.runner.RunWith
-import org.robolectric.RobolectricTestRunner
-import org.robolectric.RuntimeEnvironment
 
 @OptIn(ExperimentalCoroutinesApi::class)
-@RunWith(RobolectricTestRunner::class)
 class DashboardViewModelTest {
 
     private val testDispatcher = UnconfinedTestDispatcher()
@@ -67,7 +64,7 @@ class DashboardViewModelTest {
         fakeSystemMonitor = FakeSystemMonitor()
         fakeUserPreferences = FakeUserPreferences()
         fakeProfileRepository = FakeProfileRepository()
-        context = RuntimeEnvironment.getApplication()
+        context = mockk(relaxed = true)
     }
 
     @After

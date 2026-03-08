@@ -5,10 +5,7 @@ import com.nettarion.hyperborea.core.LogLevel
 import kotlinx.coroutines.test.runTest
 import org.junit.Before
 import org.junit.Test
-import org.junit.runner.RunWith
-import org.robolectric.RobolectricTestRunner
 
-@RunWith(RobolectricTestRunner::class)
 class RingBufferLogStoreTest {
 
     private lateinit var store: RingBufferLogStore

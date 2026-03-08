@@ -149,6 +149,7 @@ dependencies {
     testImplementation(libs.turbine)
     testImplementation(libs.mockk)
     testImplementation(libs.robolectric)
+    testImplementation(libs.json)
 
     debugImplementation(libs.compose.ui.tooling)
     debugImplementation(libs.compose.ui.test.manifest)

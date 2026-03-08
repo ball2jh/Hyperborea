@@ -1,6 +1,5 @@
 package com.nettarion.hyperborea.platform.license
 
-import android.content.Context
 import android.content.SharedPreferences
 import app.cash.turbine.test
 import com.google.common.truth.Truth.assertThat
@@ -10,12 +9,8 @@ import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.test.runTest
 import org.junit.Before
 import org.junit.Test
-import org.junit.runner.RunWith
-import org.robolectric.RobolectricTestRunner
-import org.robolectric.RuntimeEnvironment
 
 @OptIn(ExperimentalCoroutinesApi::class)
-@RunWith(RobolectricTestRunner::class)
 class LicenseCheckerImplTest {
 
     private lateinit var prefs: SharedPreferences
@@ -23,9 +18,7 @@ class LicenseCheckerImplTest {
 
     @Before
     fun setUp() {
-        val context = RuntimeEnvironment.getApplication()
-        prefs = context.getSharedPreferences("test_license", Context.MODE_PRIVATE)
-        prefs.edit().clear().commit()
+        prefs = FakeSharedPreferences()
         checker = LicenseCheckerImpl(prefs, NoOpLogger())
     }
 

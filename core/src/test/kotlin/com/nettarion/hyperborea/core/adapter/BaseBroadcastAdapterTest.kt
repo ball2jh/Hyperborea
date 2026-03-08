@@ -140,7 +140,7 @@ class BaseBroadcastAdapterTest {
         override suspend fun onStart(
             scope: CoroutineScope,
             deviceInfo: DeviceInfo,
-        ): (ExerciseData) -> Unit {
+        ): suspend (ExerciseData) -> Unit {
             if (failOnStart) throw RuntimeException("start failed")
             onStartCallCount++
             return { data -> receivedData.add(data) }

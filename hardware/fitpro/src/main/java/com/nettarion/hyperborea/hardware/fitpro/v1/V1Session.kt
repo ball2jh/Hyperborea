@@ -131,43 +131,44 @@ class V1Session(
     override suspend fun writeFeature(command: DeviceCommand) {
         if (_sessionState.value !is SessionState.Streaming) return
 
-        val fields = when (command) {
-            is DeviceCommand.SetResistance -> {
-                val raw = resistanceLevelToRaw(command.level)
-                mapOf(V1DataField.RESISTANCE to raw.toFloat())
-            }
-            is DeviceCommand.SetIncline -> {
-                lastSentGrade = roundToStep(command.percent, deviceInfo.inclineStep)
-                mapOf(V1DataField.GRADE to lastSentGrade)
-            }
-            is DeviceCommand.SetTargetSpeed -> {
-                lastSentSpeed = command.kph
-                mapOf(V1DataField.KPH to command.kph)
-            }
-            is DeviceCommand.AdjustIncline -> {
-                lastSentGrade += if (command.increase) deviceInfo.inclineStep else -deviceInfo.inclineStep
-                lastSentGrade = lastSentGrade.coerceIn(deviceInfo.minIncline, deviceInfo.maxIncline)
-                mapOf(V1DataField.GRADE to lastSentGrade)
-            }
-            is DeviceCommand.AdjustSpeed -> {
-                lastSentSpeed += if (command.increase) deviceInfo.speedStep else -deviceInfo.speedStep
-                lastSentSpeed = lastSentSpeed.coerceIn(0f, deviceInfo.maxSpeed)
-                mapOf(V1DataField.KPH to lastSentSpeed)
-            }
-            is DeviceCommand.SetTargetPower -> {
-                // Native ERG: bike MCU adjusts resistance to maintain target watts
-                mapOf(V1DataField.WATT_GOAL to command.watts.toFloat())
-            }
-            is DeviceCommand.PauseWorkout -> {
-                mapOf(V1DataField.WORKOUT_MODE to WORKOUT_MODE_PAUSE)
-            }
-            is DeviceCommand.ResumeWorkout -> {
-                mapOf(V1DataField.WORKOUT_MODE to WORKOUT_MODE_RUNNING)
-            }
-        }
+        val fields = commandToFields(command)
 
         pendingWriteMutex.withLock {
             pendingWriteFields = pendingWriteFields + fields
+        }
+    }
+
+    internal fun commandToFields(command: DeviceCommand): Map<V1DataField, Float> = when (command) {
+        is DeviceCommand.SetResistance -> {
+            val raw = resistanceLevelToRaw(command.level)
+            mapOf(V1DataField.RESISTANCE to raw.toFloat())
+        }
+        is DeviceCommand.SetIncline -> {
+            lastSentGrade = roundToStep(command.percent, deviceInfo.inclineStep)
+            mapOf(V1DataField.GRADE to lastSentGrade)
+        }
+        is DeviceCommand.SetTargetSpeed -> {
+            lastSentSpeed = command.kph
+            mapOf(V1DataField.KPH to command.kph)
+        }
+        is DeviceCommand.AdjustIncline -> {
+            lastSentGrade += if (command.increase) deviceInfo.inclineStep else -deviceInfo.inclineStep
+            lastSentGrade = lastSentGrade.coerceIn(deviceInfo.minIncline, deviceInfo.maxIncline)
+            mapOf(V1DataField.GRADE to lastSentGrade)
+        }
+        is DeviceCommand.AdjustSpeed -> {
+            lastSentSpeed += if (command.increase) deviceInfo.speedStep else -deviceInfo.speedStep
+            lastSentSpeed = lastSentSpeed.coerceIn(0f, deviceInfo.maxSpeed)
+            mapOf(V1DataField.KPH to lastSentSpeed)
+        }
+        is DeviceCommand.SetTargetPower -> {
+            mapOf(V1DataField.WATT_GOAL to command.watts.toFloat())
+        }
+        is DeviceCommand.PauseWorkout -> {
+            mapOf(V1DataField.WORKOUT_MODE to WORKOUT_MODE_PAUSE)
+        }
+        is DeviceCommand.ResumeWorkout -> {
+            mapOf(V1DataField.WORKOUT_MODE to WORKOUT_MODE_RUNNING)
         }
     }
 
