@@ -172,9 +172,22 @@ class LicenseCheckerImpl @Inject constructor(
 
     private fun parseIso8601(iso: String): Long {
         // SimpleDateFormat for API 25 compatibility (no java.time)
-        val format = java.text.SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss'Z'", java.util.Locale.US)
-        format.timeZone = java.util.TimeZone.getTimeZone("UTC")
-        return format.parse(iso)?.time ?: 0
+        // Try with fractional seconds first, then without
+        val formats = arrayOf(
+            "yyyy-MM-dd'T'HH:mm:ss.SSS'Z'",
+            "yyyy-MM-dd'T'HH:mm:ss'Z'",
+        )
+        for (pattern in formats) {
+            try {
+                val format = java.text.SimpleDateFormat(pattern, java.util.Locale.US)
+                format.timeZone = java.util.TimeZone.getTimeZone("UTC")
+                return format.parse(iso)?.time ?: continue
+            } catch (_: java.text.ParseException) {
+                continue
+            }
+        }
+        logger.w(TAG, "Failed to parse ISO 8601 date: $iso")
+        return 0
     }
 
     companion object {
