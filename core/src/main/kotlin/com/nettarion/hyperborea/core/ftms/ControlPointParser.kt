@@ -61,9 +61,9 @@ object ControlPointParser {
     }
 
     /**
-     * Parses a write to Wahoo Control (0xE005).
+     * Parses a write to trainer control (0xE005).
      */
-    fun parseWahooControl(payload: ByteArray): ControlPointResult {
+    fun parseTrainerControl(payload: ByteArray): ControlPointResult {
         if (payload.isEmpty()) return ControlPointResult.Unsupported(0x00)
         val cmd = payload[0].toInt() and 0xFF
         return when (cmd) {

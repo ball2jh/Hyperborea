@@ -1,4 +1,4 @@
-package com.nettarion.hyperborea.broadcast.wftnp
+package com.nettarion.hyperborea.broadcast.wifi
 
 import com.nettarion.hyperborea.core.AppLogger
 import com.nettarion.hyperborea.core.adapter.BaseBroadcastAdapter
@@ -13,26 +13,26 @@ import javax.inject.Singleton
 import kotlinx.coroutines.CoroutineScope
 
 @Singleton
-class WftnpAdapter @Inject constructor(
+class WifiAdapter @Inject constructor(
     private val nsdRegistrar: NsdRegistrar,
     logger: AppLogger,
     @Named("deviceName") private val deviceName: () -> String?,
 ) : BaseBroadcastAdapter(logger, TAG) {
 
-    override val id: BroadcastId = BroadcastId.WFTNP
+    override val id: BroadcastId = BroadcastId.WIFI
     override val prerequisites: List<Prerequisite> = emptyList()
 
     override fun canOperate(snapshot: SystemSnapshot): Boolean =
         snapshot.status.isWifiEnabled
 
-    private var server: WftnpServer? = null
+    private var server: WifiServer? = null
 
     override suspend fun onStart(
         scope: CoroutineScope,
         deviceInfo: DeviceInfo,
     ): suspend (ExerciseData) -> Unit {
-        val serviceDef = WftnpServiceDefinition(deviceInfo)
-        val wftnpServer = WftnpServer(
+        val serviceDef = WifiServiceDefinition(deviceInfo)
+        val wifiServer = WifiServer(
             logger = logger,
             scope = scope,
             deviceType = deviceInfo.type,
@@ -40,12 +40,12 @@ class WftnpAdapter @Inject constructor(
             onClientChange = { clients -> updateClients(clients) },
             onCommand = { command -> emitCommand(command) },
         )
-        server = wftnpServer
-        wftnpServer.start()
+        server = wifiServer
+        wifiServer.start()
 
-        nsdRegistrar.register(WftnpServer.PORT, deviceName() ?: DEFAULT_DEVICE_NAME)
+        nsdRegistrar.register(WifiServer.PORT, deviceName() ?: DEFAULT_DEVICE_NAME)
 
-        return { data -> wftnpServer.broadcastData(data) }
+        return { data -> wifiServer.broadcastData(data) }
     }
 
     override fun onStop() {
@@ -55,7 +55,7 @@ class WftnpAdapter @Inject constructor(
     }
 
     private companion object {
-        const val TAG = "WftnpAdapter"
+        const val TAG = "WifiAdapter"
         const val DEFAULT_DEVICE_NAME = "Hyperborea"
     }
 }

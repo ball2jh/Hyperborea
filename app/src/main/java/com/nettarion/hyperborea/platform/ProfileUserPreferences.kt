@@ -10,6 +10,8 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 
 class ProfileUserPreferences(
     private val profileRepository: ProfileRepository,
@@ -22,14 +24,18 @@ class ProfileUserPreferences(
             .map { it?.enabledBroadcasts ?: BroadcastId.entries.toSet() }
             .stateIn(scope, SharingStarted.Eagerly, BroadcastId.entries.toSet())
 
+    private val toggleMutex = Mutex()
+
     override fun setBroadcastEnabled(id: BroadcastId, enabled: Boolean) {
-        val profile = profileRepository.activeProfile.value ?: return
-        logger.i(TAG, "Broadcast ${id.name} ${if (enabled) "enabled" else "disabled"}")
-        val current = profile.enabledBroadcasts.toMutableSet()
-        if (enabled) current.add(id) else current.remove(id)
-        val updated = profile.copy(enabledBroadcasts = current)
         scope.launch {
-            profileRepository.updateProfile(updated)
+            toggleMutex.withLock {
+                val profile = profileRepository.activeProfile.value ?: return@withLock
+                logger.i(TAG, "Broadcast ${id.name} ${if (enabled) "enabled" else "disabled"}")
+                val current = profile.enabledBroadcasts.toMutableSet()
+                if (enabled) current.add(id) else current.remove(id)
+                val updated = profile.copy(enabledBroadcasts = current)
+                profileRepository.updateProfile(updated)
+            }
         }
     }
 

@@ -2,6 +2,7 @@ package com.nettarion.hyperborea.di
 
 import android.content.Context
 import android.content.SharedPreferences
+import com.nettarion.hyperborea.BuildConfig
 import com.nettarion.hyperborea.core.LicenseChecker
 import com.nettarion.hyperborea.platform.license.HttpUrlConnectionLicenseClient
 import com.nettarion.hyperborea.platform.license.LicenseCheckerImpl
@@ -12,6 +13,7 @@ import dagger.Provides
 import dagger.hilt.InstallIn
 import dagger.hilt.android.qualifiers.ApplicationContext
 import dagger.hilt.components.SingletonComponent
+import javax.inject.Named
 import javax.inject.Singleton
 
 @Module
@@ -33,5 +35,9 @@ abstract class LicenseModule {
             @ApplicationContext context: Context,
         ): SharedPreferences =
             context.getSharedPreferences("hyperborea_license", Context.MODE_PRIVATE)
+
+        @Provides
+        @Named("licensePublicKey")
+        fun provideLicensePublicKey(): String = BuildConfig.LICENSE_PUBLIC_KEY
     }
 }

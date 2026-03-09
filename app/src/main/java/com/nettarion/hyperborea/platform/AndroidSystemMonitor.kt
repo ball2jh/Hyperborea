@@ -143,13 +143,20 @@ class AndroidSystemMonitor @Inject constructor(
         "${ip and 0xFF}.${ip shr 8 and 0xFF}.${ip shr 16 and 0xFF}.${ip shr 24 and 0xFF}"
 
     private fun checkRootAvailable(): Boolean {
+        val process = try {
+            Runtime.getRuntime().exec(arrayOf("su", "-c", "id"))
+        } catch (_: Exception) {
+            return false
+        }
         return try {
-            val process = Runtime.getRuntime().exec(arrayOf("su", "-c", "id"))
-            val exitCode = process.waitFor()
-            process.destroy()
-            exitCode == 0
+            process.waitFor() == 0
         } catch (_: Exception) {
             false
+        } finally {
+            try { process.inputStream.close() } catch (_: Exception) {}
+            try { process.errorStream.close() } catch (_: Exception) {}
+            try { process.outputStream.close() } catch (_: Exception) {}
+            process.destroy()
         }
     }
 
@@ -159,14 +166,22 @@ class AndroidSystemMonitor @Inject constructor(
             if (file.exists()) file.readText().trim() == "1" else false
         } catch (_: Exception) {
             // Fallback: try getenforce command
+            val process = try {
+                Runtime.getRuntime().exec("getenforce")
+            } catch (_: Exception) {
+                return false
+            }
             try {
-                val process = Runtime.getRuntime().exec("getenforce")
                 val output = process.inputStream.bufferedReader().readText().trim()
                 process.waitFor()
-                process.destroy()
                 output.equals("Enforcing", ignoreCase = true)
             } catch (_: Exception) {
                 false
+            } finally {
+                try { process.inputStream.close() } catch (_: Exception) {}
+                try { process.errorStream.close() } catch (_: Exception) {}
+                try { process.outputStream.close() } catch (_: Exception) {}
+                process.destroy()
             }
         }
     }

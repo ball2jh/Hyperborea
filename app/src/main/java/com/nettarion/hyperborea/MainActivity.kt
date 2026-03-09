@@ -46,7 +46,10 @@ class MainActivity : ComponentActivity() {
                         }
                     }
                     is LicenseState.Unlicensed -> {
-                        UnlicensedScreen(onLinkDevice = licenseVm::requestPairing)
+                        UnlicensedScreen(
+                            licenseState = state,
+                            onLinkDevice = licenseVm::requestPairing,
+                        )
                     }
                     is LicenseState.Pairing -> {
                         PairingScreen(

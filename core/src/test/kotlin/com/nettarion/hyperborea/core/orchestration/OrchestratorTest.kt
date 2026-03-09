@@ -473,7 +473,7 @@ class OrchestratorTest {
         val ecosystem = FakeEcosystemManager(ecosystemPrereqs)
         val hardware = FakeHardwareAdapter(hardwarePrereqs, hardwareConnectState, hardwareCanOperate)
         val broadcast1 = FakeBroadcastAdapter(BroadcastId.FTMS, broadcast1CanOperate)
-        val broadcast2 = FakeBroadcastAdapter(BroadcastId.WFTNP, broadcast2CanOperate)
+        val broadcast2 = FakeBroadcastAdapter(BroadcastId.WIFI, broadcast2CanOperate)
         val preferences = FakeUserPreferences(enabledBroadcasts)
         val logger = NoOpLogger()
         val scope = CoroutineScope(UnconfinedTestDispatcher(testScope.testScheduler))

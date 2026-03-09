@@ -13,6 +13,7 @@ import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -20,14 +21,23 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
+import com.nettarion.hyperborea.core.LicenseState
 import com.nettarion.hyperborea.ui.theme.LocalHyperboreaColors
 
 @Composable
 fun UnlicensedScreen(
+    licenseState: LicenseState,
     onLinkDevice: () -> Unit,
 ) {
     val colors = LocalHyperboreaColors.current
     var loading by remember { mutableStateOf(false) }
+
+    // Reset loading when license state returns to Unlicensed (e.g. after a network error)
+    LaunchedEffect(licenseState) {
+        if (licenseState is LicenseState.Unlicensed) {
+            loading = false
+        }
+    }
 
     Box(
         modifier = Modifier

@@ -21,8 +21,6 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.verticalScroll
@@ -31,8 +29,6 @@ import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.KeyboardArrowUp
 import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.FilterChip
-import androidx.compose.material3.FilterChipDefaults
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -42,10 +38,9 @@ import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.Switch
-import androidx.compose.material3.Tab
-import androidx.compose.material3.PrimaryTabRow
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
@@ -188,7 +183,7 @@ private fun BroadcastsSection(viewModel: AdminViewModel) {
             val enabled = id in enabledBroadcasts
             val readiness = when (id) {
                 BroadcastId.FTMS -> if (snapshot.status.isBluetoothLeAdvertisingSupported) "BLE available" else "BLE unavailable"
-                BroadcastId.WFTNP -> if (snapshot.status.isWifiEnabled) "WiFi available" else "WiFi off"
+                BroadcastId.WIFI -> if (snapshot.status.isWifiEnabled) "WiFi available" else "WiFi off"
             }
 
             Row(
@@ -229,63 +224,25 @@ private fun LogsSection(viewModel: AdminViewModel, onExpand: () -> Unit) {
 
     val appLogs by viewModel.logEntries.collectAsStateWithLifecycle()
     val systemLogs by viewModel.systemLogEntries.collectAsStateWithLifecycle()
-    val supportState by viewModel.supportUploadState.collectAsStateWithLifecycle()
 
     CollapsibleSection("Logs") {
-        // Tab row
-        PrimaryTabRow(
-            selectedTabIndex = selectedTab,
-            containerColor = MaterialTheme.colorScheme.surface,
-            contentColor = LocalHyperboreaColors.current.textHigh,
-            divider = {},
-        ) {
-            Tab(selected = selectedTab == 0, onClick = { selectedTab = 0 }) {
-                Text("App", modifier = Modifier.padding(vertical = 8.dp))
-            }
-            Tab(selected = selectedTab == 1, onClick = { selectedTab = 1 }) {
-                Text("System", modifier = Modifier.padding(vertical = 8.dp))
-            }
-        }
+        LogTabRow(selectedTab = selectedTab, onTabSelected = { selectedTab = it })
 
-        // Level filter chips
-        Row(
+        LogLevelFilterChips(
+            selectedLevels = selectedLevels,
+            onToggleLevel = { level ->
+                selectedLevels = if (level in selectedLevels) selectedLevels - level else selectedLevels + level
+            },
             modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
-        ) {
-            LogLevel.entries.forEach { level ->
-                val selected = level in selectedLevels
-                FilterChip(
-                    selected = selected,
-                    onClick = {
-                        selectedLevels = if (selected) selectedLevels - level else selectedLevels + level
-                    },
-                    label = { Text(level.name.first().toString()) },
-                    colors = FilterChipDefaults.filterChipColors(
-                        selectedContainerColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.2f),
-                        selectedLabelColor = MaterialTheme.colorScheme.primary,
-                    ),
-                )
-            }
-        }
+        )
 
-        // Log entries (fixed height, newest first)
-        Box(modifier = Modifier.height(300.dp)) {
-            if (selectedTab == 0) {
-                val filtered = appLogs.filter { it.level in selectedLevels }.asReversed()
-                LazyColumn(reverseLayout = true) {
-                    items(filtered, key = { "${it.timestamp}-${it.tag}-${it.message.hashCode()}" }) { entry ->
-                        LogEntryRow(entry)
-                    }
-                }
-            } else {
-                val filtered = systemLogs.filter { it.level in selectedLevels }.asReversed()
-                LazyColumn(reverseLayout = true) {
-                    items(filtered, key = { "${it.timestamp}-${it.tag}-${it.message.hashCode()}" }) { entry ->
-                        SystemLogEntryRow(entry)
-                    }
-                }
-            }
-        }
+        LogList(
+            selectedTab = selectedTab,
+            appLogs = appLogs,
+            systemLogs = systemLogs,
+            selectedLevels = selectedLevels,
+            modifier = Modifier.height(300.dp),
+        )
 
         // Action buttons
         Row(
@@ -303,7 +260,6 @@ private fun LogsSection(viewModel: AdminViewModel, onExpand: () -> Unit) {
             }) {
                 Text("Export")
             }
-            GetHelpButton(supportState, viewModel)
             Spacer(Modifier.weight(1f))
             OutlinedButton(onClick = onExpand) {
                 Text("Full Screen")
@@ -321,6 +277,7 @@ private fun DiagnosticsSection(viewModel: AdminViewModel) {
     val trackState by viewModel.appTrackState.collectAsStateWithLifecycle()
     val checking by viewModel.checking.collectAsStateWithLifecycle()
     val broadcastDiags by viewModel.broadcastDiagnostics.collectAsStateWithLifecycle(emptyList())
+    val supportState by viewModel.supportUploadState.collectAsStateWithLifecycle()
 
     CollapsibleSection("Diagnostics") {
         // Device identity
@@ -413,6 +370,23 @@ private fun DiagnosticsSection(viewModel: AdminViewModel) {
             onFinalize = viewModel::finalizeUpdate,
             onDismiss = viewModel::dismissUpdate,
         )
+
+        // Support
+        Spacer(Modifier.height(8.dp))
+        Text("Support", style = MaterialTheme.typography.bodyLarge, color = colors.textHigh,
+            modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp))
+        Row(
+            modifier = Modifier.padding(horizontal = 24.dp, vertical = 4.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text(
+                text = "Upload diagnostics to support",
+                style = MaterialTheme.typography.bodyMedium,
+                color = colors.textMedium,
+                modifier = Modifier.weight(1f),
+            )
+            GetHelpButton(supportState, viewModel)
+        }
     }
 }
 
@@ -487,41 +461,97 @@ private fun DiagRow(label: String, value: String) {
 }
 
 @Composable
-private fun GetHelpButton(state: SupportUploadState, viewModel: AdminViewModel) {
-    val colors = LocalHyperboreaColors.current
-    when (state) {
-        is SupportUploadState.Idle -> {
-            OutlinedButton(onClick = { viewModel.uploadSupport() }) {
-                Text("Get Help")
-            }
+internal fun GetHelpButton(state: SupportUploadState, viewModel: AdminViewModel) {
+    var showConfirmDialog by remember { mutableStateOf(false) }
+    var showResultDialog by remember { mutableStateOf(false) }
+
+    // Show result dialog when upload succeeds or fails
+    LaunchedEffect(state) {
+        when (state) {
+            is SupportUploadState.Success, is SupportUploadState.Error -> showResultDialog = true
+            else -> {}
         }
-        is SupportUploadState.Uploading -> {
-            OutlinedButton(onClick = {}, enabled = false) {
-                CircularProgressIndicator(
-                    modifier = Modifier.size(16.dp),
-                    strokeWidth = 2.dp,
+    }
+
+    OutlinedButton(
+        onClick = { showConfirmDialog = true },
+        enabled = state !is SupportUploadState.Uploading,
+    ) {
+        if (state is SupportUploadState.Uploading) {
+            CircularProgressIndicator(
+                modifier = Modifier.size(16.dp),
+                strokeWidth = 2.dp,
+            )
+        } else {
+            Text("Get Help")
+        }
+    }
+
+    if (showConfirmDialog) {
+        AlertDialog(
+            onDismissRequest = { showConfirmDialog = false },
+            title = { Text("Send diagnostics?") },
+            text = { Text("This will upload your device info and recent logs to support. You\u2019ll receive a code to reference when contacting us.") },
+            confirmButton = {
+                TextButton(onClick = {
+                    showConfirmDialog = false
+                    viewModel.uploadSupport()
+                }) { Text("Send") }
+            },
+            dismissButton = {
+                TextButton(onClick = { showConfirmDialog = false }) { Text("Cancel") }
+            },
+        )
+    }
+
+    if (showResultDialog) {
+        when (state) {
+            is SupportUploadState.Success -> {
+                val colors = LocalHyperboreaColors.current
+                AlertDialog(
+                    onDismissRequest = {
+                        showResultDialog = false
+                        viewModel.dismissSupportUpload()
+                    },
+                    title = { Text("Support code") },
+                    text = {
+                        Text(
+                            text = state.code,
+                            style = MaterialTheme.typography.headlineLarge,
+                            color = colors.statusActive,
+                        )
+                    },
+                    confirmButton = {
+                        TextButton(onClick = {
+                            showResultDialog = false
+                            viewModel.dismissSupportUpload()
+                        }) { Text("Done") }
+                    },
                 )
             }
-        }
-        is SupportUploadState.Success -> {
-            Row(
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
-            ) {
-                Text(
-                    text = state.code,
-                    style = MaterialTheme.typography.titleMedium,
-                    color = colors.statusActive,
+            is SupportUploadState.Error -> {
+                AlertDialog(
+                    onDismissRequest = {
+                        showResultDialog = false
+                        viewModel.dismissSupportUpload()
+                    },
+                    title = { Text("Upload failed") },
+                    text = { Text(state.message) },
+                    confirmButton = {
+                        TextButton(onClick = {
+                            showResultDialog = false
+                            viewModel.uploadSupport()
+                        }) { Text("Retry") }
+                    },
+                    dismissButton = {
+                        TextButton(onClick = {
+                            showResultDialog = false
+                            viewModel.dismissSupportUpload()
+                        }) { Text("Cancel") }
+                    },
                 )
-                OutlinedButton(onClick = { viewModel.dismissSupportUpload() }) {
-                    Text("Done")
-                }
             }
-        }
-        is SupportUploadState.Error -> {
-            OutlinedButton(onClick = { viewModel.uploadSupport() }) {
-                Text("Retry")
-            }
+            else -> showResultDialog = false
         }
     }
 }

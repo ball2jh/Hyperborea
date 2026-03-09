@@ -2,10 +2,12 @@ package com.nettarion.hyperborea.platform.support
 
 import com.nettarion.hyperborea.BuildConfig
 import com.nettarion.hyperborea.core.AppLogger
+import com.nettarion.hyperborea.platform.net.Tls12SocketFactory
 import java.net.HttpURLConnection
 import java.net.URL
 import javax.inject.Inject
 import javax.inject.Singleton
+import javax.net.ssl.HttpsURLConnection
 
 @Singleton
 class HttpUrlConnectionSupportClient @Inject constructor(
@@ -15,6 +17,9 @@ class HttpUrlConnectionSupportClient @Inject constructor(
     override fun upload(authToken: String, jsonBody: String): String? {
         val url = URL("${BuildConfig.SERVER_URL}/api/support/upload")
         val connection = url.openConnection() as HttpURLConnection
+        if (connection is HttpsURLConnection) {
+            connection.sslSocketFactory = Tls12SocketFactory()
+        }
         try {
             connection.connectTimeout = TIMEOUT_MS
             connection.readTimeout = TIMEOUT_MS

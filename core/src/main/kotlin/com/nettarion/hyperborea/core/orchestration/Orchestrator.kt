@@ -200,7 +200,11 @@ class Orchestrator(
                         logger.w(TAG, "$reason -- attempting reconnect")
                         ensureActive()
                         if (_state.value !is OrchestratorState.Running && _state.value !is OrchestratorState.Paused) return@collect
-                        _state.value = OrchestratorState.Running(degraded = reason)
+                        mutex.withLock {
+                            if (_state.value is OrchestratorState.Running || _state.value is OrchestratorState.Paused) {
+                                _state.value = OrchestratorState.Running(degraded = reason)
+                            }
+                        }
 
                         var reconnected = false
                         for (attempt in 1..hardwareRetryPolicy.maxAttempts) {
@@ -216,7 +220,11 @@ class Orchestrator(
                             if (_state.value !is OrchestratorState.Running && _state.value !is OrchestratorState.Paused) return@collect
                             if (hardwareAdapter.state.value is AdapterState.Active) {
                                 logger.i(TAG, "Hardware reconnected on attempt $attempt")
-                                _state.value = OrchestratorState.Running()
+                                mutex.withLock {
+                                    if (_state.value is OrchestratorState.Running || _state.value is OrchestratorState.Paused) {
+                                        _state.value = OrchestratorState.Running()
+                                    }
+                                }
                                 reconnected = true
                                 break
                             }
@@ -360,11 +368,13 @@ class Orchestrator(
         logger.i(TAG, "Orchestrator stopped: $reason")
     }
 
-    private fun updateDegradedState() {
-        if (_state.value !is OrchestratorState.Running && _state.value !is OrchestratorState.Paused) return
-        val errors = activeBroadcasts.filter { it.state.value is AdapterState.Error }
-        val msg = if (errors.isNotEmpty()) "${errors.size} broadcast(s) in error" else null
-        _state.value = OrchestratorState.Running(degraded = msg)
+    private suspend fun updateDegradedState() {
+        mutex.withLock {
+            if (_state.value !is OrchestratorState.Running && _state.value !is OrchestratorState.Paused) return
+            val errors = activeBroadcasts.filter { it.state.value is AdapterState.Error }
+            val msg = if (errors.isNotEmpty()) "${errors.size} broadcast(s) in error" else null
+            _state.value = OrchestratorState.Running(degraded = msg)
+        }
     }
 
     private suspend fun refreshAndAwait() {

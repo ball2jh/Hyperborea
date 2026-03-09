@@ -29,8 +29,8 @@ object FtmsServiceMetadata {
     // CCCD
     const val CCCD = 0x2902
 
-    // Wahoo proprietary
-    const val WAHOO_CONTROL = 0xE005
+    // Trainer-specific control (0xE005)
+    const val TRAINER_CONTROL = 0xE005
 
     // Static read values (device-independent)
     val TRAINING_STATUS_VALUE = byteArrayOf(0x00, 0x01)

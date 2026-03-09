@@ -9,9 +9,9 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.first
+import com.nettarion.hyperborea.ui.util.UnitFormatter
 import kotlinx.coroutines.launch
 import javax.inject.Inject
-import kotlin.math.roundToInt
 
 @HiltViewModel
 class ProfileEditViewModel @Inject constructor(
@@ -61,19 +61,14 @@ class ProfileEditViewModel @Inject constructor(
     }
 
     private fun loadBodyFields(profile: Profile) {
-        if (_useImperial.value) {
-            _weight.value = profile.weightKg?.let { "%.1f".format(it * KG_TO_LBS) } ?: ""
-            val totalInches = profile.heightCm?.let { (it / CM_PER_INCH).roundToInt() }
-            if (totalInches != null) {
-                _height.value = (totalInches / 12).toString()
-                _heightInches.value = (totalInches % 12).toString()
-            } else {
-                _height.value = ""
-                _heightInches.value = ""
-            }
+        val imperial = _useImperial.value
+        _weight.value = profile.weightKg?.let { UnitFormatter.weightEditDisplay(it, imperial) } ?: ""
+        if (profile.heightCm != null) {
+            val (h, hIn) = UnitFormatter.heightEditFields(profile.heightCm!!, imperial)
+            _height.value = h
+            _heightInches.value = hIn
         } else {
-            _weight.value = profile.weightKg?.toString() ?: ""
-            _height.value = profile.heightCm?.toString() ?: ""
+            _height.value = ""
             _heightInches.value = ""
         }
     }
@@ -91,27 +86,22 @@ class ProfileEditViewModel @Inject constructor(
         val weightKg = parseWeightToKg()
         val heightCm = parseHeightToCm()
         _useImperial.value = !_useImperial.value
+        val imperial = _useImperial.value
 
-        if (_useImperial.value) {
-            _weight.value = weightKg?.let { "%.1f".format(it * KG_TO_LBS) } ?: ""
-            val totalInches = heightCm?.let { (it / CM_PER_INCH).roundToInt() }
-            if (totalInches != null) {
-                _height.value = (totalInches / 12).toString()
-                _heightInches.value = (totalInches % 12).toString()
-            } else {
-                _height.value = ""
-                _heightInches.value = ""
-            }
+        _weight.value = weightKg?.let { UnitFormatter.weightEditDisplay(it, imperial) } ?: ""
+        if (heightCm != null) {
+            val (h, hIn) = UnitFormatter.heightEditFields(heightCm, imperial)
+            _height.value = h
+            _heightInches.value = hIn
         } else {
-            _weight.value = weightKg?.toString() ?: ""
-            _height.value = heightCm?.toString() ?: ""
+            _height.value = ""
             _heightInches.value = ""
         }
     }
 
     private fun parseWeightToKg(): Float? {
         val v = _weight.value.toFloatOrNull() ?: return null
-        return if (_useImperial.value) v / KG_TO_LBS else v
+        return UnitFormatter.parseWeightToKg(v, _useImperial.value)
     }
 
     private fun parseHeightToCm(): Int? {
@@ -119,7 +109,7 @@ class ProfileEditViewModel @Inject constructor(
             val feet = _height.value.toIntOrNull() ?: 0
             val inches = _heightInches.value.toIntOrNull() ?: 0
             if (feet == 0 && inches == 0) null
-            else ((feet * 12 + inches) * CM_PER_INCH).roundToInt()
+            else UnitFormatter.parseHeightToCm(feet, inches)
         } else {
             _height.value.toIntOrNull()
         }
@@ -162,10 +152,5 @@ class ProfileEditViewModel @Inject constructor(
             }
             onSaved()
         }
-    }
-
-    private companion object {
-        const val KG_TO_LBS = 2.20462f
-        const val CM_PER_INCH = 2.54f
     }
 }

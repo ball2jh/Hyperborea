@@ -22,12 +22,13 @@ class ManifestParsingTest {
 
         val manifest = UpdateManifest.parse(json)
 
-        assertThat(manifest.app).isNotNull()
-        assertThat(manifest.app!!.versionCode).isEqualTo(2)
-        assertThat(manifest.app!!.versionName).isEqualTo("1.1")
-        assertThat(manifest.app!!.url).isEqualTo("https://example.com/app.apk")
-        assertThat(manifest.app!!.sha256).isEqualTo("abc123")
-        assertThat(manifest.app!!.releaseNotes).isEqualTo("Bug fixes.")
+        val app = manifest.app
+        assertThat(app).isNotNull()
+        assertThat(app!!.versionCode).isEqualTo(2)
+        assertThat(app.versionName).isEqualTo("1.1")
+        assertThat(app.url).isEqualTo("https://example.com/app.apk")
+        assertThat(app.sha256).isEqualTo("abc123")
+        assertThat(app.releaseNotes).isEqualTo("Bug fixes.")
     }
 
     @Test

@@ -1,4 +1,4 @@
-package com.nettarion.hyperborea.broadcast.wftnp
+package com.nettarion.hyperborea.broadcast.wifi
 
 import com.nettarion.hyperborea.core.AppLogger
 import com.nettarion.hyperborea.core.ftms.ControlPointParser
@@ -20,12 +20,12 @@ import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 
-class WftnpClientHandler(
+class WifiClientHandler(
     val clientId: String,
     private val input: InputStream,
     private val output: OutputStream,
     private val deviceType: DeviceType,
-    private val serviceDef: WftnpServiceDefinition,
+    private val serviceDef: WifiServiceDefinition,
     private val scope: CoroutineScope,
     private val onCommand: (DeviceCommand) -> Unit,
     private val logger: AppLogger,
@@ -44,7 +44,7 @@ class WftnpClientHandler(
     suspend fun runReadLoop() = withContext(Dispatchers.IO) {
         try {
             while (!isClosed) {
-                val request = WftnpCodec.readRequest(input) ?: break
+                val request = WifiCodec.readRequest(input) ?: break
                 handleRequest(request)
             }
         } catch (e: Exception) {
@@ -75,10 +75,10 @@ class WftnpClientHandler(
 
         if (enabledNotifications.contains(serviceDef.dataCharacteristic)) {
             val value = FtmsDataEncoder.encodeData(deviceType, data)
-            sendNotification(WftnpCodec.encodeNotification(serviceDef.dataCharacteristic, value))
+            sendNotification(WifiCodec.encodeNotification(serviceDef.dataCharacteristic, value))
         }
 
-        if (enabledNotifications.contains(WftnpServiceDefinition.CPS_MEASUREMENT)) {
+        if (enabledNotifications.contains(WifiServiceDefinition.CPS_MEASUREMENT)) {
             revCounter.update(data, now)
             val value = FtmsDataEncoder.encodeCpsMeasurement(
                 data,
@@ -87,7 +87,7 @@ class WftnpClientHandler(
                 revCounter.cumulativeCrankRevs,
                 revCounter.lastCrankEventTime,
             )
-            sendNotification(WftnpCodec.encodeNotification(WftnpServiceDefinition.CPS_MEASUREMENT, value))
+            sendNotification(WifiCodec.encodeNotification(WifiServiceDefinition.CPS_MEASUREMENT, value))
         }
     }
 
@@ -99,66 +99,66 @@ class WftnpClientHandler(
         runCatching { output.close() }
     }
 
-    private suspend fun handleRequest(request: WftnpMessage.Request) {
+    private suspend fun handleRequest(request: WifiMessage.Request) {
         when (request) {
-            is WftnpMessage.DiscoverServices -> handleDiscoverServices(request)
-            is WftnpMessage.DiscoverCharacteristics -> handleDiscoverCharacteristics(request)
-            is WftnpMessage.ReadCharacteristic -> handleReadCharacteristic(request)
-            is WftnpMessage.WriteCharacteristic -> handleWriteCharacteristic(request)
-            is WftnpMessage.EnableNotifications -> handleEnableNotifications(request)
-            is WftnpMessage.UnknownCompat -> {
-                send(WftnpCodec.encodeResponse(WftnpCodec.ID_UNKNOWN_COMPAT, request.sequence, WftnpCodec.RESP_SUCCESS))
+            is WifiMessage.DiscoverServices -> handleDiscoverServices(request)
+            is WifiMessage.DiscoverCharacteristics -> handleDiscoverCharacteristics(request)
+            is WifiMessage.ReadCharacteristic -> handleReadCharacteristic(request)
+            is WifiMessage.WriteCharacteristic -> handleWriteCharacteristic(request)
+            is WifiMessage.EnableNotifications -> handleEnableNotifications(request)
+            is WifiMessage.UnknownCompat -> {
+                send(WifiCodec.encodeResponse(WifiCodec.ID_UNKNOWN_COMPAT, request.sequence, WifiCodec.RESP_SUCCESS))
             }
         }
     }
 
-    private suspend fun handleDiscoverServices(request: WftnpMessage.DiscoverServices) {
-        val services = WftnpServiceDefinition.services
+    private suspend fun handleDiscoverServices(request: WifiMessage.DiscoverServices) {
+        val services = WifiServiceDefinition.services
         val payload = ByteArray(services.size * 16)
         services.forEachIndexed { i, uuid ->
-            WftnpCodec.encodeUuidBlob(uuid).copyInto(payload, i * 16)
+            WifiCodec.encodeUuidBlob(uuid).copyInto(payload, i * 16)
         }
-        send(WftnpCodec.encodeResponse(WftnpCodec.ID_DISCOVER_SERVICES, request.sequence, WftnpCodec.RESP_SUCCESS, payload))
+        send(WifiCodec.encodeResponse(WifiCodec.ID_DISCOVER_SERVICES, request.sequence, WifiCodec.RESP_SUCCESS, payload))
     }
 
-    private suspend fun handleDiscoverCharacteristics(request: WftnpMessage.DiscoverCharacteristics) {
+    private suspend fun handleDiscoverCharacteristics(request: WifiMessage.DiscoverCharacteristics) {
         val chars = serviceDef.characteristicsFor(request.serviceUuid)
         if (chars == null) {
-            send(WftnpCodec.encodeResponse(WftnpCodec.ID_DISCOVER_CHARACTERISTICS, request.sequence, WftnpCodec.RESP_SERVICE_NOT_FOUND))
+            send(WifiCodec.encodeResponse(WifiCodec.ID_DISCOVER_CHARACTERISTICS, request.sequence, WifiCodec.RESP_SERVICE_NOT_FOUND))
             return
         }
-        val serviceBlob = WftnpCodec.encodeUuidBlob(request.serviceUuid)
+        val serviceBlob = WifiCodec.encodeUuidBlob(request.serviceUuid)
         val payload = ByteArray(16 + chars.size * 17)
         serviceBlob.copyInto(payload, 0)
         chars.forEachIndexed { i, (uuid, props) ->
             val offset = 16 + i * 17
-            WftnpCodec.encodeUuidBlob(uuid).copyInto(payload, offset)
+            WifiCodec.encodeUuidBlob(uuid).copyInto(payload, offset)
             payload[offset + 16] = props
         }
-        send(WftnpCodec.encodeResponse(WftnpCodec.ID_DISCOVER_CHARACTERISTICS, request.sequence, WftnpCodec.RESP_SUCCESS, payload))
+        send(WifiCodec.encodeResponse(WifiCodec.ID_DISCOVER_CHARACTERISTICS, request.sequence, WifiCodec.RESP_SUCCESS, payload))
     }
 
-    private suspend fun handleReadCharacteristic(request: WftnpMessage.ReadCharacteristic) {
+    private suspend fun handleReadCharacteristic(request: WifiMessage.ReadCharacteristic) {
         val value = serviceDef.readValue(request.charUuid)
         if (value == null) {
-            send(WftnpCodec.encodeResponse(WftnpCodec.ID_READ_CHARACTERISTIC, request.sequence, WftnpCodec.RESP_CHAR_NOT_FOUND))
+            send(WifiCodec.encodeResponse(WifiCodec.ID_READ_CHARACTERISTIC, request.sequence, WifiCodec.RESP_CHAR_NOT_FOUND))
             return
         }
-        val payload = WftnpCodec.encodeUuidBlob(request.charUuid) + value
-        send(WftnpCodec.encodeResponse(WftnpCodec.ID_READ_CHARACTERISTIC, request.sequence, WftnpCodec.RESP_SUCCESS, payload))
+        val payload = WifiCodec.encodeUuidBlob(request.charUuid) + value
+        send(WifiCodec.encodeResponse(WifiCodec.ID_READ_CHARACTERISTIC, request.sequence, WifiCodec.RESP_SUCCESS, payload))
     }
 
-    private suspend fun handleWriteCharacteristic(request: WftnpMessage.WriteCharacteristic) {
+    private suspend fun handleWriteCharacteristic(request: WifiMessage.WriteCharacteristic) {
         if (!serviceDef.isWritable(request.charUuid)) {
-            send(WftnpCodec.encodeResponse(WftnpCodec.ID_WRITE_CHARACTERISTIC, request.sequence, WftnpCodec.RESP_OP_NOT_SUPPORTED))
+            send(WifiCodec.encodeResponse(WifiCodec.ID_WRITE_CHARACTERISTIC, request.sequence, WifiCodec.RESP_OP_NOT_SUPPORTED))
             return
         }
 
-        // Send WFTNP write success response
-        send(WftnpCodec.encodeResponse(WftnpCodec.ID_WRITE_CHARACTERISTIC, request.sequence, WftnpCodec.RESP_SUCCESS))
+        // Send write success response
+        send(WifiCodec.encodeResponse(WifiCodec.ID_WRITE_CHARACTERISTIC, request.sequence, WifiCodec.RESP_SUCCESS))
 
         val result = when (request.charUuid) {
-            WftnpServiceDefinition.FTMS_CONTROL_POINT -> {
+            WifiServiceDefinition.FTMS_CONTROL_POINT -> {
                 val parsed = ControlPointParser.parseFtmsControlPoint(request.value)
                 // Send FTMS CP indication response via notification
                 if (request.value.isNotEmpty()) {
@@ -169,11 +169,11 @@ class WftnpClientHandler(
                             else -> ControlPointParser.RESULT_SUCCESS
                         },
                     )
-                    send(WftnpCodec.encodeNotification(WftnpServiceDefinition.FTMS_CONTROL_POINT, cpResp))
+                    send(WifiCodec.encodeNotification(WifiServiceDefinition.FTMS_CONTROL_POINT, cpResp))
                 }
                 parsed
             }
-            WftnpServiceDefinition.WAHOO_CONTROL -> ControlPointParser.parseWahooControl(request.value)
+            WifiServiceDefinition.TRAINER_CONTROL -> ControlPointParser.parseTrainerControl(request.value)
             else -> null
         }
 
@@ -182,9 +182,9 @@ class WftnpClientHandler(
         }
     }
 
-    private suspend fun handleEnableNotifications(request: WftnpMessage.EnableNotifications) {
+    private suspend fun handleEnableNotifications(request: WifiMessage.EnableNotifications) {
         if (!serviceDef.isNotifiable(request.charUuid)) {
-            send(WftnpCodec.encodeResponse(WftnpCodec.ID_ENABLE_NOTIFICATIONS, request.sequence, WftnpCodec.RESP_CHAR_NOT_FOUND))
+            send(WifiCodec.encodeResponse(WifiCodec.ID_ENABLE_NOTIFICATIONS, request.sequence, WifiCodec.RESP_CHAR_NOT_FOUND))
             return
         }
 
@@ -196,7 +196,7 @@ class WftnpClientHandler(
             logger.d(TAG, "Client $clientId disabled notifications for ${request.charUuid}")
         }
 
-        send(WftnpCodec.encodeResponse(WftnpCodec.ID_ENABLE_NOTIFICATIONS, request.sequence, WftnpCodec.RESP_SUCCESS))
+        send(WifiCodec.encodeResponse(WifiCodec.ID_ENABLE_NOTIFICATIONS, request.sequence, WifiCodec.RESP_SUCCESS))
     }
 
     private suspend fun sendNotification(bytes: ByteArray) {
@@ -234,7 +234,7 @@ class WftnpClientHandler(
     }
 
     private companion object {
-        const val TAG = "WftnpClient"
+        const val TAG = "WifiClient"
         const val NOTIFICATION_INTERVAL_MS = 250L
         const val MAX_CONSECUTIVE_WRITE_ERRORS = 3
     }

@@ -281,21 +281,27 @@ class FtmsDataEncoderTest {
     fun `encodeRowerData with all null fields produces minimal packet`() {
         val data = exerciseData()
         val result = FtmsDataEncoder.encodeRowerData(data)
-        // Flags only (2 bytes), no mandatory speed field
-        assertThat(result.size).isEqualTo(2)
+        // Flags (2 bytes) + stroke rate (1 byte) + stroke count (2 bytes) = 5 bytes minimum
+        assertThat(result.size).isEqualTo(5)
         assertThat(uint16LE(result, 0)).isEqualTo(0x0000)
+        // Stroke rate = 0, stroke count = 0
+        assertThat(result[2].toInt() and 0xFF).isEqualTo(0)
+        assertThat(uint16LE(result, 3)).isEqualTo(0)
     }
 
     @Test
-    fun `encodeRowerData with cadence sets bit 0 and encodes stroke rate plus count`() {
-        val data = exerciseData(cadence = 30)
-        val result = FtmsDataEncoder.encodeRowerData(data)
-        val flags = uint16LE(result, 0)
-        assertThat(flags and (1 shl 0)).isNotEqualTo(0)
-        // Stroke rate at 0.5 spm: 30 * 2 = 60
-        assertThat(result[2].toInt() and 0xFF).isEqualTo(60)
-        // Stroke count = 0
-        assertThat(uint16LE(result, 3)).isEqualTo(0)
+    fun `encodeRowerData always includes stroke rate and count`() {
+        // With cadence
+        val withCadence = FtmsDataEncoder.encodeRowerData(exerciseData(cadence = 30))
+        assertThat(uint16LE(withCadence, 0) and (1 shl 0)).isEqualTo(0) // bit 0 stays 0
+        assertThat(withCadence[2].toInt() and 0xFF).isEqualTo(60) // 30 * 2
+        assertThat(uint16LE(withCadence, 3)).isEqualTo(0)
+
+        // Without cadence
+        val withoutCadence = FtmsDataEncoder.encodeRowerData(exerciseData())
+        assertThat(uint16LE(withoutCadence, 0) and (1 shl 0)).isEqualTo(0) // bit 0 stays 0
+        assertThat(withoutCadence[2].toInt() and 0xFF).isEqualTo(0)
+        assertThat(uint16LE(withoutCadence, 3)).isEqualTo(0)
     }
 
     @Test
@@ -304,7 +310,7 @@ class FtmsDataEncoderTest {
         val result = FtmsDataEncoder.encodeRowerData(data)
         val flags = uint16LE(result, 0)
         assertThat(flags and (1 shl 2)).isNotEqualTo(0)
-        assertThat(uint24LE(result, 2)).isEqualTo(1500)
+        assertThat(uint24LE(result, 5)).isEqualTo(1500)
     }
 
     @Test
@@ -313,7 +319,7 @@ class FtmsDataEncoderTest {
         val result = FtmsDataEncoder.encodeRowerData(data)
         val flags = uint16LE(result, 0)
         assertThat(flags and (1 shl 5)).isNotEqualTo(0)
-        assertThat(sint16LE(result, 2)).isEqualTo(180)
+        assertThat(sint16LE(result, 5)).isEqualTo(180)
     }
 
     @Test
@@ -323,7 +329,7 @@ class FtmsDataEncoderTest {
         val flags = uint16LE(result, 0)
         assertThat(flags and (1 shl 7)).isNotEqualTo(0)
         // Resistance at 0.1 resolution: 8 * 10 = 80
-        assertThat(sint16LE(result, 2)).isEqualTo(80)
+        assertThat(sint16LE(result, 5)).isEqualTo(80)
     }
 
     @Test
@@ -332,9 +338,9 @@ class FtmsDataEncoderTest {
         val result = FtmsDataEncoder.encodeRowerData(data)
         val flags = uint16LE(result, 0)
         assertThat(flags and (1 shl 8)).isNotEqualTo(0)
-        assertThat(uint16LE(result, 2)).isEqualTo(100)
-        assertThat(uint16LE(result, 4)).isEqualTo(0xFFFF)
-        assertThat(result[6].toInt() and 0xFF).isEqualTo(0xFF)
+        assertThat(uint16LE(result, 5)).isEqualTo(100)
+        assertThat(uint16LE(result, 7)).isEqualTo(0xFFFF)
+        assertThat(result[9].toInt() and 0xFF).isEqualTo(0xFF)
     }
 
     @Test
@@ -343,7 +349,7 @@ class FtmsDataEncoderTest {
         val result = FtmsDataEncoder.encodeRowerData(data)
         val flags = uint16LE(result, 0)
         assertThat(flags and (1 shl 9)).isNotEqualTo(0)
-        assertThat(result[2].toInt() and 0xFF).isEqualTo(130)
+        assertThat(result[5].toInt() and 0xFF).isEqualTo(130)
     }
 
     @Test
@@ -352,7 +358,7 @@ class FtmsDataEncoderTest {
         val result = FtmsDataEncoder.encodeRowerData(data)
         val flags = uint16LE(result, 0)
         assertThat(flags and (1 shl 11)).isNotEqualTo(0)
-        assertThat(uint16LE(result, 2)).isEqualTo(900)
+        assertThat(uint16LE(result, 5)).isEqualTo(900)
     }
 
     @Test
@@ -363,13 +369,13 @@ class FtmsDataEncoderTest {
         )
         val result = FtmsDataEncoder.encodeRowerData(data)
         val flags = uint16LE(result, 0)
-        assertThat(flags and (1 shl 0)).isNotEqualTo(0)  // stroke rate
-        assertThat(flags and (1 shl 2)).isNotEqualTo(0)  // distance
-        assertThat(flags and (1 shl 5)).isNotEqualTo(0)  // power
-        assertThat(flags and (1 shl 7)).isNotEqualTo(0)  // resistance
-        assertThat(flags and (1 shl 8)).isNotEqualTo(0)  // energy
-        assertThat(flags and (1 shl 9)).isNotEqualTo(0)  // heart rate
-        assertThat(flags and (1 shl 11)).isNotEqualTo(0) // elapsed time
+        assertThat(flags and (1 shl 0)).isEqualTo(0)      // bit 0 always 0 (stroke present)
+        assertThat(flags and (1 shl 2)).isNotEqualTo(0)    // distance
+        assertThat(flags and (1 shl 5)).isNotEqualTo(0)    // power
+        assertThat(flags and (1 shl 7)).isNotEqualTo(0)    // resistance
+        assertThat(flags and (1 shl 8)).isNotEqualTo(0)    // energy
+        assertThat(flags and (1 shl 9)).isNotEqualTo(0)    // heart rate
+        assertThat(flags and (1 shl 11)).isNotEqualTo(0)   // elapsed time
     }
 
     // --- Cross Trainer Data ---

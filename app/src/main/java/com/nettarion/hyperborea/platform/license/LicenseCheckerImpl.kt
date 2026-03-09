@@ -14,6 +14,7 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.withContext
 import org.json.JSONObject
+import java.security.SecureRandom
 import java.util.UUID
 import javax.inject.Inject
 import javax.inject.Singleton
@@ -40,8 +41,9 @@ class LicenseCheckerImpl @Inject constructor(
 
         try {
             logger.d(TAG, "Fetching status from server")
+            val nonce = generateNonce()
             val responseBody = withContext(Dispatchers.IO) {
-                httpClient.fetchStatus(authToken)
+                httpClient.fetchStatus(authToken, nonce)
             }
 
             if (responseBody == null) {
@@ -67,6 +69,15 @@ class LicenseCheckerImpl @Inject constructor(
             }
 
             val payloadJson = JSONObject(payload)
+
+            // Verify nonce matches to prevent replay attacks
+            val responseNonce = payloadJson.optString("nonce", "")
+            if (responseNonce != nonce) {
+                logger.w(TAG, "Nonce mismatch (replay attack?)")
+                _state.value = LicenseState.Unlicensed
+                return
+            }
+
             val active = payloadJson.getBoolean("active")
             val expiresAt = payloadJson.getString("expiresAt")
             val expiresAtMillis = parseIso8601(expiresAt)
@@ -168,6 +179,12 @@ class LicenseCheckerImpl @Inject constructor(
         } else {
             _state.value = LicenseState.Unlicensed
         }
+    }
+
+    private fun generateNonce(): String {
+        val bytes = ByteArray(16)
+        SecureRandom().nextBytes(bytes)
+        return bytes.joinToString("") { "%02x".format(it) }
     }
 
     private fun getDeviceUuid(): String {

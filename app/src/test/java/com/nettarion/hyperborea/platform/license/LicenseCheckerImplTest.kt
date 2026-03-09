@@ -239,14 +239,18 @@ class LicenseCheckerImplTest {
 
     private class FakeLicenseHttpClient : LicenseHttpClient {
         var statusResponse: String? = null
+        var statusResponseFactory: ((nonce: String) -> String?)? = null
         var statusException: Exception? = null
         var pairingResponse: String? = null
         var pairingException: Exception? = null
         var pairingStatusResponse: String? = null
         var pairingStatusException: Exception? = null
+        var lastNonce: String? = null
 
-        override fun fetchStatus(authToken: String): String? {
+        override fun fetchStatus(authToken: String, nonce: String): String? {
+            lastNonce = nonce
             statusException?.let { throw it }
+            statusResponseFactory?.let { return it(nonce) }
             return statusResponse
         }
 

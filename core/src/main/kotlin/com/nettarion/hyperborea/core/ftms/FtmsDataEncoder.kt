@@ -180,22 +180,19 @@ object FtmsDataEncoder {
     /**
      * Encodes ExerciseData into FTMS Rower Data (0x2AD1) characteristic value.
      *
-     * Flags (uint16 LE): bit0 → stroke rate + count, bit2 → total distance,
+     * Flags (uint16 LE): bit0=0 → stroke rate/count present, bit2 → total distance,
      * bit5 → instantaneous power, bit7 → resistance level, bit8 → expended energy,
      * bit9 → heart rate, bit11 → elapsed time.
      */
     fun encodeRowerData(data: ExerciseData): ByteArray {
-        var flags = 0x0000
+        var flags = 0x0000 // bit0=0 means stroke rate/count present
 
         val parts = mutableListOf<ByteArray>()
 
-        // Stroke Rate + Count: uint8 (0.5 spm) + uint16 (count=0) (bit 0)
-        val cadence = data.cadence
-        if (cadence != null) {
-            flags = flags or (1 shl 0)
-            parts.add(byteArrayOf((cadence * 2).coerceIn(0, 255).toByte()))
-            parts.add(uint16LE(0)) // Stroke count
-        }
+        // Stroke Rate + Count: always present (bit 0 = 0)
+        val cadence = data.cadence ?: 0
+        parts.add(byteArrayOf((cadence * 2).coerceIn(0, 255).toByte()))
+        parts.add(uint16LE(0)) // Stroke count
 
         // Total Distance: uint24, 1m resolution (bit 2)
         val distance = data.distance

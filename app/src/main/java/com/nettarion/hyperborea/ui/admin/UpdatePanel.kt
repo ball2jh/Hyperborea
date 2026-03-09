@@ -84,7 +84,7 @@ fun UpdatePanel(
                 Spacer(Modifier.height(8.dp))
                 if (trackState.progress.totalBytes > 0) {
                     LinearProgressIndicator(
-                        progress = { trackState.progress.bytesDownloaded.toFloat() / trackState.progress.totalBytes },
+                        progress = { (trackState.progress.bytesDownloaded.toFloat() / trackState.progress.totalBytes).coerceIn(0f, 1f) },
                         modifier = Modifier.fillMaxWidth(),
                         color = MaterialTheme.colorScheme.primary,
                         trackColor = colors.divider,
@@ -97,10 +97,10 @@ fun UpdatePanel(
                     )
                 }
                 Spacer(Modifier.height(4.dp))
-                val downloaded = trackState.progress.bytesDownloaded / 1024
-                val total = trackState.progress.totalBytes / 1024
+                val downloadedMb = trackState.progress.bytesDownloaded / (1024f * 1024f)
+                val totalMb = trackState.progress.totalBytes / (1024f * 1024f)
                 Text(
-                    text = if (total > 0) "${downloaded}KB / ${total}KB" else "${downloaded}KB",
+                    text = if (trackState.progress.totalBytes > 0) "%.1f MB / %.1f MB".format(downloadedMb, totalMb) else "%.1f MB".format(downloadedMb),
                     style = MaterialTheme.typography.bodyMedium,
                     color = colors.textLow,
                 )

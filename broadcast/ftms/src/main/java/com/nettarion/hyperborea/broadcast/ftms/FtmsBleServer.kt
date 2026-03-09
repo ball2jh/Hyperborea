@@ -53,6 +53,9 @@ class FtmsBleServer(
         requireBluetoothPermission()
         isStopped = false
 
+        // Drain any stale events from previous start attempts
+        while (serviceAddedChannel.tryReceive().isSuccess) {}
+
         bluetoothAdapter.name = deviceName
 
         val gattCallback = FtmsGattCallback(

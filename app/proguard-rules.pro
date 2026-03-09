@@ -45,6 +45,10 @@
     *;
 }
 
+# ---- BouncyCastle Ed25519 (license signature verification) -------------------
+-keep class org.bouncycastle.crypto.params.Ed25519PublicKeyParameters { *; }
+-keep class org.bouncycastle.crypto.signers.Ed25519Signer { *; }
+
 # ---- Suppress warnings -------------------------------------------------------
 -dontwarn javax.annotation.**
 -dontwarn org.jetbrains.annotations.**

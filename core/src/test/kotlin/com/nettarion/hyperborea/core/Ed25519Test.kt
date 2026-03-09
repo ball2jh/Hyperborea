@@ -4,6 +4,7 @@ import org.bouncycastle.crypto.params.Ed25519PrivateKeyParameters
 import org.bouncycastle.crypto.signers.Ed25519Signer
 import org.junit.Test
 import java.security.SecureRandom
+import kotlin.test.assertFailsWith
 import kotlin.test.assertFalse
 import kotlin.test.assertTrue
 
@@ -48,5 +49,26 @@ class Ed25519Test {
         val hex = "48656c6c6f"
         val bytes = Ed25519Verifier.hexToBytes(hex)
         assertTrue(bytes.contentEquals("Hello".toByteArray()))
+    }
+
+    @Test
+    fun `hexToBytes rejects odd-length string`() {
+        assertFailsWith<IllegalArgumentException> {
+            Ed25519Verifier.hexToBytes("abc")
+        }
+    }
+
+    @Test
+    fun `verify rejects wrong signature size`() {
+        assertFailsWith<IllegalArgumentException> {
+            Ed25519Verifier.verify("test".toByteArray(), ByteArray(32), publicKeyBytes)
+        }
+    }
+
+    @Test
+    fun `verify rejects wrong key size`() {
+        assertFailsWith<IllegalArgumentException> {
+            Ed25519Verifier.verify("test".toByteArray(), ByteArray(64), ByteArray(16))
+        }
     }
 }

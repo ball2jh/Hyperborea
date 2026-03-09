@@ -1,4 +1,4 @@
-package com.nettarion.hyperborea.broadcast.wftnp
+package com.nettarion.hyperborea.broadcast.wifi
 
 import com.google.common.truth.Truth.assertThat
 import com.nettarion.hyperborea.core.adapter.AdapterState
@@ -13,9 +13,9 @@ import org.junit.After
 import org.junit.Before
 import org.junit.Test
 
-class WftnpAdapterTest {
+class WifiAdapterTest {
 
-    private lateinit var adapter: WftnpAdapter
+    private lateinit var adapter: WifiAdapter
     private lateinit var nsdRegistrar: NsdRegistrar
     private val logger = object : AppLogger {
         override fun d(tag: String, message: String) {}
@@ -27,7 +27,7 @@ class WftnpAdapterTest {
     @Before
     fun setUp() {
         nsdRegistrar = mockk(relaxed = true)
-        adapter = WftnpAdapter(nsdRegistrar, logger, deviceName = { "Test Bike" })
+        adapter = WifiAdapter(nsdRegistrar, logger, deviceName = { "Test Bike" })
     }
 
     @After
@@ -110,7 +110,7 @@ class WftnpAdapterTest {
     @Test
     fun `start registers mDNS`() = runTest {
         adapter.start(emptyFlow(), buildDeviceInfo())
-        verify { nsdRegistrar.register(WftnpServer.PORT, "Test Bike") }
+        verify { nsdRegistrar.register(WifiServer.PORT, "Test Bike") }
     }
 
     @Test
