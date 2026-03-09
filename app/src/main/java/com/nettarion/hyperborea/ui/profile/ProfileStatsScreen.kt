@@ -45,6 +45,7 @@ import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.nettarion.hyperborea.core.model.RideSummary
 import com.nettarion.hyperborea.ui.theme.LocalHyperboreaColors
+import com.nettarion.hyperborea.ui.util.UnitFormatter
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -107,16 +108,8 @@ fun ProfileStatsScreen(
 
                 Spacer(Modifier.height(8.dp))
                 val details = buildList {
-                    p.weightKg?.let {
-                        if (p.useImperial) add("%.0f lbs".format(it * 2.20462f))
-                        else add("%.1f kg".format(it))
-                    }
-                    p.heightCm?.let {
-                        if (p.useImperial) {
-                            val totalIn = (it / 2.54f).toInt()
-                            add("${totalIn / 12}'${totalIn % 12}\"")
-                        } else add("${it} cm")
-                    }
+                    p.weightKg?.let { add(UnitFormatter.weightDisplay(it, p.useImperial)) }
+                    p.heightCm?.let { add(UnitFormatter.heightDisplay(it, p.useImperial)) }
                     p.age?.let { add("age $it") }
                     p.ftpWatts?.let { add("FTP ${it}W") }
                     p.maxHeartRate?.let { add("MaxHR ${it}bpm") }
@@ -136,7 +129,7 @@ fun ProfileStatsScreen(
 
             val imperial = profile?.useImperial == true
             StatRow("Total Rides", "${stats.totalRides}")
-            StatRow("Total Distance", if (imperial) String.format("%.1f mi", stats.totalDistanceKm * 0.621371f) else String.format("%.1f km", stats.totalDistanceKm))
+            StatRow("Total Distance", UnitFormatter.distanceDisplay(stats.totalDistanceKm, imperial))
             StatRow("Total Calories", "${stats.totalCalories}")
             StatRow("Total Time", formatDuration(stats.totalTimeSeconds))
 
@@ -213,8 +206,8 @@ private fun RideRow(ride: RideSummary, useImperial: Boolean, onDelete: () -> Uni
     var showDeleteConfirmation by remember { mutableStateOf(false) }
     val dateFormat = remember { SimpleDateFormat("MMM d, yyyy  HH:mm", Locale.US) }
 
-    val distText = if (useImperial) String.format("%.1f mi", ride.distanceKm * 0.621371f) else String.format("%.1f km", ride.distanceKm)
-    fun speedText(kph: Float) = if (useImperial) String.format("%.1f mph", kph * 0.621371f) else String.format("%.1f km/h", kph)
+    val distText = UnitFormatter.distanceDisplay(ride.distanceKm, useImperial)
+    fun speedText(kph: Float) = UnitFormatter.speedDisplay(kph, useImperial)
 
     if (showDeleteConfirmation) {
         AlertDialog(
@@ -300,8 +293,7 @@ private fun RideRow(ride: RideSummary, useImperial: Boolean, onDelete: () -> Uni
                 ride.avgIncline?.let { MetricPair("Avg Incline", String.format("%.1f%%", it)) }
                 ride.maxIncline?.let { MetricPair("Max Incline", String.format("%.1f%%", it)) }
                 ride.totalElevationGainMeters?.let {
-                    if (useImperial) MetricPair("Elevation", String.format("%.0f ft", it * 3.28084f))
-                    else MetricPair("Elevation", String.format("%.0f m", it))
+                    MetricPair("Elevation", UnitFormatter.elevationDisplay(it, useImperial))
                 }
             }
         }

@@ -45,8 +45,8 @@ classDiagram
         +canOperate() checks isBluetoothLeEnabled
     }
 
-    class WftnpAdapter {
-        :broadcast:wftnp
+    class WifiAdapter {
+        :broadcast:wifi
         +canOperate() checks isWifiEnabled
     }
 
@@ -54,7 +54,7 @@ classDiagram
     Adapter <|-- BroadcastAdapter
     HardwareAdapter <|.. FitProAdapter
     BroadcastAdapter <|.. FtmsAdapter
-    BroadcastAdapter <|.. WftnpAdapter
+    BroadcastAdapter <|.. WifiAdapter
 ```
 
 ## 2. Data Flow Types
@@ -568,7 +568,7 @@ flowchart LR
         direction TB
         AM_hw["bindHardwareAdapter()"]
         AM_ftms["bindFtmsAdapter()"]
-        AM_dir["bindWftnpAdapter()"]
+        AM_dir["bindWifiAdapter()"]
     end
 
     subgraph PlatformModule
@@ -588,7 +588,7 @@ flowchart LR
 
     AM_hw --> FitProAdapter:::hw
     AM_ftms --> FtmsAdapter:::bc
-    AM_dir --> WftnpAdapter:::bc
+    AM_dir --> WifiAdapter:::bc
 
     PM_log --> RingBufferLogStore:::app
     PM_al --> RingBufferLogStore
@@ -601,7 +601,7 @@ flowchart LR
 
     FitProAdapter -. "binds as" .-> HardwareAdapter:::core
     FtmsAdapter -. "binds as @IntoSet" .-> BroadcastAdapter:::core
-    WftnpAdapter -. "binds as @IntoSet" .-> BroadcastAdapter
+    WifiAdapter -. "binds as @IntoSet" .-> BroadcastAdapter
     RingBufferLogStore -. "binds as" .-> AppLogger:::core
     RingBufferLogStore -. "binds as" .-> LogStore:::core
     AndroidSystemMonitor -. "binds as" .-> SystemMonitor:::core
@@ -624,9 +624,9 @@ flowchart LR
     USB["USB Serial\n115200 baud"] --> FitPro["FitProAdapter\n:hardware:fitpro"]
     FitPro -- "StateFlow&lt;ExerciseData&gt;" --> Orchestrator
     Orchestrator -- "Flow&lt;ExerciseData&gt;" --> FTMS["FtmsAdapter\n:broadcast:ftms"]
-    Orchestrator -- "Flow&lt;ExerciseData&gt;" --> WFTNP["WftnpAdapter\n:broadcast:wftnp"]
+    Orchestrator -- "Flow&lt;ExerciseData&gt;" --> WIFI["WifiAdapter\n:broadcast:wifi"]
     FTMS -- "BLE GATT" --> Zwift
-    WFTNP -- "TCP" --> Wahoo["Wahoo Apps"]
+    WIFI -- "TCP" --> Apps["Fitness Apps"]
 
     Zwift -- "resistance/incline" --> FTMS
     FTMS -- "Flow&lt;DeviceCommand&gt;" --> Orchestrator
@@ -639,7 +639,7 @@ flowchart LR
 ```
 :app  →  :core  ←  :hardware:fitpro
   ↓                 :broadcast:ftms
-  ↓                 :broadcast:wftnp
+  ↓                 :broadcast:wifi
   └── all modules
 ```
 

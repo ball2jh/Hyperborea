@@ -1,9 +1,9 @@
-package com.nettarion.hyperborea.broadcast.wftnp
+package com.nettarion.hyperborea.broadcast.wifi
 
 import java.io.EOFException
 import java.io.InputStream
 
-object WftnpCodec {
+object WifiCodec {
 
     const val HEADER_SIZE = 6
     const val VERSION: Byte = 0x01
@@ -26,7 +26,7 @@ object WftnpCodec {
     const val RESP_CHAR_NOT_FOUND: Byte = 0x04
     const val RESP_OP_NOT_SUPPORTED: Byte = 0x05
 
-    fun readRequest(input: InputStream): WftnpMessage.Request? {
+    fun readRequest(input: InputStream): WifiMessage.Request? {
         val header = readExact(input, HEADER_SIZE) ?: return null
         val version = header[0]
         if (version != VERSION) return null
@@ -40,28 +40,28 @@ object WftnpCodec {
         val body = if (length > 0) readExact(input, length) ?: return null else ByteArray(0)
 
         return when (identifier) {
-            ID_DISCOVER_SERVICES -> WftnpMessage.DiscoverServices(sequence)
+            ID_DISCOVER_SERVICES -> WifiMessage.DiscoverServices(sequence)
             ID_DISCOVER_CHARACTERISTICS -> {
                 if (body.size < 16) return null
-                WftnpMessage.DiscoverCharacteristics(sequence, decodeShortUuid(body, 0))
+                WifiMessage.DiscoverCharacteristics(sequence, decodeShortUuid(body, 0))
             }
             ID_READ_CHARACTERISTIC -> {
                 if (body.size < 16) return null
-                WftnpMessage.ReadCharacteristic(sequence, decodeShortUuid(body, 0))
+                WifiMessage.ReadCharacteristic(sequence, decodeShortUuid(body, 0))
             }
             ID_WRITE_CHARACTERISTIC -> {
                 if (body.size < 16) return null
                 val uuid = decodeShortUuid(body, 0)
                 val value = body.copyOfRange(16, body.size)
-                WftnpMessage.WriteCharacteristic(sequence, uuid, value)
+                WifiMessage.WriteCharacteristic(sequence, uuid, value)
             }
             ID_ENABLE_NOTIFICATIONS -> {
                 if (body.size < 17) return null
                 val uuid = decodeShortUuid(body, 0)
                 val enable = body[16] != 0x00.toByte()
-                WftnpMessage.EnableNotifications(sequence, uuid, enable)
+                WifiMessage.EnableNotifications(sequence, uuid, enable)
             }
-            ID_UNKNOWN_COMPAT -> WftnpMessage.UnknownCompat(sequence)
+            ID_UNKNOWN_COMPAT -> WifiMessage.UnknownCompat(sequence)
             else -> null
         }
     }

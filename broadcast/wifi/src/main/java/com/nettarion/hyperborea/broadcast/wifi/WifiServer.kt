@@ -1,4 +1,4 @@
-package com.nettarion.hyperborea.broadcast.wftnp
+package com.nettarion.hyperborea.broadcast.wifi
 
 import com.nettarion.hyperborea.core.AppLogger
 import com.nettarion.hyperborea.core.model.ClientInfo
@@ -14,17 +14,17 @@ import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
-class WftnpServer(
+class WifiServer(
     private val logger: AppLogger,
     private val scope: CoroutineScope,
     private val deviceType: DeviceType,
-    private val serviceDef: WftnpServiceDefinition,
+    private val serviceDef: WifiServiceDefinition,
     private val onClientChange: (Set<ClientInfo>) -> Unit,
     private val onCommand: (DeviceCommand) -> Unit,
 ) {
     private var serverSocket: ServerSocket? = null
     private var acceptJob: Job? = null
-    private val clients = ConcurrentHashMap<String, WftnpClientHandler>()
+    private val clients = ConcurrentHashMap<String, WifiClientHandler>()
 
     fun start(port: Int = PORT) {
         if (serverSocket != null) return
@@ -45,7 +45,7 @@ class WftnpServer(
                         val clientId = clientSocket.remoteSocketAddress.toString()
                         logger.i(TAG, "Client connected: $clientId")
 
-                        val handler = WftnpClientHandler(
+                        val handler = WifiClientHandler(
                             clientId = clientId,
                             input = clientSocket.getInputStream(),
                             output = clientSocket.getOutputStream(),
@@ -113,13 +113,13 @@ class WftnpServer(
 
     private fun notifyClientChange() {
         val infos = clients.entries.map { (id, _) ->
-            ClientInfo(id = id, protocol = "WFTNP", connectedAt = System.currentTimeMillis())
+            ClientInfo(id = id, protocol = "WiFi", connectedAt = System.currentTimeMillis())
         }.toSet()
         onClientChange(infos)
     }
 
     companion object {
         const val PORT = 36866
-        private const val TAG = "WftnpServer"
+        private const val TAG = "WifiServer"
     }
 }

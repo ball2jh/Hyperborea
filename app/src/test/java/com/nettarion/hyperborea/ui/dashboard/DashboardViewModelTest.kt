@@ -217,15 +217,15 @@ class DashboardViewModelTest {
 
     @Test
     fun `broadcasts sorted by BroadcastId ordinal`() = runTest {
-        val wftnpAdapter = createBroadcastAdapter(BroadcastId.WFTNP)
+        val wifiAdapter = createBroadcastAdapter(BroadcastId.WIFI)
         val ftmsAdapter = createBroadcastAdapter(BroadcastId.FTMS)
-        createViewModel(broadcastAdapters = setOf(wftnpAdapter, ftmsAdapter))
+        createViewModel(broadcastAdapters = setOf(wifiAdapter, ftmsAdapter))
 
         viewModel.uiState.test {
             val broadcasts = awaitItem().broadcasts
             assertThat(broadcasts).hasSize(2)
             assertThat(broadcasts[0].id).isEqualTo(BroadcastId.FTMS)
-            assertThat(broadcasts[1].id).isEqualTo(BroadcastId.WFTNP)
+            assertThat(broadcasts[1].id).isEqualTo(BroadcastId.WIFI)
         }
     }
 

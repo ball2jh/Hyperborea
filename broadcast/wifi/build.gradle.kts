@@ -3,7 +3,7 @@ plugins {
 }
 
 android {
-    namespace = "com.nettarion.hyperborea.broadcast.wftnp"
+    namespace = "com.nettarion.hyperborea.broadcast.wifi"
     compileSdk = 36
 
     defaultConfig {

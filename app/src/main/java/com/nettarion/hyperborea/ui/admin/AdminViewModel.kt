@@ -57,20 +57,18 @@ class AdminViewModel @Inject constructor(
     @param:ApplicationContext private val context: Context,
 ) : ViewModel() {
 
-    val broadcastDiagnostics: Flow<List<BroadcastDiagnostic>> = combine(
-        broadcastAdapters.sortedBy { it.id.ordinal }.flatMap { listOf(it.state, it.connectedClients) },
-    ) { values ->
+    val broadcastDiagnostics: Flow<List<BroadcastDiagnostic>> = run {
         val sorted = broadcastAdapters.sortedBy { it.id.ordinal }
-        sorted.mapIndexed { i, adapter ->
-            val state = values[i * 2] as AdapterState
-            @Suppress("UNCHECKED_CAST")
-            val clients = values[i * 2 + 1] as Set<ClientInfo>
-            BroadcastDiagnostic(
-                id = adapter.id,
-                state = state,
-                clients = clients,
-            )
+        val perAdapterFlows = sorted.map { adapter ->
+            combine(adapter.state, adapter.connectedClients) { state, clients ->
+                BroadcastDiagnostic(
+                    id = adapter.id,
+                    state = state,
+                    clients = clients,
+                )
+            }
         }
+        combine(perAdapterFlows) { it.toList() }
     }
 
     val logEntries: StateFlow<List<LogEntry>> = logStore.entries

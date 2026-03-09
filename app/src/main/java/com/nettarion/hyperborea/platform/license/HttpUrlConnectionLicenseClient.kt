@@ -2,25 +2,28 @@ package com.nettarion.hyperborea.platform.license
 
 import com.nettarion.hyperborea.BuildConfig
 import com.nettarion.hyperborea.core.AppLogger
+import com.nettarion.hyperborea.platform.net.Tls12SocketFactory
 import org.json.JSONObject
 import java.net.HttpURLConnection
 import java.net.URL
 import javax.inject.Inject
 import javax.inject.Singleton
+import javax.net.ssl.HttpsURLConnection
 
 @Singleton
 class HttpUrlConnectionLicenseClient @Inject constructor(
     private val logger: AppLogger,
 ) : LicenseHttpClient {
 
-    override fun fetchStatus(authToken: String): String? {
+    override fun fetchStatus(authToken: String, nonce: String): String? {
         val url = URL("${BuildConfig.SERVER_URL}/api/device/status")
-        val connection = url.openConnection() as HttpURLConnection
+        val connection = url.openTlsConnection()
         try {
             connection.connectTimeout = TIMEOUT_MS
             connection.readTimeout = TIMEOUT_MS
             connection.requestMethod = "GET"
             connection.setRequestProperty("Authorization", "Bearer $authToken")
+            connection.setRequestProperty("X-Nonce", nonce)
 
             if (connection.responseCode != HttpURLConnection.HTTP_OK) {
                 logger.w(TAG, "Status check returned HTTP ${connection.responseCode}")
@@ -35,7 +38,7 @@ class HttpUrlConnectionLicenseClient @Inject constructor(
 
     override fun requestPairing(deviceUuid: String): String? {
         val url = URL("${BuildConfig.SERVER_URL}/api/device/pair")
-        val connection = url.openConnection() as HttpURLConnection
+        val connection = url.openTlsConnection()
         try {
             connection.connectTimeout = TIMEOUT_MS
             connection.readTimeout = TIMEOUT_MS
@@ -59,7 +62,7 @@ class HttpUrlConnectionLicenseClient @Inject constructor(
 
     override fun pollPairingStatus(pairingToken: String): String? {
         val url = URL("${BuildConfig.SERVER_URL}/api/device/pair/status?token=$pairingToken")
-        val connection = url.openConnection() as HttpURLConnection
+        val connection = url.openTlsConnection()
         try {
             connection.connectTimeout = TIMEOUT_MS
             connection.readTimeout = TIMEOUT_MS
@@ -78,7 +81,7 @@ class HttpUrlConnectionLicenseClient @Inject constructor(
 
     override fun unlink(authToken: String): Boolean {
         val url = URL("${BuildConfig.SERVER_URL}/api/device/unlink")
-        val connection = url.openConnection() as HttpURLConnection
+        val connection = url.openTlsConnection()
         try {
             connection.connectTimeout = TIMEOUT_MS
             connection.readTimeout = TIMEOUT_MS
@@ -96,6 +99,14 @@ class HttpUrlConnectionLicenseClient @Inject constructor(
         } finally {
             connection.disconnect()
         }
+    }
+
+    private fun URL.openTlsConnection(): HttpURLConnection {
+        val connection = openConnection() as HttpURLConnection
+        if (connection is HttpsURLConnection) {
+            connection.sslSocketFactory = Tls12SocketFactory()
+        }
+        return connection
     }
 
     companion object {

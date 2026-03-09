@@ -1,4 +1,4 @@
-package com.nettarion.hyperborea.broadcast.wftnp
+package com.nettarion.hyperborea.broadcast.wifi
 
 import android.content.Context
 import android.net.nsd.NsdManager

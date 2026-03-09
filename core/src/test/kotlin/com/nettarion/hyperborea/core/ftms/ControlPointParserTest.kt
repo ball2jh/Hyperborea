@@ -131,45 +131,45 @@ class ControlPointParserTest {
         assertThat(result).isInstanceOf(ControlPointParser.ControlPointResult.Unsupported::class.java)
     }
 
-    // --- Wahoo Control ---
+    // --- Trainer Control ---
 
     @Test
-    fun `parseWahooControl ERG mode sets target power`() {
+    fun `parseTrainerControl ERG mode sets target power`() {
         // cmd=0x42, 150 watts = 0x96, 0x00
-        val result = ControlPointParser.parseWahooControl(byteArrayOf(0x42, 0x96.toByte(), 0x00))
+        val result = ControlPointParser.parseTrainerControl(byteArrayOf(0x42, 0x96.toByte(), 0x00))
         val cmd = (result as ControlPointParser.ControlPointResult.DeviceCmd).command
         assertThat(cmd).isInstanceOf(DeviceCommand.SetTargetPower::class.java)
         assertThat((cmd as DeviceCommand.SetTargetPower).watts).isEqualTo(150)
     }
 
     @Test
-    fun `parseWahooControl sim mode sets incline`() {
+    fun `parseTrainerControl sim mode sets incline`() {
         // cmd=0x46, midpoint (32768 = 0x8000) → grade = 0%
-        val result = ControlPointParser.parseWahooControl(byteArrayOf(0x46, 0x00, 0x80.toByte()))
+        val result = ControlPointParser.parseTrainerControl(byteArrayOf(0x46, 0x00, 0x80.toByte()))
         val cmd = (result as ControlPointParser.ControlPointResult.DeviceCmd).command
         assertThat(cmd).isInstanceOf(DeviceCommand.SetIncline::class.java)
         assertThat((cmd as DeviceCommand.SetIncline).percent).isWithin(0.1f).of(0.0f)
     }
 
     @Test
-    fun `parseWahooControl sim mode max value is approximately 100 percent`() {
+    fun `parseTrainerControl sim mode max value is approximately 100 percent`() {
         // 0xFFFF → ((65535/65535)*2-1)*100 = 100%
-        val result = ControlPointParser.parseWahooControl(byteArrayOf(0x46, 0xFF.toByte(), 0xFF.toByte()))
+        val result = ControlPointParser.parseTrainerControl(byteArrayOf(0x46, 0xFF.toByte(), 0xFF.toByte()))
         val cmd = (result as ControlPointParser.ControlPointResult.DeviceCmd).command
         assertThat((cmd as DeviceCommand.SetIncline).percent).isWithin(0.1f).of(100.0f)
     }
 
     @Test
-    fun `parseWahooControl sim mode min value is approximately negative 100 percent`() {
+    fun `parseTrainerControl sim mode min value is approximately negative 100 percent`() {
         // 0x0000 → ((0/65535)*2-1)*100 = -100%
-        val result = ControlPointParser.parseWahooControl(byteArrayOf(0x46, 0x00, 0x00))
+        val result = ControlPointParser.parseTrainerControl(byteArrayOf(0x46, 0x00, 0x00))
         val cmd = (result as ControlPointParser.ControlPointResult.DeviceCmd).command
         assertThat((cmd as DeviceCommand.SetIncline).percent).isWithin(0.1f).of(-100.0f)
     }
 
     @Test
-    fun `parseWahooControl unknown command returns Unsupported`() {
-        val result = ControlPointParser.parseWahooControl(byteArrayOf(0x10, 0x00, 0x00))
+    fun `parseTrainerControl unknown command returns Unsupported`() {
+        val result = ControlPointParser.parseTrainerControl(byteArrayOf(0x10, 0x00, 0x00))
         assertThat(result).isInstanceOf(ControlPointParser.ControlPointResult.Unsupported::class.java)
     }
 

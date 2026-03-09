@@ -124,7 +124,7 @@ dependencies {
     implementation(project(":core"))
     implementation(project(":hardware:fitpro"))
     implementation(project(":broadcast:ftms"))
-    implementation(project(":broadcast:wftnp"))
+    implementation(project(":broadcast:wifi"))
     implementation(project(":ecosystem:ifit"))
 
     implementation(libs.coroutines.android)
@@ -153,6 +153,7 @@ dependencies {
     testImplementation(libs.coroutines.test)
     testImplementation(libs.turbine)
     testImplementation(libs.json)
+    testImplementation(libs.bouncycastle)
 
     debugImplementation(libs.compose.ui.tooling)
     debugImplementation(libs.compose.ui.test.manifest)

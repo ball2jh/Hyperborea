@@ -2,8 +2,8 @@ package com.nettarion.hyperborea.di
 
 import android.content.Context
 import com.nettarion.hyperborea.broadcast.ftms.FtmsAdapter
-import com.nettarion.hyperborea.broadcast.wftnp.NsdRegistrar
-import com.nettarion.hyperborea.broadcast.wftnp.WftnpAdapter
+import com.nettarion.hyperborea.broadcast.wifi.NsdRegistrar
+import com.nettarion.hyperborea.broadcast.wifi.WifiAdapter
 import com.nettarion.hyperborea.core.AppLogger
 import com.nettarion.hyperborea.core.adapter.BroadcastAdapter
 import com.nettarion.hyperborea.core.adapter.HardwareAdapter
@@ -31,7 +31,7 @@ abstract class AdapterModule {
     @Binds
     @Singleton
     @IntoSet
-    abstract fun bindWftnpAdapter(impl: WftnpAdapter): BroadcastAdapter
+    abstract fun bindWifiAdapter(impl: WifiAdapter): BroadcastAdapter
 
     companion object {
         @Provides

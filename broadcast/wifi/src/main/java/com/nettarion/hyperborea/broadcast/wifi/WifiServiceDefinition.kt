@@ -1,10 +1,10 @@
-package com.nettarion.hyperborea.broadcast.wftnp
+package com.nettarion.hyperborea.broadcast.wifi
 
 import com.nettarion.hyperborea.core.model.DeviceInfo
 import com.nettarion.hyperborea.core.ftms.FtmsDataEncoder
 import com.nettarion.hyperborea.core.ftms.FtmsServiceMetadata
 
-class WftnpServiceDefinition(deviceInfo: DeviceInfo) {
+class WifiServiceDefinition(deviceInfo: DeviceInfo) {
 
     val dataCharacteristic = ShortUuid(FtmsDataEncoder.dataCharacteristicShortUuid(deviceInfo.type))
 
@@ -20,7 +20,7 @@ class WftnpServiceDefinition(deviceInfo: DeviceInfo) {
         CharDef(SUPPORTED_INCLINATION, PROP_READ, inclinationRangeValue),
         CharDef(SUPPORTED_POWER, PROP_READ, powerRangeValue),
         CharDef(FTMS_CONTROL_POINT, (PROP_WRITE.toInt() or PROP_INDICATE.toInt()).toByte(), null),
-        CharDef(WAHOO_CONTROL, PROP_WRITE, null),
+        CharDef(TRAINER_CONTROL, PROP_WRITE, null),
         CharDef(dataCharacteristic, PROP_NOTIFY, null),
         CharDef(TRAINING_STATUS, PROP_READ, FtmsServiceMetadata.TRAINING_STATUS_VALUE),
     )
@@ -60,7 +60,7 @@ class WftnpServiceDefinition(deviceInfo: DeviceInfo) {
     private data class CharDef(val uuid: ShortUuid, val properties: Byte, val readValue: ByteArray?)
 
     companion object {
-        // WFTNP property flags (NOT standard BLE ATT flags)
+        // Property flags (protocol-specific, NOT standard BLE ATT flags)
         const val PROP_READ: Byte = 0x01
         const val PROP_WRITE: Byte = 0x02
         const val PROP_NOTIFY: Byte = 0x04
@@ -76,7 +76,7 @@ class WftnpServiceDefinition(deviceInfo: DeviceInfo) {
         val SUPPORTED_INCLINATION = ShortUuid(FtmsServiceMetadata.SUPPORTED_INCLINATION)
         val SUPPORTED_POWER = ShortUuid(FtmsServiceMetadata.SUPPORTED_POWER)
         val FTMS_CONTROL_POINT = ShortUuid(FtmsServiceMetadata.FTMS_CONTROL_POINT)
-        val WAHOO_CONTROL = ShortUuid(FtmsServiceMetadata.WAHOO_CONTROL)
+        val TRAINER_CONTROL = ShortUuid(FtmsServiceMetadata.TRAINER_CONTROL)
         val TRAINING_STATUS = ShortUuid(FtmsServiceMetadata.TRAINING_STATUS)
 
         // CPS characteristics
