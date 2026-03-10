@@ -1,5 +1,6 @@
 package com.nettarion.hyperborea
 
+import android.annotation.SuppressLint
 import android.app.Notification
 import android.app.PendingIntent
 import android.app.Service
@@ -10,6 +11,7 @@ import com.nettarion.hyperborea.core.AppLogger
 import com.nettarion.hyperborea.core.LicenseChecker
 import com.nettarion.hyperborea.core.LicenseState
 import com.nettarion.hyperborea.core.adapter.HardwareAdapter
+import com.nettarion.hyperborea.core.orchestration.BroadcastManager
 import com.nettarion.hyperborea.core.orchestration.Orchestrator
 import com.nettarion.hyperborea.core.orchestration.OrchestratorState
 import com.nettarion.hyperborea.overlay.OverlayManager
@@ -25,6 +27,7 @@ import javax.inject.Inject
 class HyperboreaService : Service() {
 
     @Inject lateinit var orchestrator: Orchestrator
+    @Inject lateinit var broadcastManager: BroadcastManager
     @Inject lateinit var hardwareAdapter: HardwareAdapter
     @Inject lateinit var logger: AppLogger
     @Inject lateinit var scope: CoroutineScope
@@ -33,6 +36,7 @@ class HyperboreaService : Service() {
     private var stateObserverJob: Job? = null
     private lateinit var overlayManager: OverlayManager
 
+    @SuppressLint("ForegroundServiceType") // API 25 target — no foregroundServiceType needed
     override fun onCreate() {
         super.onCreate()
         @Suppress("DEPRECATION")
@@ -47,6 +51,7 @@ class HyperboreaService : Service() {
             onResume = { resume() },
             onStop = { deactivate(saveRide = true) },
         )
+        scope.launch { broadcastManager.start() }
         startStateObserver()
         logger.i(TAG, "Service created")
     }
@@ -75,6 +80,9 @@ class HyperboreaService : Service() {
             withTimeoutOrNull(STOP_TIMEOUT_MS) {
                 orchestrator.stop()
             } ?: logger.w(TAG, "Orchestrator stop timed out in onDestroy")
+            withTimeoutOrNull(STOP_TIMEOUT_MS) {
+                broadcastManager.stop()
+            } ?: logger.w(TAG, "BroadcastManager stop timed out in onDestroy")
         }
         logger.i(TAG, "Service destroyed")
         super.onDestroy()
@@ -84,6 +92,7 @@ class HyperboreaService : Service() {
         logger.i(TAG, "Task removed — shutting down")
         scope.launch {
             orchestrator.stop()
+            broadcastManager.stop()
             stopSelf()
         }
     }
@@ -125,6 +134,7 @@ class HyperboreaService : Service() {
         logger.i(TAG, "Shutting down")
         scope.launch {
             orchestrator.stop()
+            broadcastManager.stop()
             stopSelf()
         }
     }
@@ -139,6 +149,7 @@ class HyperboreaService : Service() {
     }
 
     @Suppress("DEPRECATION")
+    @SuppressLint("NotificationPermission") // API 25 target — POST_NOTIFICATIONS not required
     private fun updateNotification(state: OrchestratorState) {
         val text = when (state) {
             is OrchestratorState.Idle -> "Idle"
