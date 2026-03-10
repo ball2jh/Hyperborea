@@ -3,13 +3,9 @@ package com.nettarion.hyperborea.core.orchestration
 import com.nettarion.hyperborea.core.AppLogger
 import com.nettarion.hyperborea.core.RetryPolicy
 import com.nettarion.hyperborea.core.adapter.AdapterState
-import com.nettarion.hyperborea.core.adapter.BroadcastAdapter
-import com.nettarion.hyperborea.core.adapter.BroadcastId
 import com.nettarion.hyperborea.core.adapter.HardwareAdapter
 import com.nettarion.hyperborea.core.model.DeviceCommand
-import com.nettarion.hyperborea.core.model.DeviceInfo
 import com.nettarion.hyperborea.core.profile.RideRecorder
-import com.nettarion.hyperborea.core.profile.UserPreferences
 import com.nettarion.hyperborea.core.system.SystemController
 import com.nettarion.hyperborea.core.system.SystemMonitor
 
@@ -23,7 +19,6 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.catch
 import kotlinx.coroutines.flow.filterNotNull
 import kotlinx.coroutines.flow.first
-import kotlinx.coroutines.flow.merge
 import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
@@ -38,8 +33,7 @@ class Orchestrator(
     private val systemController: SystemController,
     private val ecosystemManager: EcosystemManager,
     private val hardwareAdapter: HardwareAdapter,
-    private val broadcastAdapters: Set<BroadcastAdapter>,
-    private val userPreferences: UserPreferences,
+    private val broadcastManager: BroadcastManager,
     private val rideRecorder: RideRecorder,
     private val logger: AppLogger,
     private val scope: CoroutineScope,
@@ -49,18 +43,12 @@ class Orchestrator(
     val state: StateFlow<OrchestratorState> = _state.asStateFlow()
 
     private val mutex = Mutex()
-    private var commandPipelineJob: Job? = null
     private var hardwareMonitorJob: Job? = null
-    private var broadcastMonitorJobs: List<Job> = emptyList()
-    private var activeBroadcasts: List<BroadcastAdapter> = emptyList()
+    private var commandPipelineJob: Job? = null
 
-    private val broadcastRetryPolicy = RetryPolicy(maxAttempts = 3, initialDelayMs = 2000)
-    private val broadcastRetryAttempts = mutableMapOf<BroadcastId, Int>()
     private val hardwareRetryPolicy = RetryPolicy(maxAttempts = 5, initialDelayMs = 2000, maxDelayMs = 15000)
     @Volatile
     private var isReconnecting = false
-    @Volatile
-    private var activeDeviceInfo: DeviceInfo? = null
     private var preservedElapsedSeconds: Long = 0L
 
     suspend fun start() {
@@ -114,80 +102,28 @@ class Orchestrator(
             return
         }
 
-        // Start broadcasts
-        _state.value = OrchestratorState.Preparing("Starting broadcasts")
-        val dataSource = hardwareAdapter.exerciseData.filterNotNull()
-        val started = mutableListOf<BroadcastAdapter>()
-        val enabledIds = userPreferences.enabledBroadcasts.value
+        // Wire data source to broadcasts
         val deviceInfo = hardwareAdapter.deviceInfo.value
             ?: throw IllegalStateException("Hardware connected but deviceInfo is null")
-        activeDeviceInfo = deviceInfo
+        broadcastManager.connectDataSource(hardwareAdapter.exerciseData)
+        broadcastManager.updateDeviceInfo(deviceInfo)
 
-        for (adapter in broadcastAdapters) {
-            if (adapter.id !in enabledIds) {
-                logger.i(TAG, "Skipped broadcast (disabled by user): ${adapter.id.displayName}")
-                continue
-            }
-            if (adapter.canOperate(snapshot)) {
-                adapter.start(dataSource, deviceInfo)
-                started.add(adapter)
-                logger.i(TAG, "Started broadcast: ${adapter.id.displayName}")
-            } else {
-                logger.i(TAG, "Skipped broadcast (cannot operate): ${adapter.id.displayName}")
-            }
-        }
-        activeBroadcasts = started
-
-        // Command pipeline
-        if (started.isNotEmpty()) {
-            val commandFlows = started.map { it.incomingCommands }
-            commandPipelineJob = scope.launch {
-                commandFlows.merge()
-                    .catch { e -> logger.e(TAG, "Command pipeline error", e) }
-                    .collect { command ->
-                        try {
-                            logger.d(TAG, "Forwarding command: $command")
-                            hardwareAdapter.sendCommand(command)
-                        } catch (e: CancellationException) { throw e }
-                        catch (e: Exception) { logger.e(TAG, "Failed to forward command", e) }
-                    }
-            }
+        // Command pipeline: broadcasts → hardware
+        commandPipelineJob = scope.launch {
+            broadcastManager.incomingCommands
+                .catch { e -> logger.e(TAG, "Command pipeline error", e) }
+                .collect { command ->
+                    try {
+                        logger.d(TAG, "Forwarding command: $command")
+                        hardwareAdapter.sendCommand(command)
+                    } catch (e: CancellationException) { throw e }
+                    catch (e: Exception) { logger.e(TAG, "Failed to forward command", e) }
+                }
         }
 
         _state.value = OrchestratorState.Running()
         rideRecorder.start(hardwareAdapter.exerciseData.filterNotNull())
-        logger.i(TAG, "Orchestrator running (${started.size}/${broadcastAdapters.size} broadcasts)")
-
-        // Broadcast adapter monitors — retry on error
-        broadcastRetryAttempts.clear()
-        broadcastMonitorJobs = started.map { adapter ->
-            scope.launch {
-                adapter.state.collect { adapterState ->
-                    if (adapterState is AdapterState.Error) {
-                        val attempts = broadcastRetryAttempts.getOrDefault(adapter.id, 0)
-                        if (attempts < broadcastRetryPolicy.maxAttempts) {
-                            val delayMs = broadcastRetryPolicy.delayForAttempt(attempts + 1)
-                            logger.i(TAG, "Retrying ${adapter.id.displayName} in ${delayMs}ms (attempt ${attempts + 1})")
-                            delay(delayMs)
-                            broadcastRetryAttempts[adapter.id] = attempts + 1
-                            adapter.stop()
-                            val currentSnapshot = systemMonitor.snapshot.value
-                            val deviceInfo = activeDeviceInfo
-                            if (deviceInfo != null && adapter.canOperate(currentSnapshot)) {
-                                adapter.start(hardwareAdapter.exerciseData.filterNotNull(), deviceInfo)
-                            } else if (deviceInfo == null) {
-                                logger.e(TAG, "Cannot retry ${adapter.id.displayName}: activeDeviceInfo is null")
-                            }
-                        } else {
-                            logger.e(TAG, "${adapter.id.displayName} exhausted retries")
-                            updateDegradedState()
-                        }
-                    } else if (adapterState is AdapterState.Active) {
-                        broadcastRetryAttempts.remove(adapter.id)
-                    }
-                }
-            }
-        }
+        logger.i(TAG, "Orchestrator running")
 
         // Hardware disconnect monitor — reconnect with backoff
         hardwareMonitorJob = scope.launch {
@@ -312,26 +248,13 @@ class Orchestrator(
 
             rideRecorder.stop(save = saveRide)
 
-            broadcastMonitorJobs.forEach { it.cancel() }
-            broadcastMonitorJobs = emptyList()
-            broadcastRetryAttempts.clear()
+            commandPipelineJob?.cancel()
+            commandPipelineJob = null
+            broadcastManager.disconnectDataSource()
 
             hardwareMonitorJob?.cancel()
             hardwareMonitorJob = null
             isReconnecting = false
-
-            commandPipelineJob?.cancel()
-            commandPipelineJob = null
-
-            for (adapter in activeBroadcasts) {
-                try {
-                    adapter.stop()
-                } catch (e: CancellationException) { throw e }
-                catch (e: Exception) {
-                    logger.e(TAG, "Failed to stop ${adapter.id.displayName}", e)
-                }
-            }
-            activeBroadcasts = emptyList()
 
             hardwareAdapter.disconnect()
 
@@ -344,37 +267,16 @@ class Orchestrator(
         preservedElapsedSeconds = 0L
         rideRecorder.stop()
 
-        broadcastMonitorJobs.forEach { it.cancel() }
-        broadcastMonitorJobs = emptyList()
-        broadcastRetryAttempts.clear()
+        commandPipelineJob?.cancel()
+        commandPipelineJob = null
+        broadcastManager.disconnectDataSource()
 
         hardwareMonitorJob?.cancel()
         hardwareMonitorJob = null
         isReconnecting = false
 
-        commandPipelineJob?.cancel()
-        commandPipelineJob = null
-
-        for (adapter in activeBroadcasts) {
-            try {
-                adapter.stop()
-            } catch (e: Exception) {
-                logger.e(TAG, "Failed to stop ${adapter.id.displayName}", e)
-            }
-        }
-        activeBroadcasts = emptyList()
-
         _state.value = OrchestratorState.Error(reason)
         logger.i(TAG, "Orchestrator stopped: $reason")
-    }
-
-    private suspend fun updateDegradedState() {
-        mutex.withLock {
-            if (_state.value !is OrchestratorState.Running && _state.value !is OrchestratorState.Paused) return
-            val errors = activeBroadcasts.filter { it.state.value is AdapterState.Error }
-            val msg = if (errors.isNotEmpty()) "${errors.size} broadcast(s) in error" else null
-            _state.value = OrchestratorState.Running(degraded = msg)
-        }
     }
 
     private suspend fun refreshAndAwait() {

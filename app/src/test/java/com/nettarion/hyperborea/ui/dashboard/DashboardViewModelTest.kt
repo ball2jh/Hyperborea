@@ -3,7 +3,6 @@ package com.nettarion.hyperborea.ui.dashboard
 import android.content.ContextWrapper
 import com.google.common.truth.Truth.assertThat
 import com.nettarion.hyperborea.MainDispatcherRule
-import com.nettarion.hyperborea.core.AppLogger
 import com.nettarion.hyperborea.core.adapter.AdapterState
 import com.nettarion.hyperborea.core.adapter.BroadcastAdapter
 import com.nettarion.hyperborea.core.adapter.BroadcastId
@@ -16,6 +15,7 @@ import com.nettarion.hyperborea.core.model.ExerciseData
 import com.nettarion.hyperborea.core.model.Profile
 import com.nettarion.hyperborea.core.model.RideSummary
 import com.nettarion.hyperborea.core.model.WorkoutSample
+import com.nettarion.hyperborea.core.orchestration.BroadcastManager
 import com.nettarion.hyperborea.core.orchestration.EcosystemManager
 import com.nettarion.hyperborea.core.orchestration.Orchestrator
 import com.nettarion.hyperborea.core.orchestration.OrchestratorState
@@ -26,6 +26,7 @@ import com.nettarion.hyperborea.core.profile.UserPreferences
 import com.nettarion.hyperborea.core.system.SystemController
 import com.nettarion.hyperborea.core.system.SystemMonitor
 import com.nettarion.hyperborea.core.system.SystemSnapshot
+import com.nettarion.hyperborea.core.test.TestAppLogger
 import com.nettarion.hyperborea.core.test.buildExerciseData
 import com.nettarion.hyperborea.core.test.buildSystemSnapshot
 import app.cash.turbine.test
@@ -122,12 +123,7 @@ class DashboardViewModelTest {
     private fun createViewModel(
         broadcastAdapters: Set<BroadcastAdapter> = emptySet(),
     ) {
-        val noOpLogger = object : AppLogger {
-            override fun d(tag: String, message: String) {}
-            override fun i(tag: String, message: String) {}
-            override fun w(tag: String, message: String) {}
-            override fun e(tag: String, message: String, throwable: Throwable?) {}
-        }
+        val noOpLogger = TestAppLogger()
 
         val fakeSystemController = object : SystemController {
             override suspend fun stopService(packageName: String, className: String) = true
@@ -148,13 +144,20 @@ class DashboardViewModelTest {
         val scope = CoroutineScope(mainDispatcherRule.testDispatcher)
         val rideRecorder = RideRecorder(fakeProfileRepository, noOpLogger, scope)
 
+        val broadcastManager = BroadcastManager(
+            broadcastAdapters = broadcastAdapters,
+            systemMonitor = fakeSystemMonitor,
+            userPreferences = fakeUserPreferences,
+            logger = noOpLogger,
+            scope = scope,
+        )
+
         val orchestrator = Orchestrator(
             systemMonitor = fakeSystemMonitor,
             systemController = fakeSystemController,
             ecosystemManager = fakeEcosystemManager,
             hardwareAdapter = fakeHardwareAdapter,
-            broadcastAdapters = broadcastAdapters,
-            userPreferences = fakeUserPreferences,
+            broadcastManager = broadcastManager,
             rideRecorder = rideRecorder,
             logger = noOpLogger,
             scope = scope,

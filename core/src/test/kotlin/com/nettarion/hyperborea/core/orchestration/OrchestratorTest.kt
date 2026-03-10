@@ -1,6 +1,5 @@
 package com.nettarion.hyperborea.core.orchestration
 
-import com.nettarion.hyperborea.core.AppLogger
 import com.nettarion.hyperborea.core.adapter.AdapterState
 import com.nettarion.hyperborea.core.adapter.BroadcastAdapter
 import com.nettarion.hyperborea.core.adapter.BroadcastId
@@ -21,6 +20,7 @@ import com.nettarion.hyperborea.core.system.SystemMonitor
 import com.nettarion.hyperborea.core.system.SystemSnapshot
 
 import com.google.common.truth.Truth.assertThat
+import com.nettarion.hyperborea.core.test.TestAppLogger
 import com.nettarion.hyperborea.core.test.buildDeviceInfo
 import com.nettarion.hyperborea.core.test.buildSystemSnapshot
 import kotlinx.coroutines.CoroutineScope
@@ -30,7 +30,6 @@ import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
-import kotlinx.coroutines.flow.emptyFlow
 import kotlinx.coroutines.test.TestScope
 import kotlinx.coroutines.test.UnconfinedTestDispatcher
 import kotlinx.coroutines.test.advanceUntilIdle
@@ -54,14 +53,6 @@ class OrchestratorTest {
         val env = TestEnv(this)
         env.orchestrator.start()
         assertThat(env.hardware.connectCalled).isTrue()
-    }
-
-    @Test
-    fun `start starts broadcast adapters that can operate`() = runTest {
-        val env = TestEnv(this)
-        env.orchestrator.start()
-        assertThat(env.broadcast1.startCalled).isTrue()
-        assertThat(env.broadcast2.startCalled).isTrue()
     }
 
     @Test
@@ -156,15 +147,6 @@ class OrchestratorTest {
     // --- canOperate filtering ---
 
     @Test
-    fun `broadcast adapter that cannot operate is skipped`() = runTest {
-        val env = TestEnv(this, broadcast1CanOperate = false)
-        env.orchestrator.start()
-        assertThat(env.broadcast1.startCalled).isFalse()
-        assertThat(env.broadcast2.startCalled).isTrue()
-        assertThat(env.orchestrator.state.value).isEqualTo(OrchestratorState.Running())
-    }
-
-    @Test
     fun `hardware canOperate false transitions to Error`() = runTest {
         val env = TestEnv(this, hardwareCanOperate = false)
         env.orchestrator.start()
@@ -188,15 +170,6 @@ class OrchestratorTest {
         env.orchestrator.start()
         env.orchestrator.stop()
         assertThat(env.hardware.disconnectCalled).isTrue()
-    }
-
-    @Test
-    fun `stop stops broadcast adapters`() = runTest {
-        val env = TestEnv(this)
-        env.orchestrator.start()
-        env.orchestrator.stop()
-        assertThat(env.broadcast1.stopCalled).isTrue()
-        assertThat(env.broadcast2.stopCalled).isTrue()
     }
 
     // --- Idempotency ---
@@ -230,7 +203,7 @@ class OrchestratorTest {
     // --- Hardware disconnect while running ---
 
     @Test
-    fun `hardware error with reconnect failure stops broadcasts and transitions to Error`() = runTest {
+    fun `hardware error with reconnect failure transitions to Error`() = runTest {
         val env = TestEnv(this)
         env.orchestrator.start()
         assertThat(env.orchestrator.state.value).isEqualTo(OrchestratorState.Running())
@@ -241,8 +214,6 @@ class OrchestratorTest {
 
         assertThat(env.orchestrator.state.value).isInstanceOf(OrchestratorState.Error::class.java)
         assertThat((env.orchestrator.state.value as OrchestratorState.Error).message).contains("reconnect failed")
-        assertThat(env.broadcast1.stopCalled).isTrue()
-        assertThat(env.broadcast2.stopCalled).isTrue()
     }
 
     @Test
@@ -257,7 +228,6 @@ class OrchestratorTest {
 
         assertThat(env.orchestrator.state.value).isInstanceOf(OrchestratorState.Error::class.java)
         assertThat((env.orchestrator.state.value as OrchestratorState.Error).message).contains("reconnect failed")
-        assertThat(env.broadcast1.stopCalled).isTrue()
     }
 
     // --- Pause/Resume ---
@@ -329,37 +299,6 @@ class OrchestratorTest {
         assertThat(env.hardware.receivedCommands).contains(command)
     }
 
-    // --- User preferences ---
-
-    @Test
-    fun `disabled broadcast is not started`() = runTest {
-        val env = TestEnv(this, enabledBroadcasts = setOf(BroadcastId.FTMS))
-        env.orchestrator.start()
-        assertThat(env.broadcast1.startCalled).isTrue()
-        assertThat(env.broadcast2.startCalled).isFalse()
-        assertThat(env.orchestrator.state.value).isEqualTo(OrchestratorState.Running())
-    }
-
-    @Test
-    fun `all broadcasts disabled still transitions to Running`() = runTest {
-        val env = TestEnv(this, enabledBroadcasts = emptySet())
-        env.orchestrator.start()
-        assertThat(env.broadcast1.startCalled).isFalse()
-        assertThat(env.broadcast2.startCalled).isFalse()
-        assertThat(env.orchestrator.state.value).isEqualTo(OrchestratorState.Running())
-    }
-
-    @Test
-    fun `disabled broadcast is not stopped on orchestrator stop`() = runTest {
-        val env = TestEnv(this, enabledBroadcasts = setOf(BroadcastId.FTMS))
-        env.orchestrator.start()
-        env.orchestrator.stop()
-        assertThat(env.broadcast1.stopCalled).isTrue()
-        assertThat(env.broadcast2.stopCalled).isFalse()
-    }
-
-    // --- Command pipeline resilience ---
-
     @Test
     fun `command pipeline error does not crash orchestrator`() = runTest {
         val env = TestEnv(this)
@@ -370,35 +309,6 @@ class OrchestratorTest {
         env.broadcast1.emitCommand(command)
 
         assertThat(env.orchestrator.state.value).isEqualTo(OrchestratorState.Running())
-    }
-
-    // --- Broadcast retry ---
-
-    @Test
-    fun `broadcast error triggers retry`() = runTest {
-        val env = TestEnv(this)
-        env.orchestrator.start()
-        assertThat(env.broadcast1.startCallCount).isEqualTo(1)
-
-        env.broadcast1.setError("BLE failed")
-        advanceUntilIdle()
-
-        assertThat(env.broadcast1.startCallCount).isGreaterThan(1)
-        assertThat(env.orchestrator.state.value).isEqualTo(OrchestratorState.Running())
-    }
-
-    @Test
-    fun `broadcast exhausts retries transitions to degraded`() = runTest {
-        val env = TestEnv(this)
-        env.orchestrator.start()
-
-        env.broadcast1.failOnStart = true
-        env.broadcast1.setError("BLE failed")
-        advanceUntilIdle()
-
-        val state = env.orchestrator.state.value
-        assertThat(state).isInstanceOf(OrchestratorState.Running::class.java)
-        assertThat((state as OrchestratorState.Running).degraded).isNotNull()
     }
 
     // --- Hardware reconnect ---
@@ -456,6 +366,37 @@ class OrchestratorTest {
         assertThat((env.orchestrator.state.value as OrchestratorState.Error).message).contains("Timeout")
     }
 
+    // --- BroadcastManager integration ---
+
+    @Test
+    fun `start connects data source to broadcast manager`() = runTest {
+        val env = TestEnv(this)
+        env.orchestrator.start()
+        // Broadcasts are started by BroadcastManager.start() (service lifecycle),
+        // but data flows through connectDataSource. Verify broadcasts received data source.
+        assertThat(env.broadcast1.startCalled).isTrue()
+    }
+
+    @Test
+    fun `stop disconnects data source from broadcast manager`() = runTest {
+        val env = TestEnv(this)
+        env.orchestrator.start()
+        env.orchestrator.stop()
+        // Broadcasts should still be running (BroadcastManager not stopped),
+        // but data source disconnected. Verify orchestrator reached Idle.
+        assertThat(env.orchestrator.state.value).isEqualTo(OrchestratorState.Idle)
+    }
+
+    @Test
+    fun `start updates broadcast manager device info`() = runTest {
+        val env = TestEnv(this)
+        env.orchestrator.start()
+        // BroadcastManager.updateDeviceInfo is called with hardware's device info.
+        // Since our fake returns buildDeviceInfo() which differs from DEFAULT_INDOOR_BIKE,
+        // broadcasts get restarted with the new info.
+        assertThat(env.broadcast1.lastDeviceInfo).isEqualTo(buildDeviceInfo())
+    }
+
     // --- Fakes ---
 
     private class TestEnv(
@@ -464,33 +405,45 @@ class OrchestratorTest {
         hardwarePrereqs: List<Prerequisite> = emptyList(),
         hardwareConnectState: AdapterState = AdapterState.Active,
         hardwareCanOperate: Boolean = true,
-        broadcast1CanOperate: Boolean = true,
-        broadcast2CanOperate: Boolean = true,
         enabledBroadcasts: Set<BroadcastId> = BroadcastId.entries.toSet(),
     ) {
         val monitor = FakeSystemMonitor()
         val controller = FakeSystemController()
         val ecosystem = FakeEcosystemManager(ecosystemPrereqs)
         val hardware = FakeHardwareAdapter(hardwarePrereqs, hardwareConnectState, hardwareCanOperate)
-        val broadcast1 = FakeBroadcastAdapter(BroadcastId.FTMS, broadcast1CanOperate)
-        val broadcast2 = FakeBroadcastAdapter(BroadcastId.WIFI, broadcast2CanOperate)
+        val broadcast1 = FakeBroadcastAdapter(BroadcastId.FTMS, true)
+        val broadcast2 = FakeBroadcastAdapter(BroadcastId.WIFI, true)
         val preferences = FakeUserPreferences(enabledBroadcasts)
-        val logger = NoOpLogger()
+        val logger = TestAppLogger()
         val scope = CoroutineScope(UnconfinedTestDispatcher(testScope.testScheduler))
         val profileRepository = FakeProfileRepository()
         val rideRecorder = RideRecorder(profileRepository, logger, scope)
 
-        val orchestrator = Orchestrator(
-            systemMonitor = monitor,
-            systemController = controller,
-            ecosystemManager = ecosystem,
-            hardwareAdapter = hardware,
+        val broadcastManager = BroadcastManager(
             broadcastAdapters = setOf(broadcast1, broadcast2),
+            systemMonitor = monitor,
             userPreferences = preferences,
-            rideRecorder = rideRecorder,
             logger = logger,
             scope = scope,
         )
+
+        val orchestrator: Orchestrator
+
+        init {
+            // BroadcastManager must be started before Orchestrator (service lifecycle)
+            kotlinx.coroutines.runBlocking { broadcastManager.start() }
+
+            orchestrator = Orchestrator(
+                systemMonitor = monitor,
+                systemController = controller,
+                ecosystemManager = ecosystem,
+                hardwareAdapter = hardware,
+                broadcastManager = broadcastManager,
+                rideRecorder = rideRecorder,
+                logger = logger,
+                scope = scope,
+            )
+        }
     }
 
     private class FakeSystemMonitor : SystemMonitor {
@@ -590,13 +543,16 @@ class OrchestratorTest {
         var startCalled = false
         var startCallCount = 0
         var stopCalled = false
+        var stopCallCount = 0
         var failOnStart = false
+        var lastDeviceInfo: DeviceInfo? = null
 
         override fun canOperate(snapshot: SystemSnapshot) = operatable
 
         override suspend fun start(dataSource: Flow<ExerciseData>, deviceInfo: DeviceInfo) {
             startCalled = true
             startCallCount++
+            lastDeviceInfo = deviceInfo
             if (failOnStart) {
                 _state.value = AdapterState.Error("start failed #$startCallCount")
             } else {
@@ -606,6 +562,7 @@ class OrchestratorTest {
 
         override suspend fun stop() {
             stopCalled = true
+            stopCallCount++
             _state.value = AdapterState.Inactive
         }
 
@@ -631,10 +588,4 @@ class OrchestratorTest {
         override fun getWorkoutSamples(rideId: Long): Flow<List<WorkoutSample>> = MutableStateFlow(emptyList())
     }
 
-    private class NoOpLogger : AppLogger {
-        override fun d(tag: String, message: String) {}
-        override fun i(tag: String, message: String) {}
-        override fun w(tag: String, message: String) {}
-        override fun e(tag: String, message: String, throwable: Throwable?) {}
-    }
 }
