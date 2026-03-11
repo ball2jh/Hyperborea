@@ -1,4 +1,4 @@
-package com.nettarion.hyperborea.ui.profile
+package com.nettarion.hyperborea.ui.ride
 
 import android.app.Application
 import android.os.Environment
@@ -8,6 +8,7 @@ import com.nettarion.hyperborea.core.AppLogger
 import com.nettarion.hyperborea.core.fit.FitActivityBuilder
 import com.nettarion.hyperborea.core.model.Profile
 import com.nettarion.hyperborea.core.model.RideSummary
+import com.nettarion.hyperborea.core.model.WorkoutSample
 import com.nettarion.hyperborea.core.profile.ProfileRepository
 import com.nettarion.hyperborea.ui.admin.ExportResult
 import dagger.hilt.android.lifecycle.HiltViewModel
@@ -17,10 +18,8 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
-import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.filterNotNull
 import kotlinx.coroutines.flow.flatMapLatest
-import kotlinx.coroutines.flow.flowOf
-import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import java.io.File
@@ -29,56 +28,44 @@ import java.util.Date
 import java.util.Locale
 import javax.inject.Inject
 
-data class AggregateStats(
-    val totalRides: Int = 0,
-    val totalDistanceKm: Float = 0f,
-    val totalCalories: Int = 0,
-    val totalTimeSeconds: Long = 0,
-)
-
 @HiltViewModel
-class ProfileStatsViewModel @Inject constructor(
+class RideDetailViewModel @Inject constructor(
     private val profileRepository: ProfileRepository,
     private val logger: AppLogger,
     application: Application,
 ) : AndroidViewModel(application) {
 
-    val profile: StateFlow<Profile?> = profileRepository.activeProfile
+    private val _rideId = MutableStateFlow<Long?>(null)
 
     @OptIn(ExperimentalCoroutinesApi::class)
-    val rideSummaries: StateFlow<List<RideSummary>> = profileRepository.activeProfile
-        .flatMapLatest { profile ->
-            if (profile != null) profileRepository.getRideSummaries(profile.id) else flowOf(emptyList())
-        }
+    val rideSummary: StateFlow<RideSummary?> = _rideId
+        .filterNotNull()
+        .flatMapLatest { profileRepository.getRideSummary(it) }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), null)
+
+    @OptIn(ExperimentalCoroutinesApi::class)
+    val samples: StateFlow<List<WorkoutSample>> = _rideId
+        .filterNotNull()
+        .flatMapLatest { profileRepository.getWorkoutSamples(it) }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
-    val aggregateStats: StateFlow<AggregateStats> = rideSummaries
-        .map { rides ->
-            AggregateStats(
-                totalRides = rides.size,
-                totalDistanceKm = rides.sumOf { it.distanceKm.toDouble() }.toFloat(),
-                totalCalories = rides.sumOf { it.calories },
-                totalTimeSeconds = rides.sumOf { it.durationSeconds },
-            )
-        }
-        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), AggregateStats())
+    val profile: StateFlow<Profile?> = profileRepository.activeProfile
 
     private val _exportResult = MutableStateFlow<ExportResult?>(null)
     val exportResult: StateFlow<ExportResult?> = _exportResult.asStateFlow()
 
-    fun deleteRide(id: Long) {
-        viewModelScope.launch {
-            profileRepository.deleteRideSummary(id)
-        }
+    fun load(rideId: Long) {
+        _rideId.value = rideId
     }
 
-    fun exportRide(ride: RideSummary) {
+    fun exportFit() {
+        val summary = rideSummary.value ?: return
         viewModelScope.launch(Dispatchers.IO) {
             try {
-                val samples = profileRepository.getWorkoutSamples(ride.id).first()
-                val fitBytes = FitActivityBuilder.buildActivityFile(ride, samples, profile.value)
+                val sampleList = samples.value
+                val fitBytes = FitActivityBuilder.buildActivityFile(summary, sampleList, profile.value)
 
-                val timestamp = SimpleDateFormat("yyyyMMdd_HHmmss", Locale.US).format(Date(ride.startedAt))
+                val timestamp = SimpleDateFormat("yyyyMMdd_HHmmss", Locale.US).format(Date(summary.startedAt))
                 val filename = "hyperborea_$timestamp.fit"
 
                 @Suppress("DEPRECATION")
@@ -98,6 +85,7 @@ class ProfileStatsViewModel @Inject constructor(
                         val fallbackFile = File(fallbackDir, filename)
                         fallbackFile.writeBytes(fitBytes)
                         _exportResult.value = ExportResult(fallbackFile.absolutePath)
+                        logger.i(TAG, "FIT exported to ${fallbackFile.absolutePath} (fallback)")
                     } else {
                         _exportResult.value = ExportResult(null, error = "Failed to save: ${e.message}")
                     }
@@ -114,6 +102,6 @@ class ProfileStatsViewModel @Inject constructor(
     }
 
     private companion object {
-        const val TAG = "ProfileStats"
+        const val TAG = "RideDetail"
     }
 }

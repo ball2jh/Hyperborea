@@ -22,6 +22,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.ArrowBack
 import androidx.compose.material.icons.outlined.Delete
+import androidx.compose.material.icons.outlined.Share
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.HorizontalDivider
@@ -29,6 +30,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.Snackbar
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -44,6 +46,7 @@ import androidx.compose.ui.unit.sp
 import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.nettarion.hyperborea.core.model.RideSummary
+import com.nettarion.hyperborea.ui.admin.ExportResult
 import com.nettarion.hyperborea.ui.theme.LocalHyperboreaColors
 import com.nettarion.hyperborea.ui.util.UnitFormatter
 import java.text.SimpleDateFormat
@@ -57,13 +60,16 @@ fun ProfileStatsScreen(
     onBack: () -> Unit,
     onEditProfile: () -> Unit,
     onSwitchProfile: () -> Unit,
+    onRideClick: (Long) -> Unit = {},
     viewModel: ProfileStatsViewModel = hiltViewModel(),
 ) {
     val profile by viewModel.profile.collectAsStateWithLifecycle()
     val rides by viewModel.rideSummaries.collectAsStateWithLifecycle()
     val stats by viewModel.aggregateStats.collectAsStateWithLifecycle()
+    val exportResult by viewModel.exportResult.collectAsStateWithLifecycle()
     val colors = LocalHyperboreaColors.current
 
+    Box(modifier = Modifier.fillMaxSize()) {
     Row(
         modifier = Modifier
             .fillMaxSize()
@@ -177,12 +183,38 @@ fun ProfileStatsScreen(
                 val useImperial = profile?.useImperial == true
                 LazyColumn(verticalArrangement = Arrangement.spacedBy(2.dp)) {
                     items(rides, key = { it.id }) { ride ->
-                        RideRow(ride = ride, useImperial = useImperial, onDelete = { viewModel.deleteRide(ride.id) })
+                        RideRow(
+                            ride = ride,
+                            useImperial = useImperial,
+                            onClick = { onRideClick(ride.id) },
+                            onExport = { viewModel.exportRide(ride) },
+                            onDelete = { viewModel.deleteRide(ride.id) },
+                        )
                     }
                 }
             }
         }
     }
+
+    // Export snackbar
+    exportResult?.let { result ->
+        Snackbar(
+            modifier = Modifier
+                .align(Alignment.BottomCenter)
+                .padding(16.dp),
+            action = {
+                TextButton(onClick = viewModel::dismissExportResult) {
+                    Text("Dismiss")
+                }
+            },
+        ) {
+            Text(
+                text = result.error ?: "Exported to ${result.filePath}",
+                maxLines = 2,
+            )
+        }
+    }
+    } // Box
 }
 
 @Composable
@@ -200,14 +232,18 @@ private fun StatRow(label: String, value: String) {
 }
 
 @Composable
-private fun RideRow(ride: RideSummary, useImperial: Boolean, onDelete: () -> Unit) {
+private fun RideRow(
+    ride: RideSummary,
+    useImperial: Boolean,
+    onClick: () -> Unit,
+    onExport: () -> Unit,
+    onDelete: () -> Unit,
+) {
     val colors = LocalHyperboreaColors.current
-    var expanded by remember { mutableStateOf(false) }
     var showDeleteConfirmation by remember { mutableStateOf(false) }
     val dateFormat = remember { SimpleDateFormat("MMM d, yyyy  HH:mm", Locale.US) }
 
     val distText = UnitFormatter.distanceDisplay(ride.distanceKm, useImperial)
-    fun speedText(kph: Float) = UnitFormatter.speedDisplay(kph, useImperial)
 
     if (showDeleteConfirmation) {
         AlertDialog(
@@ -239,7 +275,7 @@ private fun RideRow(ride: RideSummary, useImperial: Boolean, onDelete: () -> Uni
         modifier = Modifier
             .fillMaxWidth()
             .background(MaterialTheme.colorScheme.surface, RoundedCornerShape(8.dp))
-            .clickable { expanded = !expanded }
+            .clickable(onClick = onClick)
             .padding(12.dp),
     ) {
         Row(
@@ -252,48 +288,21 @@ private fun RideRow(ride: RideSummary, useImperial: Boolean, onDelete: () -> Uni
                 style = MaterialTheme.typography.bodyMedium,
                 color = colors.textHigh,
             )
-            Row(horizontalArrangement = Arrangement.spacedBy(16.dp)) {
+            Row(
+                horizontalArrangement = Arrangement.spacedBy(16.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
                 Text(formatDuration(ride.durationSeconds), style = MaterialTheme.typography.bodySmall, color = colors.textMedium)
                 Text(distText, style = MaterialTheme.typography.bodySmall, color = colors.textMedium)
                 Text("${ride.calories} cal", style = MaterialTheme.typography.bodySmall, color = colors.textMedium)
                 ride.avgPower?.let {
                     Text("${it}W avg", style = MaterialTheme.typography.bodySmall, color = colors.electricBlue)
                 }
+                IconButton(onClick = onExport, modifier = Modifier.size(24.dp)) {
+                    Icon(Icons.Outlined.Share, contentDescription = "Export FIT", tint = colors.textLow, modifier = Modifier.size(16.dp))
+                }
                 IconButton(onClick = { showDeleteConfirmation = true }, modifier = Modifier.size(24.dp)) {
                     Icon(Icons.Outlined.Delete, contentDescription = "Delete ride", tint = colors.textLow, modifier = Modifier.size(16.dp))
-                }
-            }
-        }
-
-        if (expanded) {
-            Spacer(Modifier.height(8.dp))
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(24.dp),
-            ) {
-                ride.normalizedPower?.let { MetricPair("NP", "${it}W") }
-                ride.intensityFactor?.let { MetricPair("IF", String.format(Locale.US, "%.2f", it)) }
-                ride.trainingStressScore?.let { MetricPair("TSS", String.format(Locale.US, "%.0f", it)) }
-                ride.avgPower?.let { MetricPair("Avg Power", "${it}W") }
-                ride.maxPower?.let { MetricPair("Max Power", "${it}W") }
-                ride.avgCadence?.let { MetricPair("Avg Cadence", "${it}rpm") }
-                ride.maxCadence?.let { MetricPair("Max Cadence", "${it}rpm") }
-                ride.avgSpeedKph?.let { MetricPair("Avg Speed", speedText(it)) }
-                ride.maxSpeedKph?.let { MetricPair("Max Speed", speedText(it)) }
-                ride.avgHeartRate?.let { MetricPair("Avg HR", "${it}bpm") }
-                ride.maxHeartRate?.let { MetricPair("Max HR", "${it}bpm") }
-            }
-            Spacer(Modifier.height(4.dp))
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(24.dp),
-            ) {
-                ride.avgResistance?.let { MetricPair("Avg Resistance", "$it") }
-                ride.maxResistance?.let { MetricPair("Max Resistance", "$it") }
-                ride.avgIncline?.let { MetricPair("Avg Incline", String.format(Locale.US, "%.1f%%", it)) }
-                ride.maxIncline?.let { MetricPair("Max Incline", String.format(Locale.US, "%.1f%%", it)) }
-                ride.totalElevationGainMeters?.let {
-                    MetricPair("Elevation", UnitFormatter.elevationDisplay(it, useImperial))
                 }
             }
         }

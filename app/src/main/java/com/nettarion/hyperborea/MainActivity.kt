@@ -25,6 +25,7 @@ import com.nettarion.hyperborea.ui.license.UnlicensedScreen
 import com.nettarion.hyperborea.ui.profile.ProfileEditScreen
 import com.nettarion.hyperborea.ui.profile.ProfilePickerScreen
 import com.nettarion.hyperborea.ui.profile.ProfileStatsScreen
+import com.nettarion.hyperborea.ui.ride.RideDetailScreen
 import com.nettarion.hyperborea.ui.theme.HyperboreaTheme
 import dagger.hilt.android.AndroidEntryPoint
 
@@ -92,6 +93,11 @@ private fun MainApp(onUnlinkDevice: () -> Unit) {
             onBack = { currentScreen = AppScreen.Dashboard },
             onEditProfile = { currentScreen = AppScreen.ProfileEdit(screen.profileId) },
             onSwitchProfile = { currentScreen = AppScreen.ProfilePicker },
+            onRideClick = { rideId -> currentScreen = AppScreen.RideDetail(rideId, screen.profileId) },
+        )
+        is AppScreen.RideDetail -> RideDetailScreen(
+            rideId = screen.rideId,
+            onBack = { currentScreen = AppScreen.ProfileStats(screen.profileId) },
         )
     }
 }

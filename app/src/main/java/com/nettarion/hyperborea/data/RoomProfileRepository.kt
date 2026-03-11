@@ -65,6 +65,9 @@ class RoomProfileRepository(
         logger.i(TAG, "Set active profile id=$id")
     }
 
+    override fun getRideSummary(id: Long): Flow<RideSummary?> =
+        dao.getRideSummary(id).map { it?.toDomain() }
+
     override fun getRideSummaries(profileId: Long): Flow<List<RideSummary>> =
         dao.getRideSummaries(profileId).map { entities ->
             entities.map { it.toDomain() }

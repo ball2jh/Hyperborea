@@ -29,6 +29,9 @@ interface ProfileDao {
     @Query("UPDATE profiles SET isActive = 1 WHERE id = :id")
     suspend fun setActive(id: Long)
 
+    @Query("SELECT * FROM ride_summaries WHERE id = :id")
+    fun getRideSummary(id: Long): Flow<RideSummaryEntity?>
+
     @Query("SELECT * FROM ride_summaries WHERE profileId = :profileId ORDER BY startedAt DESC")
     fun getRideSummaries(profileId: Long): Flow<List<RideSummaryEntity>>
 

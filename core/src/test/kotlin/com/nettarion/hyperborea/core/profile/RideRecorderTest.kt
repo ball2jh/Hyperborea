@@ -571,6 +571,7 @@ class RideRecorderTest {
         override suspend fun updateProfile(profile: Profile) {}
         override suspend fun deleteProfile(id: Long) {}
         override suspend fun setActiveProfile(id: Long) {}
+        override fun getRideSummary(id: Long): Flow<RideSummary?> = MutableStateFlow(null)
         override fun getRideSummaries(profileId: Long): Flow<List<RideSummary>> = MutableStateFlow(emptyList())
         override suspend fun saveRideSummary(summary: RideSummary, samples: List<WorkoutSample>) {
             savedSummaries.add(summary)

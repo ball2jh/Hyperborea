@@ -4,9 +4,10 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-Hyperborea is an Android app that bridges a NordicTrack S22i stationary bike to Zwift and other fitness platforms via BLE and WiFi. It reads bike data through the proprietary FitPro protocol over USB serial and rebroadcasts it as standard fitness protocols (BLE FTMS and WiFi TCP).
+Hyperborea is an Android app that bridges ICON Fitness equipment (NordicTrack, ProForm, FreeMotion, Schwinn, etc.) to Zwift and other fitness platforms via BLE and WiFi. It reads exercise data through the proprietary FitPro protocol over USB serial and rebroadcasts it as standard fitness protocols (BLE FTMS and WiFi TCP).
 
-- **Target device**: NordicTrack S22i console — Android 7.1.2 (API 25), 1920x1080 landscape, 22"
+- **Primary development device**: NordicTrack S22i console — Android 7.1.2 (API 25), 1920x1080 landscape, 22"
+- **Hardware compatibility**: Any ICON Fitness device using the FitPro protocol over USB (vendor ID `0x213C`) — bikes, treadmills, ellipticals
 - **Stack**: Kotlin, Jetpack Compose + Material3, Hilt (KSP), Gradle — check `libs.versions.toml` and `build.gradle.kts` for current versions
 
 ## Build Commands
@@ -36,7 +37,7 @@ All feature modules depend only on `:core`. The `:app` module wires everything t
 ### Module Roles
 
 - **`:core`** — Pure Kotlin module (no Android dependencies). Defines domain interfaces and data types. Uses `kotlinx-coroutines-core` for Flow/StateFlow.
-- **`:hardware:fitpro`** — Android library. Implements the hardware adapter for the NordicTrack FitPro protocol over USB serial (115200 baud).
+- **`:hardware:fitpro`** — Android library. Implements the hardware adapter for the ICON Fitness FitPro protocol over USB serial (115200 baud).
 - **`:broadcast:ftms`** — Android library. Implements a broadcast adapter as a BLE GATT server advertising FTMS (UUID 0x1826).
 - **`:broadcast:wifi`** — Android library. Implements a broadcast adapter as a WiFi TCP server for fitness app connectivity.
 - **`:app`** — Application module. Contains Hilt DI wiring, Compose UI, foreground service, and Android platform implementations.
@@ -47,7 +48,7 @@ When modifying or extending the codebase, investigate the existing code to under
 
 - **Pure-Kotlin core with dependency inversion.** All interfaces live in `:core` with zero Android dependencies. Feature modules depend on `:core` abstractions, never on each other.
 - **One hardware source, many broadcast sinks.** Single hardware adapter instance. Broadcast adapters provided as a `Set` via Hilt `@IntoSet` multibinding. Adding a new broadcast protocol means: new module implementing the broadcast interface + one `@IntoSet` binding.
-- **Push-based data piping.** Broadcast adapters receive a `Flow` of bike data rather than holding a reference to the hardware adapter. The orchestrator decides what to pipe and when.
+- **Push-based data piping.** Broadcast adapters receive a `Flow` of exercise data rather than holding a reference to the hardware adapter. The orchestrator decides what to pipe and when.
 - **Self-describing capability checks.** Each broadcast adapter declares its own system requirements. The orchestrator selectively starts only adapters whose requirements are met.
 - **Declarative prerequisites.** Adapters declare what must be true before they can operate (e.g., a service must be stopped). The app layer fulfills those prerequisites.
 - **Read/write split for system interaction.** Passive observation (monitoring) and active mutation (control) are separate interfaces with different permissions and failure modes.
@@ -59,7 +60,7 @@ When modifying or extending the codebase, investigate the existing code to under
 
 ```
 Hardware adapter (USB serial)
-  → bike data flow
+  → exercise data flow
     → orchestrator pipes to each broadcast adapter
       → BLE GATT → Zwift
       → TCP      → fitness apps

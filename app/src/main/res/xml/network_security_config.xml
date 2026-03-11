@@ -2,13 +2,13 @@
 <network-security-config>
     <base-config cleartextTrafficPermitted="false" />
 
-    <!-- Uncomment and update when the server is deployed:
     <domain-config>
-        <domain includeSubdomains="true">hyperborea.dev</domain>
+        <domain includeSubdomains="true">hyperborea.nettarion.com</domain>
         <pin-set expiration="2027-06-01">
-            <pin digest="SHA-256">PLACEHOLDER_SERVER_PIN=</pin>
-            <pin digest="SHA-256">PLACEHOLDER_BACKUP_PIN=</pin>
+            <!-- Leaf: CN=hyperborea.nettarion.com (Let's Encrypt) -->
+            <pin digest="SHA-256">+yzGXJcyHoi5MFBJ4ynt6ju7Zy69l6Ksj4W0FgThV8s=</pin>
+            <!-- Backup: Let's Encrypt R13 intermediate CA -->
+            <pin digest="SHA-256">AlSQhgtJirc8ahLyekmtX+Iw+v46yPYRLJt9Cq1GlB0=</pin>
         </pin-set>
     </domain-config>
-    -->
 </network-security-config>

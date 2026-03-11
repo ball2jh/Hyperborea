@@ -97,6 +97,7 @@ class DashboardViewModelTest {
         override suspend fun updateProfile(profile: Profile) {}
         override suspend fun deleteProfile(id: Long) {}
         override suspend fun setActiveProfile(id: Long) {}
+        override fun getRideSummary(id: Long): Flow<RideSummary?> = flowOf(null)
         override fun getRideSummaries(profileId: Long): Flow<List<RideSummary>> = flowOf(emptyList())
         override suspend fun saveRideSummary(summary: RideSummary, samples: List<WorkoutSample>) {}
         override suspend fun deleteRideSummary(id: Long) {}
