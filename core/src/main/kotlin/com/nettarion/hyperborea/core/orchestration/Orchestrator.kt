@@ -41,6 +41,7 @@ class Orchestrator(
 
     private val _state = MutableStateFlow<OrchestratorState>(OrchestratorState.Idle)
     val state: StateFlow<OrchestratorState> = _state.asStateFlow()
+    val lastSavedRideId: StateFlow<Long?> = rideRecorder.lastSavedRideId
 
     private val mutex = Mutex()
     private var hardwareMonitorJob: Job? = null

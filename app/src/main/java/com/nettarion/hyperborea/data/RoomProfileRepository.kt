@@ -73,13 +73,14 @@ class RoomProfileRepository(
             entities.map { it.toDomain() }
         }
 
-    override suspend fun saveRideSummary(summary: RideSummary, samples: List<WorkoutSample>) {
-        database.withTransaction {
+    override suspend fun saveRideSummary(summary: RideSummary, samples: List<WorkoutSample>): Long {
+        return database.withTransaction {
             val id = dao.insertRideSummary(summary.toEntity())
             if (samples.isNotEmpty()) {
                 dao.insertWorkoutSamples(samples.map { it.toEntity(id) })
             }
             logger.i(TAG, "Saved ride summary id=$id for profile=${summary.profileId} (${samples.size} samples)")
+            id
         }
     }
 

@@ -1,9 +1,12 @@
 package com.nettarion.hyperborea.ui.dashboard
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.AlertDialog
@@ -32,6 +35,7 @@ import kotlinx.coroutines.delay
 @Composable
 fun DashboardScreen(
     onProfileClick: (profileId: Long) -> Unit,
+    onViewRide: (rideId: Long) -> Unit,
     onUnlinkDevice: () -> Unit,
     viewModel: DashboardViewModel = hiltViewModel(),
     adminViewModel: AdminViewModel = hiltViewModel(),
@@ -42,18 +46,35 @@ fun DashboardScreen(
     var showStopDialog by remember { mutableStateOf(false) }
     val colors = LocalHyperboreaColors.current
 
-    // Export result snackbar
-    val exportResult by adminViewModel.exportResult.collectAsStateWithLifecycle()
+    // Post-save navigation (Save & View)
+    val postSaveEvent by viewModel.postSaveEvent.collectAsStateWithLifecycle()
+    LaunchedEffect(postSaveEvent) {
+        when (val event = postSaveEvent) {
+            is PostSaveEvent.ViewRide -> {
+                viewModel.consumePostSaveEvent()
+                onViewRide(event.rideId)
+            }
+            null -> {}
+        }
+    }
+
+    // Export result snackbar (admin logs + ride FIT export)
+    val adminExportResult by adminViewModel.exportResult.collectAsStateWithLifecycle()
+    val rideExportResult by viewModel.rideExportResult.collectAsStateWithLifecycle()
     var snackbarMessage by remember { mutableStateOf<String?>(null) }
 
-    LaunchedEffect(exportResult) {
-        val result = exportResult ?: return@LaunchedEffect
-        snackbarMessage = if (result.error != null) {
-            result.error
-        } else {
-            "Saved to ${result.filePath}"
-        }
+    LaunchedEffect(adminExportResult) {
+        val result = adminExportResult ?: return@LaunchedEffect
+        snackbarMessage = if (result.error != null) result.error else "Saved to ${result.filePath}"
         adminViewModel.dismissExportResult()
+        delay(4000)
+        snackbarMessage = null
+    }
+
+    LaunchedEffect(rideExportResult) {
+        val result = rideExportResult ?: return@LaunchedEffect
+        snackbarMessage = if (result.error != null) result.error else "Exported to ${result.filePath}"
+        viewModel.dismissExportResult()
         delay(4000)
         snackbarMessage = null
     }
@@ -119,18 +140,34 @@ fun DashboardScreen(
             AlertDialog(
                 onDismissRequest = { showStopDialog = false },
                 title = { Text("Stop workout?") },
-                text = { Text("Do you want to save this ride?") },
-                confirmButton = {
-                    TextButton(onClick = {
-                        showStopDialog = false
-                        viewModel.stopBroadcasting(save = true)
-                    }) { Text("Save") }
+                text = {
+                    Column {
+                        Text("What would you like to do with this ride?")
+                        Row(
+                            modifier = Modifier.fillMaxWidth().padding(top = 16.dp),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        ) {
+                            TextButton(onClick = {
+                                showStopDialog = false
+                                viewModel.stopBroadcasting(save = true)
+                            }) { Text("Save") }
+                            TextButton(onClick = {
+                                showStopDialog = false
+                                viewModel.stopAndView()
+                            }) { Text("Save & View") }
+                            TextButton(onClick = {
+                                showStopDialog = false
+                                viewModel.stopAndExport()
+                            }) { Text("Save & Export") }
+                        }
+                    }
                 },
+                confirmButton = {},
                 dismissButton = {
                     TextButton(onClick = {
                         showStopDialog = false
                         viewModel.stopBroadcasting(save = false)
-                    }) { Text("Discard") }
+                    }) { Text("Discard", color = MaterialTheme.colorScheme.error) }
                 },
             )
         }

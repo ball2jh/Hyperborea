@@ -8,6 +8,9 @@ import com.nettarion.hyperborea.core.model.WorkoutSample
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
@@ -24,10 +27,14 @@ class RideRecorder(
     private var collectJob: Job? = null
     private var state = AccumulationState()
 
+    private val _lastSavedRideId = MutableStateFlow<Long?>(null)
+    val lastSavedRideId: StateFlow<Long?> = _lastSavedRideId.asStateFlow()
+
     fun start(dataSource: Flow<ExerciseData>) {
         if (collectJob != null) return
         state = AccumulationState()
         state.startedAtMs = System.currentTimeMillis()
+        _lastSavedRideId.value = null
         logger.i(TAG, "Recording started")
 
         collectJob = scope.launch {
@@ -277,9 +284,10 @@ class RideRecorder(
         )
 
         val savedSamples = state.samples.toList()
-        profileRepository.saveRideSummary(summary, savedSamples)
-        logger.i(TAG, "Recording saved: ${durationSeconds}s, ${state.lastDistance}km, ${state.lastCalories}cal, ${savedSamples.size} samples")
+        val savedId = profileRepository.saveRideSummary(summary, savedSamples)
+        logger.i(TAG, "Recording saved: id=$savedId, ${durationSeconds}s, ${state.lastDistance}km, ${state.lastCalories}cal, ${savedSamples.size} samples")
         state = AccumulationState()
+        _lastSavedRideId.value = savedId
     }
 
     private class AccumulationState {

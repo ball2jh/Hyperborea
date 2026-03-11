@@ -18,7 +18,7 @@ interface ProfileRepository {
 
     fun getRideSummary(id: Long): Flow<RideSummary?>
     fun getRideSummaries(profileId: Long): Flow<List<RideSummary>>
-    suspend fun saveRideSummary(summary: RideSummary, samples: List<WorkoutSample> = emptyList())
+    suspend fun saveRideSummary(summary: RideSummary, samples: List<WorkoutSample> = emptyList()): Long
     suspend fun deleteRideSummary(id: Long)
     fun getWorkoutSamples(rideId: Long): Flow<List<WorkoutSample>>
 }

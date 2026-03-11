@@ -99,7 +99,7 @@ class DashboardViewModelTest {
         override suspend fun setActiveProfile(id: Long) {}
         override fun getRideSummary(id: Long): Flow<RideSummary?> = flowOf(null)
         override fun getRideSummaries(profileId: Long): Flow<List<RideSummary>> = flowOf(emptyList())
-        override suspend fun saveRideSummary(summary: RideSummary, samples: List<WorkoutSample>) {}
+        override suspend fun saveRideSummary(summary: RideSummary, samples: List<WorkoutSample>): Long = 0
         override suspend fun deleteRideSummary(id: Long) {}
         override fun getWorkoutSamples(rideId: Long): Flow<List<WorkoutSample>> = flowOf(emptyList())
     }
@@ -171,6 +171,7 @@ class DashboardViewModelTest {
             systemMonitor = fakeSystemMonitor,
             userPreferences = fakeUserPreferences,
             profileRepository = fakeProfileRepository,
+            logger = TestAppLogger(),
             context = ContextWrapper(null),
         )
     }

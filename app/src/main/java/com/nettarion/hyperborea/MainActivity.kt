@@ -81,6 +81,7 @@ private fun MainApp(onUnlinkDevice: () -> Unit) {
         )
         is AppScreen.Dashboard -> DashboardScreen(
             onProfileClick = { currentScreen = AppScreen.ProfileStats(it) },
+            onViewRide = { rideId -> currentScreen = AppScreen.RideDetail(rideId, 0) },
             onUnlinkDevice = onUnlinkDevice,
         )
         is AppScreen.ProfileEdit -> ProfileEditScreen(
@@ -97,7 +98,13 @@ private fun MainApp(onUnlinkDevice: () -> Unit) {
         )
         is AppScreen.RideDetail -> RideDetailScreen(
             rideId = screen.rideId,
-            onBack = { currentScreen = AppScreen.ProfileStats(screen.profileId) },
+            onBack = {
+                currentScreen = if (screen.profileId != 0L) {
+                    AppScreen.ProfileStats(screen.profileId)
+                } else {
+                    AppScreen.Dashboard
+                }
+            },
         )
     }
 }
