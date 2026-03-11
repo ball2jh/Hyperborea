@@ -81,17 +81,13 @@ class LicenseCheckerImpl @Inject constructor(
             }
 
             val active = payloadJson.getBoolean("active")
-            val expiresAt = payloadJson.getString("expiresAt")
-            val expiresAtMillis = parseIso8601(expiresAt)
 
-            logger.d(TAG, "active=$active expiresAtMillis=$expiresAtMillis now=${System.currentTimeMillis()}")
-
-            if (active && expiresAtMillis > System.currentTimeMillis()) {
-                _state.value = LicenseState.Licensed(expiresAtMillis)
-                logger.i(TAG, "Licensed until $expiresAtMillis")
+            if (active) {
+                _state.value = LicenseState.Licensed
+                logger.i(TAG, "Licensed")
             } else {
                 _state.value = LicenseState.Unlicensed
-                logger.w(TAG, "Not active or expired")
+                logger.w(TAG, "Not active")
             }
         } catch (e: Exception) {
             logger.e(TAG, "License check failed", e)
@@ -183,26 +179,6 @@ class LicenseCheckerImpl @Inject constructor(
             prefs.edit().putString(KEY_DEVICE_UUID, uuid).apply()
         }
         return uuid
-    }
-
-    private fun parseIso8601(iso: String): Long {
-        // SimpleDateFormat for API 25 compatibility (no java.time)
-        // Try with fractional seconds first, then without
-        val formats = arrayOf(
-            "yyyy-MM-dd'T'HH:mm:ss.SSS'Z'",
-            "yyyy-MM-dd'T'HH:mm:ss'Z'",
-        )
-        for (pattern in formats) {
-            try {
-                val format = java.text.SimpleDateFormat(pattern, java.util.Locale.US)
-                format.timeZone = java.util.TimeZone.getTimeZone("UTC")
-                return format.parse(iso)?.time ?: continue
-            } catch (_: java.text.ParseException) {
-                continue
-            }
-        }
-        logger.w(TAG, "Failed to parse ISO 8601 date: $iso")
-        return 0
     }
 
     companion object {
