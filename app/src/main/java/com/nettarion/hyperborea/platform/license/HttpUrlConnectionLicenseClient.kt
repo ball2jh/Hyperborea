@@ -59,8 +59,7 @@ class HttpUrlConnectionLicenseClient @Inject constructor(
 
     override fun pollPairingStatus(pairingToken: String): String? {
         val connection = HttpHelper.openConnection(
-            url = "${BuildConfig.SERVER_URL}/api/device/pair/status",
-            headers = mapOf("X-Pairing-Token" to pairingToken),
+            url = "${BuildConfig.SERVER_URL}/api/device/pair/status?token=$pairingToken",
             connectTimeoutMs = TIMEOUT_MS,
             readTimeoutMs = TIMEOUT_MS,
         )
