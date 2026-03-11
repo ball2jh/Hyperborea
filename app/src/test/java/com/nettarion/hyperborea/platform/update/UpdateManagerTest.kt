@@ -1,8 +1,14 @@
 package com.nettarion.hyperborea.platform.update
 
 import com.google.common.truth.Truth.assertThat
-import com.nettarion.hyperborea.platform.license.FakeSharedPreferences
+import com.nettarion.hyperborea.core.test.TestAppLogger
+import com.nettarion.hyperborea.core.LicenseChecker
+import com.nettarion.hyperborea.core.LicenseState
+import com.nettarion.hyperborea.core.PairingSession
+import com.nettarion.hyperborea.core.PairingStatus
 import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.test.UnconfinedTestDispatcher
 import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertThrows
@@ -14,14 +20,21 @@ import java.io.File
 class UpdateManagerTest {
 
     private lateinit var httpClient: FakeUpdateHttpClient
-    private lateinit var logger: FakeAppLogger
-    private lateinit var prefs: FakeSharedPreferences
+    private lateinit var logger: TestAppLogger
+    private val fakeLicenseChecker = object : LicenseChecker {
+        override val state: StateFlow<LicenseState> = MutableStateFlow(LicenseState.Unlicensed)
+        override var authToken: String? = null
+        override var deviceUuid: String? = null
+        override suspend fun check(silent: Boolean) {}
+        override suspend fun requestPairing(): PairingSession = PairingSession.Error("stub")
+        override suspend fun pollPairing(pairingToken: String): PairingStatus = PairingStatus.Pending
+        override suspend fun unlink() {}
+    }
 
     @Before
     fun setUp() {
         httpClient = FakeUpdateHttpClient()
-        logger = FakeAppLogger()
-        prefs = FakeSharedPreferences()
+        logger = TestAppLogger()
     }
 
     private fun createManager(
@@ -35,7 +48,7 @@ class UpdateManagerTest {
             appInstaller = FakeUpdateInstaller(),
             logger = logger,
             scope = scope,
-            prefs = prefs,
+            licenseChecker = fakeLicenseChecker,
             versionProvider = VersionProvider { currentVersionCode },
             downloadDir = downloadDir,
         )
@@ -173,7 +186,7 @@ class UpdateManagerTest {
 
     @Test
     fun `checkForUpdates includes auth header when token present`() = runTest {
-        prefs.edit().putString("license_auth_token", "my-token").commit()
+        fakeLicenseChecker.authToken = "my-token"
         // Use manifestException to stop the flow early — the key thing is it makes the call
         httpClient.manifestException = java.io.IOException("Expected")
 

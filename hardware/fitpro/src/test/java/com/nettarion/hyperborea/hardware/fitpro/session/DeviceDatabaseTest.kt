@@ -70,6 +70,40 @@ class DeviceDatabaseTest {
         assertThat(s15i.type).isEqualTo(DeviceType.BIKE)
     }
 
+    @Test
+    fun `S15i and S10i variants share capabilities with originals`() {
+        val s15iV1 = DeviceDatabase.fromModel(5119)
+        val s15iV2 = DeviceDatabase.fromModel(5121)
+        assertThat(s15iV2.name).isEqualTo("NordicTrack S15i")
+        assertThat(s15iV2.maxResistance).isEqualTo(s15iV1.maxResistance)
+        assertThat(s15iV2.minIncline).isEqualTo(s15iV1.minIncline)
+
+        val s10iV1 = DeviceDatabase.fromModel(3121)
+        val s10iV2 = DeviceDatabase.fromModel(5117)
+        assertThat(s10iV2.name).isEqualTo("NordicTrack S10i")
+        assertThat(s10iV2.maxResistance).isEqualTo(s10iV1.maxResistance)
+    }
+
+    @Test
+    fun `VU 29 is an upright bike with no incline`() {
+        val info = DeviceDatabase.fromModel(12921)
+        assertThat(info.name).isEqualTo("NordicTrack VU 29")
+        assertThat(info.type).isEqualTo(DeviceType.BIKE)
+        assertThat(info.maxResistance).isEqualTo(24)
+        assertThat(info.minIncline).isEqualTo(0f)
+        assertThat(info.maxIncline).isEqualTo(0f)
+    }
+
+    @Test
+    fun `R35 is a recumbent bike with 26 resistance levels`() {
+        val info = DeviceDatabase.fromModel(14921)
+        assertThat(info.name).isEqualTo("NordicTrack R35")
+        assertThat(info.type).isEqualTo(DeviceType.BIKE)
+        assertThat(info.maxResistance).isEqualTo(26)
+        assertThat(info.minIncline).isEqualTo(0f)
+        assertThat(info.maxIncline).isEqualTo(0f)
+    }
+
     // ── NordicTrack Treadmills ──
 
     @Test
@@ -100,6 +134,47 @@ class DeviceDatabaseTest {
         assertThat(info.maxIncline).isEqualTo(12f)
     }
 
+    @Test
+    fun `Commercial 1750 variants share capabilities`() {
+        val v1 = DeviceDatabase.fromModel(14119)
+        val v2 = DeviceDatabase.fromModel(17125)
+        assertThat(v2.name).isEqualTo("NordicTrack Commercial 1750")
+        assertThat(v2.minIncline).isEqualTo(v1.minIncline)
+        assertThat(v2.maxIncline).isEqualTo(v1.maxIncline)
+        assertThat(v2.maxSpeed).isEqualTo(v1.maxSpeed)
+    }
+
+    @Test
+    fun `Commercial 1250 has limited incline and speed`() {
+        val v1 = DeviceDatabase.fromModel(14124)
+        val v2 = DeviceDatabase.fromModel(14125)
+        assertThat(v1.name).isEqualTo("NordicTrack Commercial 1250")
+        assertThat(v1.type).isEqualTo(DeviceType.TREADMILL)
+        assertThat(v1.minIncline).isEqualTo(-3f)
+        assertThat(v1.maxIncline).isEqualTo(12f)
+        assertThat(v1.maxSpeed).isEqualTo(19.3f)
+        assertThat(v2.maxSpeed).isEqualTo(v1.maxSpeed)
+    }
+
+    @Test
+    fun `Commercial LE has no decline`() {
+        val info = DeviceDatabase.fromModel(13125)
+        assertThat(info.name).isEqualTo("NordicTrack Commercial LE")
+        assertThat(info.type).isEqualTo(DeviceType.TREADMILL)
+        assertThat(info.minIncline).isEqualTo(0f)
+        assertThat(info.maxIncline).isEqualTo(12f)
+    }
+
+    @Test
+    fun `EXP 10i has lower max speed`() {
+        val info = DeviceDatabase.fromModel(15423)
+        assertThat(info.name).isEqualTo("NordicTrack EXP 10i")
+        assertThat(info.type).isEqualTo(DeviceType.TREADMILL)
+        assertThat(info.minIncline).isEqualTo(-3f)
+        assertThat(info.maxIncline).isEqualTo(12f)
+        assertThat(info.maxSpeed).isEqualTo(16.1f)
+    }
+
     // ── NordicTrack Rowers ──
 
     @Test
@@ -124,6 +199,15 @@ class DeviceDatabaseTest {
         assertThat(info.supportedMetrics).doesNotContain(Metric.INCLINE)
     }
 
+    @Test
+    fun `RW600 is a rower with same capabilities as RW700`() {
+        val rw600 = DeviceDatabase.fromModel(10124)
+        val rw700 = DeviceDatabase.fromModel(15125)
+        assertThat(rw600.name).isEqualTo("NordicTrack RW600")
+        assertThat(rw600.type).isEqualTo(DeviceType.ROWER)
+        assertThat(rw600.maxResistance).isEqualTo(rw700.maxResistance)
+    }
+
     // ── NordicTrack Ellipticals ──
 
     @Test
@@ -144,6 +228,16 @@ class DeviceDatabaseTest {
             Metric.RESISTANCE, Metric.INCLINE,
             Metric.DISTANCE, Metric.CALORIES,
         )
+    }
+
+    @Test
+    fun `FS10i has lower resistance and incline-only`() {
+        val info = DeviceDatabase.fromModel(71320)
+        assertThat(info.name).isEqualTo("NordicTrack FS10i")
+        assertThat(info.type).isEqualTo(DeviceType.ELLIPTICAL)
+        assertThat(info.maxResistance).isEqualTo(24)
+        assertThat(info.minIncline).isEqualTo(0f)
+        assertThat(info.maxIncline).isEqualTo(10f)
     }
 
     // ── ProForm Bikes ──
@@ -213,5 +307,83 @@ class DeviceDatabaseTest {
         assertThat(info.minIncline).isEqualTo(0f)
         assertThat(info.maxIncline).isEqualTo(0f)
         assertThat(info.maxResistance).isEqualTo(26)
+    }
+
+    // ── FreeMotion Bikes ──
+
+    @Test
+    fun `Coachbike b22-7 is a bike with incline`() {
+        val info = DeviceDatabase.fromModel(82820)
+        assertThat(info.name).isEqualTo("FreeMotion Coachbike b22.7")
+        assertThat(info.type).isEqualTo(DeviceType.BIKE)
+        assertThat(info.maxResistance).isEqualTo(24)
+        assertThat(info.minIncline).isEqualTo(-10f)
+        assertThat(info.maxIncline).isEqualTo(20f)
+    }
+
+    @Test
+    fun `Coachbike variants share capabilities`() {
+        val v1 = DeviceDatabase.fromModel(82820)
+        val v2 = DeviceDatabase.fromModel(84821)
+        assertThat(v2.name).isEqualTo("FreeMotion Coachbike")
+        assertThat(v2.maxResistance).isEqualTo(v1.maxResistance)
+        assertThat(v2.minIncline).isEqualTo(v1.minIncline)
+        assertThat(v2.maxIncline).isEqualTo(v1.maxIncline)
+    }
+
+    @Test
+    fun `FreeMotion upright and recumbent bikes have no incline`() {
+        val upright = DeviceDatabase.fromModel(82420)
+        val recumbent = DeviceDatabase.fromModel(82520)
+        assertThat(upright.name).isEqualTo("FreeMotion u22.9 Upright")
+        assertThat(recumbent.name).isEqualTo("FreeMotion r22.9 Recumbent")
+        assertThat(upright.minIncline).isEqualTo(0f)
+        assertThat(upright.maxIncline).isEqualTo(0f)
+        assertThat(recumbent.minIncline).isEqualTo(0f)
+        assertThat(recumbent.maxIncline).isEqualTo(0f)
+        assertThat(upright.maxResistance).isEqualTo(24)
+        assertThat(recumbent.maxResistance).isEqualTo(24)
+    }
+
+    // ── FreeMotion Treadmills ──
+
+    @Test
+    fun `t22-9 Reflex is a treadmill with no decline`() {
+        val info = DeviceDatabase.fromModel(70920)
+        assertThat(info.name).isEqualTo("FreeMotion t22.9 Reflex")
+        assertThat(info.type).isEqualTo(DeviceType.TREADMILL)
+        assertThat(info.minIncline).isEqualTo(0f)
+        assertThat(info.maxIncline).isEqualTo(15f)
+        assertThat(info.maxSpeed).isEqualTo(24.1f)
+    }
+
+    @Test
+    fun `t10-9b Reflex has lower max speed`() {
+        val info = DeviceDatabase.fromModel(70718)
+        assertThat(info.name).isEqualTo("FreeMotion t10.9b Reflex")
+        assertThat(info.type).isEqualTo(DeviceType.TREADMILL)
+        assertThat(info.maxSpeed).isEqualTo(19.3f)
+    }
+
+    @Test
+    fun `i22-9 Incline Trainer has steep incline`() {
+        val info = DeviceDatabase.fromModel(74819)
+        assertThat(info.name).isEqualTo("FreeMotion i22.9 Incline Trainer")
+        assertThat(info.type).isEqualTo(DeviceType.TREADMILL)
+        assertThat(info.minIncline).isEqualTo(-3f)
+        assertThat(info.maxIncline).isEqualTo(30f)
+        assertThat(info.maxSpeed).isEqualTo(24.1f)
+    }
+
+    // ── FreeMotion Elliptical ──
+
+    @Test
+    fun `e22-9 is an elliptical with no incline`() {
+        val info = DeviceDatabase.fromModel(84420)
+        assertThat(info.name).isEqualTo("FreeMotion e22.9")
+        assertThat(info.type).isEqualTo(DeviceType.ELLIPTICAL)
+        assertThat(info.maxResistance).isEqualTo(24)
+        assertThat(info.minIncline).isEqualTo(0f)
+        assertThat(info.maxIncline).isEqualTo(0f)
     }
 }

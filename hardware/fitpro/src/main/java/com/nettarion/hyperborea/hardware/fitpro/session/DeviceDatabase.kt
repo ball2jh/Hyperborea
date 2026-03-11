@@ -100,6 +100,38 @@ object DeviceDatabase {
             minIncline = -10f, maxIncline = 20f,
             maxPower = 2000, minPower = 0, powerStep = 1, resistanceStep = 1.0f, inclineStep = 0.5f, speedStep = 0.5f, maxSpeed = 60f,
         ),
+        5121 to DeviceRecord(
+            name = "NordicTrack S15i",
+            type = DeviceType.BIKE,
+            supportedMetrics = STANDARD_BIKE_METRICS,
+            maxResistance = 22, minResistance = 1,
+            minIncline = -10f, maxIncline = 20f,
+            maxPower = 2000, minPower = 0, powerStep = 1, resistanceStep = 1.0f, inclineStep = 0.5f, speedStep = 0.5f, maxSpeed = 60f,
+        ),
+        5117 to DeviceRecord(
+            name = "NordicTrack S10i",
+            type = DeviceType.BIKE,
+            supportedMetrics = STANDARD_BIKE_METRICS,
+            maxResistance = 22, minResistance = 1,
+            minIncline = -10f, maxIncline = 20f,
+            maxPower = 2000, minPower = 0, powerStep = 1, resistanceStep = 1.0f, inclineStep = 0.5f, speedStep = 0.5f, maxSpeed = 60f,
+        ),
+        12921 to DeviceRecord(
+            name = "NordicTrack VU 29",
+            type = DeviceType.BIKE,
+            supportedMetrics = STANDARD_BIKE_METRICS,
+            maxResistance = 24, minResistance = 1,
+            minIncline = 0f, maxIncline = 0f,
+            maxPower = 2000, minPower = 0, powerStep = 1, resistanceStep = 1.0f, inclineStep = 0f, speedStep = 0.5f, maxSpeed = 60f,
+        ),
+        14921 to DeviceRecord(
+            name = "NordicTrack R35",
+            type = DeviceType.BIKE,
+            supportedMetrics = STANDARD_BIKE_METRICS,
+            maxResistance = 26, minResistance = 1,
+            minIncline = 0f, maxIncline = 0f,
+            maxPower = 2000, minPower = 0, powerStep = 1, resistanceStep = 1.0f, inclineStep = 0f, speedStep = 0.5f, maxSpeed = 60f,
+        ),
 
         // ── NordicTrack Treadmills ──
         39225 to DeviceRecord(
@@ -142,6 +174,46 @@ object DeviceDatabase {
             minIncline = -3f, maxIncline = 15f,
             maxPower = 2000, minPower = 0, powerStep = 1, resistanceStep = 1.0f, inclineStep = 0.5f, speedStep = 0.5f, maxSpeed = 22f,
         ),
+        17125 to DeviceRecord(
+            name = "NordicTrack Commercial 1750",
+            type = DeviceType.TREADMILL,
+            supportedMetrics = STANDARD_TREADMILL_METRICS,
+            maxResistance = 0, minResistance = 0,
+            minIncline = -3f, maxIncline = 15f,
+            maxPower = 2000, minPower = 0, powerStep = 1, resistanceStep = 1.0f, inclineStep = 0.5f, speedStep = 0.5f, maxSpeed = 22f,
+        ),
+        14124 to DeviceRecord(
+            name = "NordicTrack Commercial 1250",
+            type = DeviceType.TREADMILL,
+            supportedMetrics = STANDARD_TREADMILL_METRICS,
+            maxResistance = 0, minResistance = 0,
+            minIncline = -3f, maxIncline = 12f,
+            maxPower = 2000, minPower = 0, powerStep = 1, resistanceStep = 1.0f, inclineStep = 0.5f, speedStep = 0.5f, maxSpeed = 19.3f,
+        ),
+        14125 to DeviceRecord(
+            name = "NordicTrack Commercial 1250",
+            type = DeviceType.TREADMILL,
+            supportedMetrics = STANDARD_TREADMILL_METRICS,
+            maxResistance = 0, minResistance = 0,
+            minIncline = -3f, maxIncline = 12f,
+            maxPower = 2000, minPower = 0, powerStep = 1, resistanceStep = 1.0f, inclineStep = 0.5f, speedStep = 0.5f, maxSpeed = 19.3f,
+        ),
+        13125 to DeviceRecord(
+            name = "NordicTrack Commercial LE",
+            type = DeviceType.TREADMILL,
+            supportedMetrics = STANDARD_TREADMILL_METRICS,
+            maxResistance = 0, minResistance = 0,
+            minIncline = 0f, maxIncline = 12f,
+            maxPower = 2000, minPower = 0, powerStep = 1, resistanceStep = 1.0f, inclineStep = 0.5f, speedStep = 0.5f, maxSpeed = 19.3f,
+        ),
+        15423 to DeviceRecord(
+            name = "NordicTrack EXP 10i",
+            type = DeviceType.TREADMILL,
+            supportedMetrics = STANDARD_TREADMILL_METRICS,
+            maxResistance = 0, minResistance = 0,
+            minIncline = -3f, maxIncline = 12f,
+            maxPower = 2000, minPower = 0, powerStep = 1, resistanceStep = 1.0f, inclineStep = 0.5f, speedStep = 0.5f, maxSpeed = 16.1f,
+        ),
 
         // ── NordicTrack Rowers ──
         19425 to DeviceRecord(
@@ -154,6 +226,14 @@ object DeviceDatabase {
         ),
         15125 to DeviceRecord(
             name = "NordicTrack RW700",
+            type = DeviceType.ROWER,
+            supportedMetrics = STANDARD_ROWER_METRICS,
+            maxResistance = 26, minResistance = 1,
+            minIncline = 0f, maxIncline = 0f,
+            maxPower = 2000, minPower = 0, powerStep = 1, resistanceStep = 1.0f, inclineStep = 0f, speedStep = 0f, maxSpeed = 0f,
+        ),
+        10124 to DeviceRecord(
+            name = "NordicTrack RW600",
             type = DeviceType.ROWER,
             supportedMetrics = STANDARD_ROWER_METRICS,
             maxResistance = 26, minResistance = 1,
@@ -176,6 +256,14 @@ object DeviceDatabase {
             supportedMetrics = STANDARD_ELLIPTICAL_METRICS,
             maxResistance = 26, minResistance = 1,
             minIncline = -5f, maxIncline = 15f,
+            maxPower = 2000, minPower = 0, powerStep = 1, resistanceStep = 1.0f, inclineStep = 0.5f, speedStep = 0.5f, maxSpeed = 60f,
+        ),
+        71320 to DeviceRecord(
+            name = "NordicTrack FS10i",
+            type = DeviceType.ELLIPTICAL,
+            supportedMetrics = STANDARD_ELLIPTICAL_METRICS,
+            maxResistance = 24, minResistance = 1,
+            minIncline = 0f, maxIncline = 10f,
             maxPower = 2000, minPower = 0, powerStep = 1, resistanceStep = 1.0f, inclineStep = 0.5f, speedStep = 0.5f, maxSpeed = 60f,
         ),
 
@@ -327,6 +415,76 @@ object DeviceDatabase {
             type = DeviceType.ELLIPTICAL,
             supportedMetrics = STANDARD_ELLIPTICAL_METRICS,
             maxResistance = 26, minResistance = 1,
+            minIncline = 0f, maxIncline = 0f,
+            maxPower = 2000, minPower = 0, powerStep = 1, resistanceStep = 1.0f, inclineStep = 0f, speedStep = 0.5f, maxSpeed = 60f,
+        ),
+
+        // ── FreeMotion Bikes ──
+        82820 to DeviceRecord(
+            name = "FreeMotion Coachbike b22.7",
+            type = DeviceType.BIKE,
+            supportedMetrics = STANDARD_BIKE_METRICS,
+            maxResistance = 24, minResistance = 1,
+            minIncline = -10f, maxIncline = 20f,
+            maxPower = 2000, minPower = 0, powerStep = 1, resistanceStep = 1.0f, inclineStep = 0.5f, speedStep = 0.5f, maxSpeed = 60f,
+        ),
+        84821 to DeviceRecord(
+            name = "FreeMotion Coachbike",
+            type = DeviceType.BIKE,
+            supportedMetrics = STANDARD_BIKE_METRICS,
+            maxResistance = 24, minResistance = 1,
+            minIncline = -10f, maxIncline = 20f,
+            maxPower = 2000, minPower = 0, powerStep = 1, resistanceStep = 1.0f, inclineStep = 0.5f, speedStep = 0.5f, maxSpeed = 60f,
+        ),
+        82420 to DeviceRecord(
+            name = "FreeMotion u22.9 Upright",
+            type = DeviceType.BIKE,
+            supportedMetrics = STANDARD_BIKE_METRICS,
+            maxResistance = 24, minResistance = 1,
+            minIncline = 0f, maxIncline = 0f,
+            maxPower = 2000, minPower = 0, powerStep = 1, resistanceStep = 1.0f, inclineStep = 0f, speedStep = 0.5f, maxSpeed = 60f,
+        ),
+        82520 to DeviceRecord(
+            name = "FreeMotion r22.9 Recumbent",
+            type = DeviceType.BIKE,
+            supportedMetrics = STANDARD_BIKE_METRICS,
+            maxResistance = 24, minResistance = 1,
+            minIncline = 0f, maxIncline = 0f,
+            maxPower = 2000, minPower = 0, powerStep = 1, resistanceStep = 1.0f, inclineStep = 0f, speedStep = 0.5f, maxSpeed = 60f,
+        ),
+
+        // ── FreeMotion Treadmills ──
+        70920 to DeviceRecord(
+            name = "FreeMotion t22.9 Reflex",
+            type = DeviceType.TREADMILL,
+            supportedMetrics = STANDARD_TREADMILL_METRICS,
+            maxResistance = 0, minResistance = 0,
+            minIncline = 0f, maxIncline = 15f,
+            maxPower = 2000, minPower = 0, powerStep = 1, resistanceStep = 1.0f, inclineStep = 0.5f, speedStep = 0.5f, maxSpeed = 24.1f,
+        ),
+        70718 to DeviceRecord(
+            name = "FreeMotion t10.9b Reflex",
+            type = DeviceType.TREADMILL,
+            supportedMetrics = STANDARD_TREADMILL_METRICS,
+            maxResistance = 0, minResistance = 0,
+            minIncline = 0f, maxIncline = 15f,
+            maxPower = 2000, minPower = 0, powerStep = 1, resistanceStep = 1.0f, inclineStep = 0.5f, speedStep = 0.5f, maxSpeed = 19.3f,
+        ),
+        74819 to DeviceRecord(
+            name = "FreeMotion i22.9 Incline Trainer",
+            type = DeviceType.TREADMILL,
+            supportedMetrics = STANDARD_TREADMILL_METRICS,
+            maxResistance = 0, minResistance = 0,
+            minIncline = -3f, maxIncline = 30f,
+            maxPower = 2000, minPower = 0, powerStep = 1, resistanceStep = 1.0f, inclineStep = 0.5f, speedStep = 0.5f, maxSpeed = 24.1f,
+        ),
+
+        // ── FreeMotion Elliptical ──
+        84420 to DeviceRecord(
+            name = "FreeMotion e22.9",
+            type = DeviceType.ELLIPTICAL,
+            supportedMetrics = STANDARD_ELLIPTICAL_METRICS,
+            maxResistance = 24, minResistance = 1,
             minIncline = 0f, maxIncline = 0f,
             maxPower = 2000, minPower = 0, powerStep = 1, resistanceStep = 1.0f, inclineStep = 0f, speedStep = 0.5f, maxSpeed = 60f,
         ),

@@ -1,5 +1,6 @@
 package com.nettarion.hyperborea.platform
 
+import android.annotation.SuppressLint
 import android.app.ActivityManager
 import android.content.ComponentName
 import android.content.Context
@@ -91,6 +92,7 @@ class AndroidSystemController @Inject constructor(
         }
     }
 
+    @SuppressLint("SoonBlockedPrivateApi") // API 25 target — no hidden API restrictions
     override suspend fun grantUsbPermission(packageName: String): Boolean {
         logger.d(TAG, "grantUsbPermission: $packageName")
         return try {

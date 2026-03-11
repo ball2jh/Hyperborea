@@ -19,6 +19,6 @@ class BootReceiver : BroadcastReceiver() {
     }
 
     private companion object {
-        const val TAG = "Hyperborea.Boot"
+        const val TAG = "Boot"
     }
 }

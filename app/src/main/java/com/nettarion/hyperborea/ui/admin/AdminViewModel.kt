@@ -2,7 +2,7 @@ package com.nettarion.hyperborea.ui.admin
 
 import android.content.Context
 import android.content.Intent
-import android.content.SharedPreferences
+import com.nettarion.hyperborea.core.LicenseChecker
 import android.os.Environment
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
@@ -23,6 +23,7 @@ import com.nettarion.hyperborea.core.system.SystemMonitor
 import com.nettarion.hyperborea.core.system.SystemSnapshot
 import com.nettarion.hyperborea.core.profile.UserPreferences
 import com.nettarion.hyperborea.platform.support.SupportHttpClient
+import com.nettarion.hyperborea.platform.support.truncateLogExport
 import com.nettarion.hyperborea.platform.update.TrackState
 import com.nettarion.hyperborea.platform.update.UpdateManager
 import dagger.hilt.android.lifecycle.HiltViewModel
@@ -52,7 +53,7 @@ class AdminViewModel @Inject constructor(
     private val updateManager: UpdateManager,
     private val userPreferences: UserPreferences,
     private val supportHttpClient: SupportHttpClient,
-    private val licensePreferences: SharedPreferences,
+    private val licenseChecker: LicenseChecker,
     private val logger: AppLogger,
     @param:ApplicationContext private val context: Context,
 ) : ViewModel() {
@@ -168,8 +169,8 @@ class AdminViewModel @Inject constructor(
 
         viewModelScope.launch(Dispatchers.IO) {
             try {
-                val deviceUuid = licensePreferences.getString("license_device_uuid", null)
-                val authToken = licensePreferences.getString("license_auth_token", null)
+                val deviceUuid = licenseChecker.deviceUuid
+                val authToken = licenseChecker.authToken
 
                 if (authToken.isNullOrEmpty()) {
                     _supportUploadState.value = SupportUploadState.Error("Device not linked")
@@ -223,8 +224,8 @@ class AdminViewModel @Inject constructor(
                     put("deviceUuid", deviceUuid ?: JSONObject.NULL)
                     put("appVersion", BuildConfig.VERSION_NAME)
                     put("timestamp", SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss'Z'", Locale.US).format(Date()))
-                    put("appLogs", logStore.export())
-                    put("systemLogs", systemLogStore.export())
+                    put("appLogs", truncateLogExport(logStore.export(), 400_000))
+                    put("systemLogs", truncateLogExport(systemLogStore.export(), 400_000))
                     put("diagnostics", diagnostics)
                 }
 

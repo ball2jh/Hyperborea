@@ -4,6 +4,8 @@ import kotlinx.coroutines.flow.StateFlow
 
 interface LicenseChecker {
     val state: StateFlow<LicenseState>
+    val authToken: String?
+    val deviceUuid: String?
 
     /** Check license status with the server. Updates [state]. When [silent] is true, skips emitting [LicenseState.Checking]. */
     suspend fun check(silent: Boolean = false)

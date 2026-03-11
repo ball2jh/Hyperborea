@@ -1,8 +1,8 @@
 package com.nettarion.hyperborea.platform.systemlog
 
 import com.google.common.truth.Truth.assertThat
-import com.nettarion.hyperborea.core.AppLogger
 import com.nettarion.hyperborea.core.system.CaptureConfig
+import com.nettarion.hyperborea.core.test.TestAppLogger
 import com.nettarion.hyperborea.core.system.CaptureState
 import com.nettarion.hyperborea.core.LogLevel
 import com.nettarion.hyperborea.core.system.SystemLogEntry
@@ -28,12 +28,7 @@ class RingBufferSystemLogStoreTest {
 
     private lateinit var testScope: TestScope
     private lateinit var store: RingBufferSystemLogStore
-    private val fakeLogger = object : AppLogger {
-        override fun d(tag: String, message: String) {}
-        override fun i(tag: String, message: String) {}
-        override fun w(tag: String, message: String) {}
-        override fun e(tag: String, message: String, throwable: Throwable?) {}
-    }
+    private val fakeLogger = TestAppLogger()
 
     private fun fakeProcess(stdout: String): Process = object : Process() {
         override fun getOutputStream() = System.out

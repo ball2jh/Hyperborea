@@ -24,6 +24,7 @@ local.properties
 # Signing keys
 iFit/firmware/keys/*
 !iFit/firmware/keys/README.md
+release.jks
 
 # Large binary assets (firmware images, stock APKs, backups)
 iFit/firmware/repack/

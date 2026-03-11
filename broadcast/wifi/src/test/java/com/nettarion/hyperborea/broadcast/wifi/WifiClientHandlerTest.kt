@@ -1,9 +1,9 @@
 package com.nettarion.hyperborea.broadcast.wifi
 
 import com.google.common.truth.Truth.assertThat
-import com.nettarion.hyperborea.core.AppLogger
 import com.nettarion.hyperborea.core.model.DeviceCommand
 import com.nettarion.hyperborea.core.model.DeviceType
+import com.nettarion.hyperborea.core.test.TestAppLogger
 import com.nettarion.hyperborea.core.test.buildDeviceInfo
 import com.nettarion.hyperborea.core.ftms.ControlPointParser
 import com.nettarion.hyperborea.core.ftms.FtmsServiceMetadata
@@ -17,12 +17,7 @@ class WifiClientHandlerTest {
     private val deviceInfo = buildDeviceInfo()
     private val serviceDef = WifiServiceDefinition(deviceInfo)
     private val commands = mutableListOf<DeviceCommand>()
-    private val logger = object : AppLogger {
-        override fun d(tag: String, message: String) {}
-        override fun i(tag: String, message: String) {}
-        override fun w(tag: String, message: String) {}
-        override fun e(tag: String, message: String, throwable: Throwable?) {}
-    }
+    private val logger = TestAppLogger()
 
     private data class ParsedResponse(val id: Byte, val seq: Byte, val code: Byte, val payload: ByteArray)
 

@@ -5,11 +5,14 @@ import androidx.lifecycle.viewModelScope
 import app.cash.turbine.test
 import com.google.common.truth.Truth.assertThat
 import com.nettarion.hyperborea.MainDispatcherRule
-import com.nettarion.hyperborea.core.AppLogger
 import com.nettarion.hyperborea.core.LogEntry
 import com.nettarion.hyperborea.core.LogStore
 import com.nettarion.hyperborea.core.adapter.AdapterState
 import com.nettarion.hyperborea.core.adapter.BroadcastId
+import com.nettarion.hyperborea.core.LicenseChecker
+import com.nettarion.hyperborea.core.LicenseState
+import com.nettarion.hyperborea.core.PairingSession
+import com.nettarion.hyperborea.core.PairingStatus
 import com.nettarion.hyperborea.core.adapter.HardwareAdapter
 import com.nettarion.hyperborea.core.model.DeviceCommand
 import com.nettarion.hyperborea.core.model.DeviceIdentity
@@ -22,9 +25,8 @@ import com.nettarion.hyperborea.core.system.SystemLogStore
 import com.nettarion.hyperborea.core.system.SystemMonitor
 import com.nettarion.hyperborea.core.system.SystemSnapshot
 import com.nettarion.hyperborea.core.test.buildSystemSnapshot
-import com.nettarion.hyperborea.platform.license.FakeSharedPreferences
 import com.nettarion.hyperborea.platform.support.SupportHttpClient
-import com.nettarion.hyperborea.platform.update.FakeAppLogger
+import com.nettarion.hyperborea.core.test.TestAppLogger
 import com.nettarion.hyperborea.platform.update.FakeUpdateHttpClient
 import com.nettarion.hyperborea.platform.update.FakeUpdateInstaller
 import com.nettarion.hyperborea.platform.update.UpdateManager
@@ -55,9 +57,17 @@ class AdminViewModelTest {
     private val systemSnapshot = MutableStateFlow(buildSystemSnapshot())
     private val enabledBroadcasts = MutableStateFlow<Set<BroadcastId>>(emptySet())
     private var uploadResponse: String? = """{"code":"ABC123"}"""
-    private val prefs = FakeSharedPreferences()
+    private val fakeLicenseChecker = object : LicenseChecker {
+        override val state: StateFlow<LicenseState> = MutableStateFlow(LicenseState.Unlicensed)
+        override var authToken: String? = "test-token"
+        override var deviceUuid: String? = "test-uuid"
+        override suspend fun check(silent: Boolean) {}
+        override suspend fun requestPairing(): PairingSession = PairingSession.Error("stub")
+        override suspend fun pollPairing(pairingToken: String): PairingStatus = PairingStatus.Pending
+        override suspend fun unlink() {}
+    }
 
-    private val noOpLogger = FakeAppLogger()
+    private val noOpLogger = TestAppLogger()
 
     private val fakeLogStore = object : LogStore {
         override val entries = MutableStateFlow<List<LogEntry>>(emptyList())
@@ -103,9 +113,6 @@ class AdminViewModelTest {
     private lateinit var viewModel: AdminViewModel
 
     private fun createViewModel() {
-        prefs.edit().putString("license_device_uuid", "test-uuid").apply()
-        prefs.edit().putString("license_auth_token", "test-token").apply()
-
         val scope = CoroutineScope(mainDispatcherRule.testDispatcher)
         val downloadDir = File(System.getProperty("java.io.tmpdir"), "test-update-${System.nanoTime()}").absolutePath
         val updateManager = UpdateManager(
@@ -113,7 +120,7 @@ class AdminViewModelTest {
             appInstaller = FakeUpdateInstaller(),
             logger = noOpLogger,
             scope = scope,
-            prefs = prefs,
+            licenseChecker = fakeLicenseChecker,
             versionProvider = VersionProvider { 1 },
             downloadDir = downloadDir,
         )
@@ -127,7 +134,7 @@ class AdminViewModelTest {
             updateManager = updateManager,
             userPreferences = fakeUserPreferences,
             supportHttpClient = fakeSupportClient,
-            licensePreferences = prefs,
+            licenseChecker = fakeLicenseChecker,
             logger = noOpLogger,
             context = ContextWrapper(null),
         )
@@ -179,8 +186,8 @@ class AdminViewModelTest {
 
     @Test
     fun `uploadSupport errors when no auth token`() = runViewModelTest {
+        fakeLicenseChecker.authToken = null
         createViewModel()
-        prefs.edit().remove("license_auth_token").apply()
 
         viewModel.supportUploadState.test {
             assertThat(awaitItem()).isEqualTo(SupportUploadState.Idle)

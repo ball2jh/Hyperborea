@@ -1,6 +1,5 @@
 package com.nettarion.hyperborea.platform.update
 
-import com.nettarion.hyperborea.core.AppLogger
 import java.io.ByteArrayInputStream
 import java.io.IOException
 
@@ -41,11 +40,4 @@ class FakeUpdateInstaller : UpdateInstaller {
         finalizeCalled = true
         lastFinalizePath = path
     }
-}
-
-class FakeAppLogger : AppLogger {
-    override fun d(tag: String, message: String) {}
-    override fun i(tag: String, message: String) {}
-    override fun w(tag: String, message: String) {}
-    override fun e(tag: String, message: String, throwable: Throwable?) {}
 }

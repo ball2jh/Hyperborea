@@ -9,10 +9,10 @@ import android.bluetooth.BluetoothGattService
 import android.bluetooth.BluetoothProfile
 import android.content.Context
 import com.google.common.truth.Truth.assertThat
-import com.nettarion.hyperborea.core.AppLogger
 import com.nettarion.hyperborea.core.ftms.ControlPointParser
 import com.nettarion.hyperborea.core.model.DeviceCommand
 import com.nettarion.hyperborea.core.model.DeviceType
+import com.nettarion.hyperborea.core.test.TestAppLogger
 import com.nettarion.hyperborea.core.test.buildDeviceInfo
 import io.mockk.every
 import io.mockk.mockk
@@ -33,12 +33,7 @@ class FtmsGattCallbackTest {
     private val connectedDevices = mutableListOf<BluetoothDevice>()
     private val disconnectedDevices = mutableListOf<BluetoothDevice>()
     private var serviceAddedCalled = false
-    private val logger = object : AppLogger {
-        override fun d(tag: String, message: String) {}
-        override fun i(tag: String, message: String) {}
-        override fun w(tag: String, message: String) {}
-        override fun e(tag: String, message: String, throwable: Throwable?) {}
-    }
+    private val logger = TestAppLogger()
 
     private val callback = FtmsGattCallback(
         context = context,

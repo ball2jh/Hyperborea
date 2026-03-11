@@ -1,6 +1,7 @@
 package com.nettarion.hyperborea.hardware.fitpro.session
 
 import com.google.common.truth.Truth.assertThat
+import com.nettarion.hyperborea.core.test.TestAppLogger
 import com.nettarion.hyperborea.core.model.DeviceCommand
 import com.nettarion.hyperborea.core.test.buildDeviceInfo
 import com.nettarion.hyperborea.hardware.fitpro.v2.V2Codec
@@ -23,7 +24,7 @@ import org.junit.Test
 class V2SessionTest {
 
     private val transport = FakeHidTransport()
-    private val logger = FakeAppLogger()
+    private val logger = TestAppLogger()
 
     private fun createSession(scope: TestScope): V2Session =
         V2Session(

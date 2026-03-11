@@ -1,8 +1,8 @@
 package com.nettarion.hyperborea.platform.update
 
-import android.content.SharedPreferences
 import com.nettarion.hyperborea.BuildConfig
 import com.nettarion.hyperborea.core.AppLogger
+import com.nettarion.hyperborea.core.LicenseChecker
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -19,7 +19,7 @@ class UpdateManager @Inject constructor(
     private val appInstaller: UpdateInstaller,
     private val logger: AppLogger,
     private val scope: CoroutineScope,
-    private val prefs: SharedPreferences,
+    private val licenseChecker: LicenseChecker,
     private val versionProvider: VersionProvider,
     @param:Named("updateDir") private val downloadDir: String,
 ) {
@@ -45,7 +45,7 @@ class UpdateManager @Inject constructor(
             _checking.value = true
             try {
                 val manifestUrl = "${BuildConfig.SERVER_URL}/api/device/manifest"
-                val authToken = prefs.getString("license_auth_token", null)
+                val authToken = licenseChecker.authToken
                 val headers = if (authToken != null) {
                     mapOf("Authorization" to "Bearer $authToken")
                 } else {

@@ -1,6 +1,5 @@
 package com.nettarion.hyperborea.core.adapter
 
-import com.nettarion.hyperborea.core.AppLogger
 import com.nettarion.hyperborea.core.model.ClientInfo
 import com.nettarion.hyperborea.core.model.DeviceCommand
 import com.nettarion.hyperborea.core.model.DeviceInfo
@@ -9,6 +8,7 @@ import com.nettarion.hyperborea.core.orchestration.Prerequisite
 import com.nettarion.hyperborea.core.system.SystemSnapshot
 
 import com.google.common.truth.Truth.assertThat
+import com.nettarion.hyperborea.core.test.TestAppLogger
 import com.nettarion.hyperborea.core.test.buildDeviceInfo
 import com.nettarion.hyperborea.core.test.buildExerciseData
 import kotlinx.coroutines.CoroutineScope
@@ -125,7 +125,7 @@ class BaseBroadcastAdapterTest {
     private class TestAdapter(
         private val failOnStart: Boolean = false,
     ) : BaseBroadcastAdapter(
-        logger = NoOpLogger(),
+        logger = TestAppLogger(),
         tag = "TestAdapter",
         dispatcher = UnconfinedTestDispatcher(),
     ) {
@@ -155,10 +155,4 @@ class BaseBroadcastAdapterTest {
         fun triggerUpdateClients(clients: Set<ClientInfo>) = updateClients(clients)
     }
 
-    private class NoOpLogger : AppLogger {
-        override fun d(tag: String, message: String) {}
-        override fun i(tag: String, message: String) {}
-        override fun w(tag: String, message: String) {}
-        override fun e(tag: String, message: String, throwable: Throwable?) {}
-    }
 }

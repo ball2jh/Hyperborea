@@ -70,6 +70,7 @@ fun DashboardScreen(
                 broadcasts = uiState.broadcasts,
                 exerciseData = uiState.exerciseData,
                 profileName = uiState.profileName,
+                deviceName = uiState.deviceInfo?.name,
                 onStart = viewModel::startBroadcasting,
                 onStop = {
                     if (viewModel.currentElapsedSeconds >= 60) {

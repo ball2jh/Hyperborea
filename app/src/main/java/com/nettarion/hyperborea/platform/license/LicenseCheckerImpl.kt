@@ -28,6 +28,8 @@ class LicenseCheckerImpl @Inject constructor(
 
     private val _state = MutableStateFlow<LicenseState>(LicenseState.Checking)
     override val state: StateFlow<LicenseState> = _state.asStateFlow()
+    override val authToken: String? get() = prefs.getString(KEY_AUTH_TOKEN, null)
+    override val deviceUuid: String? get() = prefs.getString(KEY_DEVICE_UUID, null)
 
     override suspend fun check(silent: Boolean) {
         logger.d(TAG, "check() starting (silent=$silent)")
@@ -47,8 +49,8 @@ class LicenseCheckerImpl @Inject constructor(
             }
 
             if (responseBody == null) {
-                logger.w(TAG, "Server returned null, falling back to cache")
-                useCachedState()
+                logger.w(TAG, "Server returned null, setting Unlicensed")
+                _state.value = LicenseState.Unlicensed
                 return
             }
 
@@ -85,24 +87,22 @@ class LicenseCheckerImpl @Inject constructor(
             logger.d(TAG, "active=$active expiresAtMillis=$expiresAtMillis now=${System.currentTimeMillis()}")
 
             if (active && expiresAtMillis > System.currentTimeMillis()) {
-                prefs.edit().putLong(KEY_CACHED_EXPIRES_AT, expiresAtMillis).apply()
                 _state.value = LicenseState.Licensed(expiresAtMillis)
                 logger.i(TAG, "Licensed until $expiresAtMillis")
             } else {
-                prefs.edit().remove(KEY_CACHED_EXPIRES_AT).apply()
                 _state.value = LicenseState.Unlicensed
                 logger.w(TAG, "Not active or expired")
             }
         } catch (e: Exception) {
             logger.e(TAG, "License check failed", e)
-            useCachedState()
+            _state.value = LicenseState.Unlicensed
         }
     }
 
     override suspend fun requestPairing(): PairingSession {
         return try {
             val responseBody = withContext(Dispatchers.IO) {
-                httpClient.requestPairing(getDeviceUuid())
+                httpClient.requestPairing(getOrCreateDeviceUuid())
             }
             if (responseBody != null) {
                 val json = JSONObject(responseBody)
@@ -155,7 +155,6 @@ class LicenseCheckerImpl @Inject constructor(
         // Clear local credentials first so the device is unlicensed even if the server call fails
         prefs.edit()
             .remove(KEY_AUTH_TOKEN)
-            .remove(KEY_CACHED_EXPIRES_AT)
             .apply()
         _state.value = LicenseState.Unlicensed
         logger.i(TAG, "Device unlinked locally")
@@ -171,23 +170,13 @@ class LicenseCheckerImpl @Inject constructor(
         }
     }
 
-    private fun useCachedState() {
-        val cachedExpiresAt = prefs.getLong(KEY_CACHED_EXPIRES_AT, 0)
-        if (cachedExpiresAt > System.currentTimeMillis()) {
-            logger.i(TAG, "Using cached license (expires at $cachedExpiresAt)")
-            _state.value = LicenseState.Licensed(cachedExpiresAt)
-        } else {
-            _state.value = LicenseState.Unlicensed
-        }
-    }
-
     private fun generateNonce(): String {
         val bytes = ByteArray(16)
         SecureRandom().nextBytes(bytes)
         return bytes.joinToString("") { "%02x".format(it) }
     }
 
-    private fun getDeviceUuid(): String {
+    private fun getOrCreateDeviceUuid(): String {
         var uuid = prefs.getString(KEY_DEVICE_UUID, null)
         if (uuid == null) {
             uuid = UUID.randomUUID().toString()
@@ -217,9 +206,8 @@ class LicenseCheckerImpl @Inject constructor(
     }
 
     companion object {
-        private const val TAG = "Hyperborea.License"
+        private const val TAG = "License"
         private const val KEY_AUTH_TOKEN = "license_auth_token"
         private const val KEY_DEVICE_UUID = "license_device_uuid"
-        private const val KEY_CACHED_EXPIRES_AT = "license_cached_expires_at"
     }
 }

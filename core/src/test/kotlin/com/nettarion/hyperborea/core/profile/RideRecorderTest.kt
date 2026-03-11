@@ -1,12 +1,12 @@
 package com.nettarion.hyperborea.core.profile
 
-import com.nettarion.hyperborea.core.AppLogger
 import com.nettarion.hyperborea.core.model.ExerciseData
 import com.nettarion.hyperborea.core.model.Profile
 import com.nettarion.hyperborea.core.model.RideSummary
 import com.nettarion.hyperborea.core.model.WorkoutSample
 
 import com.google.common.truth.Truth.assertThat
+import com.nettarion.hyperborea.core.test.TestAppLogger
 import com.nettarion.hyperborea.core.test.buildExerciseData
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.ExperimentalCoroutinesApi
@@ -27,7 +27,7 @@ class RideRecorderTest {
     @Test
     fun `saves summary when session exceeds minimum duration`() = runTest {
         val repo = FakeProfileRepository(activeProfileId = 1L)
-        val logger = NoOpLogger()
+        val logger = TestAppLogger()
         val scope = CoroutineScope(UnconfinedTestDispatcher(testScheduler))
         val recorder = RideRecorder(repo, logger, scope)
 
@@ -58,7 +58,7 @@ class RideRecorderTest {
     @Test
     fun `discards session shorter than minimum duration`() = runTest {
         val repo = FakeProfileRepository(activeProfileId = 1L)
-        val logger = NoOpLogger()
+        val logger = TestAppLogger()
         val scope = CoroutineScope(UnconfinedTestDispatcher(testScheduler))
         val recorder = RideRecorder(repo, logger, scope)
 
@@ -75,7 +75,7 @@ class RideRecorderTest {
     @Test
     fun `discards session when no active profile`() = runTest {
         val repo = FakeProfileRepository(activeProfileId = null)
-        val logger = NoOpLogger()
+        val logger = TestAppLogger()
         val scope = CoroutineScope(UnconfinedTestDispatcher(testScheduler))
         val recorder = RideRecorder(repo, logger, scope)
 
@@ -92,7 +92,7 @@ class RideRecorderTest {
     @Test
     fun `handles null metric fields gracefully`() = runTest {
         val repo = FakeProfileRepository(activeProfileId = 1L)
-        val logger = NoOpLogger()
+        val logger = TestAppLogger()
         val scope = CoroutineScope(UnconfinedTestDispatcher(testScheduler))
         val recorder = RideRecorder(repo, logger, scope)
 
@@ -115,7 +115,7 @@ class RideRecorderTest {
     @Test
     fun `double start is no-op`() = runTest {
         val repo = FakeProfileRepository(activeProfileId = 1L)
-        val logger = NoOpLogger()
+        val logger = TestAppLogger()
         val scope = CoroutineScope(UnconfinedTestDispatcher(testScheduler))
         val recorder = RideRecorder(repo, logger, scope)
 
@@ -134,7 +134,7 @@ class RideRecorderTest {
     @Test
     fun `resistance and incline avg and max computed correctly`() = runTest {
         val repo = FakeProfileRepository(activeProfileId = 1L)
-        val logger = NoOpLogger()
+        val logger = TestAppLogger()
         val scope = CoroutineScope(UnconfinedTestDispatcher(testScheduler))
         val recorder = RideRecorder(repo, logger, scope)
 
@@ -158,7 +158,7 @@ class RideRecorderTest {
     @Test
     fun `normalized power calculated correctly with 30s window`() = runTest {
         val repo = FakeProfileRepository(activeProfileId = 1L)
-        val logger = NoOpLogger()
+        val logger = TestAppLogger()
         val scope = CoroutineScope(UnconfinedTestDispatcher(testScheduler))
         val recorder = RideRecorder(repo, logger, scope)
 
@@ -180,7 +180,7 @@ class RideRecorderTest {
     @Test
     fun `NP is null when fewer than 30 power samples`() = runTest {
         val repo = FakeProfileRepository(activeProfileId = 1L)
-        val logger = NoOpLogger()
+        val logger = TestAppLogger()
         val scope = CoroutineScope(UnconfinedTestDispatcher(testScheduler))
         val recorder = RideRecorder(repo, logger, scope)
 
@@ -203,7 +203,7 @@ class RideRecorderTest {
     @Test
     fun `NP computed at exactly 30s boundary`() = runTest {
         val repo = FakeProfileRepository(activeProfileId = 1L)
-        val logger = NoOpLogger()
+        val logger = TestAppLogger()
         val scope = CoroutineScope(UnconfinedTestDispatcher(testScheduler))
         val recorder = RideRecorder(repo, logger, scope)
 
@@ -226,7 +226,7 @@ class RideRecorderTest {
     @Test
     fun `elevation gain accumulated from positive incline and distance deltas`() = runTest {
         val repo = FakeProfileRepository(activeProfileId = 1L)
-        val logger = NoOpLogger()
+        val logger = TestAppLogger()
         val scope = CoroutineScope(UnconfinedTestDispatcher(testScheduler))
         val recorder = RideRecorder(repo, logger, scope)
 
@@ -257,7 +257,7 @@ class RideRecorderTest {
     @Test
     fun `time-series samples recorded once per elapsed second`() = runTest {
         val repo = FakeProfileRepository(activeProfileId = 1L)
-        val logger = NoOpLogger()
+        val logger = TestAppLogger()
         val scope = CoroutineScope(UnconfinedTestDispatcher(testScheduler))
         val recorder = RideRecorder(repo, logger, scope)
 
@@ -284,7 +284,7 @@ class RideRecorderTest {
     fun `IF and TSS computed when FTP is set`() = runTest {
         val ftp = 200
         val repo = FakeProfileRepository(activeProfileId = 1L, ftpWatts = ftp)
-        val logger = NoOpLogger()
+        val logger = TestAppLogger()
         val scope = CoroutineScope(UnconfinedTestDispatcher(testScheduler))
         val recorder = RideRecorder(repo, logger, scope)
 
@@ -309,7 +309,7 @@ class RideRecorderTest {
     @Test
     fun `IF and TSS null when FTP is not set`() = runTest {
         val repo = FakeProfileRepository(activeProfileId = 1L, ftpWatts = null)
-        val logger = NoOpLogger()
+        val logger = TestAppLogger()
         val scope = CoroutineScope(UnconfinedTestDispatcher(testScheduler))
         val recorder = RideRecorder(repo, logger, scope)
 
@@ -334,7 +334,7 @@ class RideRecorderTest {
     @Test
     fun `auto-stops after 300 consecutive idle seconds`() = runTest {
         val repo = FakeProfileRepository(activeProfileId = 1L)
-        val logger = NoOpLogger()
+        val logger = TestAppLogger()
         val scope = CoroutineScope(UnconfinedTestDispatcher(testScheduler))
         val recorder = RideRecorder(repo, logger, scope)
 
@@ -360,7 +360,7 @@ class RideRecorderTest {
     @Test
     fun `auto-stop discards when active duration below minimum`() = runTest {
         val repo = FakeProfileRepository(activeProfileId = 1L)
-        val logger = NoOpLogger()
+        val logger = TestAppLogger()
         val scope = CoroutineScope(UnconfinedTestDispatcher(testScheduler))
         val recorder = RideRecorder(repo, logger, scope)
 
@@ -382,7 +382,7 @@ class RideRecorderTest {
     @Test
     fun `short idle under 60s is kept`() = runTest {
         val repo = FakeProfileRepository(activeProfileId = 1L)
-        val logger = NoOpLogger()
+        val logger = TestAppLogger()
         val scope = CoroutineScope(UnconfinedTestDispatcher(testScheduler))
         val recorder = RideRecorder(repo, logger, scope)
 
@@ -412,7 +412,7 @@ class RideRecorderTest {
     @Test
     fun `long idle 60s or more is trimmed`() = runTest {
         val repo = FakeProfileRepository(activeProfileId = 1L)
-        val logger = NoOpLogger()
+        val logger = TestAppLogger()
         val scope = CoroutineScope(UnconfinedTestDispatcher(testScheduler))
         val recorder = RideRecorder(repo, logger, scope)
 
@@ -442,7 +442,7 @@ class RideRecorderTest {
     @Test
     fun `idle boundary at exactly 59s is kept`() = runTest {
         val repo = FakeProfileRepository(activeProfileId = 1L)
-        val logger = NoOpLogger()
+        val logger = TestAppLogger()
         val scope = CoroutineScope(UnconfinedTestDispatcher(testScheduler))
         val recorder = RideRecorder(repo, logger, scope)
 
@@ -471,7 +471,7 @@ class RideRecorderTest {
     @Test
     fun `idle boundary at exactly 60s is trimmed`() = runTest {
         val repo = FakeProfileRepository(activeProfileId = 1L)
-        val logger = NoOpLogger()
+        val logger = TestAppLogger()
         val scope = CoroutineScope(UnconfinedTestDispatcher(testScheduler))
         val recorder = RideRecorder(repo, logger, scope)
 
@@ -500,7 +500,7 @@ class RideRecorderTest {
     @Test
     fun `averages exclude trimmed idle data`() = runTest {
         val repo = FakeProfileRepository(activeProfileId = 1L)
-        val logger = NoOpLogger()
+        val logger = TestAppLogger()
         val scope = CoroutineScope(UnconfinedTestDispatcher(testScheduler))
         val recorder = RideRecorder(repo, logger, scope)
 
@@ -531,7 +531,7 @@ class RideRecorderTest {
     @Test
     fun `explicit stop during long idle flushes pending`() = runTest {
         val repo = FakeProfileRepository(activeProfileId = 1L)
-        val logger = NoOpLogger()
+        val logger = TestAppLogger()
         val scope = CoroutineScope(UnconfinedTestDispatcher(testScheduler))
         val recorder = RideRecorder(repo, logger, scope)
 
@@ -580,10 +580,4 @@ class RideRecorderTest {
         override fun getWorkoutSamples(rideId: Long): Flow<List<WorkoutSample>> = MutableStateFlow(emptyList())
     }
 
-    private class NoOpLogger : AppLogger {
-        override fun d(tag: String, message: String) {}
-        override fun i(tag: String, message: String) {}
-        override fun w(tag: String, message: String) {}
-        override fun e(tag: String, message: String, throwable: Throwable?) {}
-    }
 }

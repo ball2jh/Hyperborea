@@ -3,8 +3,8 @@ package com.nettarion.hyperborea.platform.license
 import android.content.SharedPreferences
 import app.cash.turbine.test
 import com.google.common.truth.Truth.assertThat
-import com.nettarion.hyperborea.core.AppLogger
 import com.nettarion.hyperborea.core.LicenseState
+import com.nettarion.hyperborea.core.test.TestAppLogger
 import com.nettarion.hyperborea.core.PairingSession
 import com.nettarion.hyperborea.core.PairingStatus
 import kotlinx.coroutines.ExperimentalCoroutinesApi
@@ -29,7 +29,7 @@ class LicenseCheckerImplTest {
     fun setUp() {
         prefs = FakeSharedPreferences()
         httpClient = FakeLicenseHttpClient()
-        checker = LicenseCheckerImpl(prefs, NoOpLogger(), httpClient)
+        checker = LicenseCheckerImpl(prefs, TestAppLogger(), httpClient)
     }
 
     @Test
@@ -53,36 +53,7 @@ class LicenseCheckerImplTest {
     }
 
     @Test
-    fun `check with auth token but network error and valid cache returns Licensed`() = runTest {
-        prefs.edit()
-            .putString("license_auth_token", "some-token")
-            .putLong("license_cached_expires_at", System.currentTimeMillis() + 86_400_000)
-            .commit()
-
-        // HTTP client returns null (simulating network error)
-        httpClient.statusResponse = null
-
-        checker.check()
-
-        assertThat(checker.state.value).isInstanceOf(LicenseState.Licensed::class.java)
-    }
-
-    @Test
-    fun `check with auth token but network error and expired cache returns Unlicensed`() = runTest {
-        prefs.edit()
-            .putString("license_auth_token", "some-token")
-            .putLong("license_cached_expires_at", System.currentTimeMillis() - 86_400_000)
-            .commit()
-
-        httpClient.statusResponse = null
-
-        checker.check()
-
-        assertThat(checker.state.value).isEqualTo(LicenseState.Unlicensed)
-    }
-
-    @Test
-    fun `check with auth token but network error and no cache returns Unlicensed`() = runTest {
+    fun `check with auth token but network error returns Unlicensed`() = runTest {
         prefs.edit()
             .putString("license_auth_token", "some-token")
             .commit()
@@ -95,17 +66,16 @@ class LicenseCheckerImplTest {
     }
 
     @Test
-    fun `check with auth token and exception falls back to cache`() = runTest {
+    fun `check with auth token and exception returns Unlicensed`() = runTest {
         prefs.edit()
             .putString("license_auth_token", "some-token")
-            .putLong("license_cached_expires_at", System.currentTimeMillis() + 86_400_000)
             .commit()
 
         httpClient.statusException = java.io.IOException("Connection refused")
 
         checker.check()
 
-        assertThat(checker.state.value).isInstanceOf(LicenseState.Licensed::class.java)
+        assertThat(checker.state.value).isEqualTo(LicenseState.Unlicensed)
     }
 
     @Test
@@ -147,8 +117,7 @@ class LicenseCheckerImplTest {
     @Test
     fun `pollPairing returns Linked and saves auth token`() = runTest {
         httpClient.pairingStatusResponse = """{"status":"linked","authToken":"new-token-abc"}"""
-        // After link succeeds, check() is called. Set up null status response
-        // so it falls back to cache (no cache = Unlicensed, which is fine)
+        // After link succeeds, check() is called — null status response means Unlicensed
         httpClient.statusResponse = null
 
         val result = checker.pollPairing("tok-123")
@@ -210,14 +179,12 @@ class LicenseCheckerImplTest {
     fun `unlink clears auth token and sets Unlicensed`() = runTest {
         prefs.edit()
             .putString("license_auth_token", "some-token")
-            .putLong("license_cached_expires_at", System.currentTimeMillis() + 86_400_000)
             .commit()
 
         checker.unlink()
 
         assertThat(checker.state.value).isEqualTo(LicenseState.Unlicensed)
         assertThat(prefs.getString("license_auth_token", null)).isNull()
-        assertThat(prefs.getLong("license_cached_expires_at", 0)).isEqualTo(0)
     }
 
     @Test
@@ -272,10 +239,4 @@ class LicenseCheckerImplTest {
         }
     }
 
-    private class NoOpLogger : AppLogger {
-        override fun d(tag: String, message: String) {}
-        override fun i(tag: String, message: String) {}
-        override fun w(tag: String, message: String) {}
-        override fun e(tag: String, message: String, throwable: Throwable?) {}
-    }
 }

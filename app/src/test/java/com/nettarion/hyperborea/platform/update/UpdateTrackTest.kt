@@ -1,5 +1,6 @@
 package com.nettarion.hyperborea.platform.update
 
+import com.nettarion.hyperborea.core.test.TestAppLogger
 import app.cash.turbine.test
 import com.google.common.truth.Truth.assertThat
 import kotlinx.coroutines.ExperimentalCoroutinesApi
@@ -19,7 +20,7 @@ class UpdateTrackTest {
 
     private lateinit var httpClient: FakeUpdateHttpClient
     private lateinit var installer: FakeUpdateInstaller
-    private lateinit var logger: FakeAppLogger
+    private lateinit var logger: TestAppLogger
     private lateinit var track: UpdateTrack
 
     private val sampleInfo = UpdateInfo(
@@ -33,7 +34,7 @@ class UpdateTrackTest {
     fun setUp() {
         httpClient = FakeUpdateHttpClient()
         installer = FakeUpdateInstaller()
-        logger = FakeAppLogger()
+        logger = TestAppLogger()
     }
 
     private fun createTrack(

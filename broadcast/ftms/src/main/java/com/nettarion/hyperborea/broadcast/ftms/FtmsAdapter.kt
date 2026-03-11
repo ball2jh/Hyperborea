@@ -3,6 +3,7 @@ package com.nettarion.hyperborea.broadcast.ftms
 import android.content.Context
 import com.nettarion.hyperborea.core.AppLogger
 import com.nettarion.hyperborea.core.adapter.BaseBroadcastAdapter
+import com.nettarion.hyperborea.core.adapter.BroadcastAdapter.Companion.DEFAULT_DEVICE_NAME
 import com.nettarion.hyperborea.core.adapter.BroadcastId
 import com.nettarion.hyperborea.core.model.DeviceInfo
 import com.nettarion.hyperborea.core.model.ExerciseData
@@ -48,6 +49,5 @@ class FtmsAdapter(
 
     private companion object {
         const val TAG = "FtmsAdapter"
-        const val DEFAULT_DEVICE_NAME = "Hyperborea"
     }
 }

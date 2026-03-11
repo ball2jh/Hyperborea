@@ -2,7 +2,7 @@ package com.nettarion.hyperborea.broadcast.wifi
 
 import com.google.common.truth.Truth.assertThat
 import com.nettarion.hyperborea.core.adapter.AdapterState
-import com.nettarion.hyperborea.core.AppLogger
+import com.nettarion.hyperborea.core.test.TestAppLogger
 import com.nettarion.hyperborea.core.test.buildDeviceInfo
 import com.nettarion.hyperborea.core.test.buildSystemSnapshot
 import io.mockk.mockk
@@ -17,12 +17,7 @@ class WifiAdapterTest {
 
     private lateinit var adapter: WifiAdapter
     private lateinit var nsdRegistrar: NsdRegistrar
-    private val logger = object : AppLogger {
-        override fun d(tag: String, message: String) {}
-        override fun i(tag: String, message: String) {}
-        override fun w(tag: String, message: String) {}
-        override fun e(tag: String, message: String, throwable: Throwable?) {}
-    }
+    private val logger = TestAppLogger()
 
     @Before
     fun setUp() {

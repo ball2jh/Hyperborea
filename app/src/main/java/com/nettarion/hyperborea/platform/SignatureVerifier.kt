@@ -10,7 +10,7 @@ import java.security.MessageDigest
 @Suppress("DEPRECATION")
 object SignatureVerifier {
 
-    private const val TAG = "Hyperborea.SignatureVerify"
+    private const val TAG = "SignatureVerify"
 
     fun verify(context: Context): Boolean {
         return try {
@@ -26,8 +26,8 @@ object SignatureVerifier {
             val actual = digest.joinToString("") { "%02X".format(it) }
             val expected = BuildConfig.SIGNING_CERTIFICATE_SHA256
             if (expected.isEmpty()) {
-                Log.w(TAG, "No expected fingerprint configured, skipping verification")
-                return true
+                Log.e(TAG, "No expected fingerprint configured, failing verification")
+                return false
             }
             if (!actual.equals(expected, ignoreCase = true)) {
                 Log.e(TAG, "Signature mismatch")

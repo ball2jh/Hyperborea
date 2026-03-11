@@ -49,6 +49,11 @@
 -keep class org.bouncycastle.crypto.params.Ed25519PublicKeyParameters { *; }
 -keep class org.bouncycastle.crypto.signers.Ed25519Signer { *; }
 
+# ---- Tink / security-crypto (EncryptedSharedPreferences) --------------------
+# Tink uses reflection to load key managers and primitives
+-keep class com.google.crypto.tink.** { *; }
+-dontwarn com.google.crypto.tink.**
+
 # ---- Suppress warnings -------------------------------------------------------
 -dontwarn javax.annotation.**
 -dontwarn org.jetbrains.annotations.**

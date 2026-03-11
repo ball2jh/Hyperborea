@@ -43,6 +43,8 @@ class LicenseViewModelTest {
 
     private val fakeLicenseChecker = object : LicenseChecker {
         override val state: StateFlow<LicenseState> = licenseState
+        override val authToken: String? = null
+        override val deviceUuid: String? = null
         override suspend fun check(silent: Boolean) {
             checkCallCount++
             lastCheckSilent = silent

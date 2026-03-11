@@ -8,7 +8,7 @@ import com.nettarion.hyperborea.core.orchestration.FulfillResult
 import com.nettarion.hyperborea.core.system.SystemController
 import com.nettarion.hyperborea.core.system.UsbDeviceInfo
 import com.nettarion.hyperborea.core.test.buildSystemSnapshot
-import com.nettarion.hyperborea.hardware.fitpro.session.FakeAppLogger
+import com.nettarion.hyperborea.core.test.TestAppLogger
 import com.nettarion.hyperborea.hardware.fitpro.session.FakeHidTransport
 import com.nettarion.hyperborea.hardware.fitpro.transport.HidTransportFactory
 import com.nettarion.hyperborea.hardware.fitpro.transport.HidTransportResult
@@ -24,7 +24,7 @@ import org.junit.Test
 class FitProAdapterTest {
 
     private val transport = FakeHidTransport()
-    private val logger = FakeAppLogger()
+    private val logger = TestAppLogger()
 
     private fun createAdapter(scope: TestScope, productId: Int = 2): FitProAdapter {
         val testFactory = object : HidTransportFactory {

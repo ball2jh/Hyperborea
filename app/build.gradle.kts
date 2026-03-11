@@ -60,6 +60,12 @@ android {
             keyAlias = "platform"
             keyPassword = "android"
         }
+        create("release") {
+            storeFile = rootProject.file("release.jks")
+            storePassword = "hyperborea"
+            keyAlias = "hyperborea"
+            keyPassword = "hyperborea"
+        }
     }
 
     buildTypes {
@@ -67,6 +73,7 @@ android {
             isMinifyEnabled = true
             isShrinkResources = true
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
+            signingConfig = signingConfigs.getByName("release")
         }
     }
 
@@ -144,6 +151,7 @@ dependencies {
     implementation(libs.room.runtime)
     implementation(libs.room.ktx)
     ksp(libs.room.compiler)
+    implementation(libs.security.crypto)
     implementation(libs.zxing.core)
 
     testImplementation(testFixtures(project(":core")))

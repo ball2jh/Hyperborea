@@ -59,13 +59,14 @@ fun StatusBar(
     broadcasts: List<BroadcastUiState>,
     exerciseData: ExerciseData?,
     profileName: String?,
+    deviceName: String?,
     onStart: () -> Unit,
     onStop: () -> Unit,
     onPause: () -> Unit,
     onResume: () -> Unit,
     onSettingsClick: () -> Unit,
-    onProfileClick: (() -> Unit)? = null,
     modifier: Modifier = Modifier,
+    onProfileClick: (() -> Unit)? = null,
 ) {
     val colors = LocalHyperboreaColors.current
     val timeFormat = remember { SimpleDateFormat("HH:mm", Locale.getDefault()) }
@@ -102,6 +103,23 @@ fun StatusBar(
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
             )
+
+            if (deviceName != null) {
+                Spacer(Modifier.width(6.dp))
+                Text(
+                    text = "\u00B7",
+                    style = MaterialTheme.typography.titleMedium,
+                    color = colors.textLow,
+                )
+                Spacer(Modifier.width(6.dp))
+                Text(
+                    text = deviceName,
+                    style = MaterialTheme.typography.titleMedium,
+                    color = colors.textLow,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
 
             if (profileName != null) {
                 Spacer(Modifier.width(8.dp))
@@ -318,10 +336,10 @@ internal fun ExerciseData.controlModeLabel(): String? {
     // targetPower means ERG mode (Zwift is controlling wattage)
     if (targetPower != null) return "ERG ${targetPower}W"
     // targetIncline means simulation mode (Zwift is controlling gradient)
-    if (targetIncline != null) return "SIM ${String.format("%.1f", targetIncline)}%"
+    if (targetIncline != null) return "SIM ${String.format(Locale.US, "%.1f", targetIncline)}%"
     // targetResistance means direct resistance control
     if (targetResistance != null) return "RES $targetResistance"
     // targetSpeed means speed control
-    if (targetSpeed != null) return "SPD ${String.format("%.1f", targetSpeed)} km/h"
+    if (targetSpeed != null) return "SPD ${String.format(Locale.US, "%.1f", targetSpeed)} km/h"
     return null
 }

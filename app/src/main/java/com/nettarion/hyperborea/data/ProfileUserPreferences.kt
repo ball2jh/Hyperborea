@@ -1,4 +1,4 @@
-package com.nettarion.hyperborea.platform
+package com.nettarion.hyperborea.data
 
 import com.nettarion.hyperborea.core.AppLogger
 import com.nettarion.hyperborea.core.adapter.BroadcastId

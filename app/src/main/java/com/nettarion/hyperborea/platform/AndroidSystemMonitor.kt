@@ -99,15 +99,15 @@ class AndroidSystemMonitor @Inject constructor(
         val bleEnabled = pm.hasSystemFeature(PackageManager.FEATURE_BLUETOOTH_LE) &&
             btAdapter?.isEnabled == true
         val bleAdvertisingSupported = bleEnabled &&
-            (btAdapter?.isMultipleAdvertisementSupported == true ||
-                btAdapter?.bluetoothLeAdvertiser != null)
+            (btAdapter.isMultipleAdvertisementSupported ||
+                btAdapter.bluetoothLeAdvertiser != null)
 
         // WiFi + IP
         val wifiManager = context.getSystemService(Context.WIFI_SERVICE) as? WifiManager
         val wifiEnabled = pm.hasSystemFeature(PackageManager.FEATURE_WIFI) &&
             wifiManager?.isWifiEnabled == true
         val wifiIp = if (wifiEnabled) {
-            val ip = wifiManager?.connectionInfo?.ipAddress ?: 0
+            val ip = wifiManager.connectionInfo?.ipAddress ?: 0
             if (ip != 0) formatIpAddress(ip) else null
         } else null
 

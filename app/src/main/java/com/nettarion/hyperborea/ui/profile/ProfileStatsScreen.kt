@@ -272,8 +272,8 @@ private fun RideRow(ride: RideSummary, useImperial: Boolean, onDelete: () -> Uni
                 horizontalArrangement = Arrangement.spacedBy(24.dp),
             ) {
                 ride.normalizedPower?.let { MetricPair("NP", "${it}W") }
-                ride.intensityFactor?.let { MetricPair("IF", String.format("%.2f", it)) }
-                ride.trainingStressScore?.let { MetricPair("TSS", String.format("%.0f", it)) }
+                ride.intensityFactor?.let { MetricPair("IF", String.format(Locale.US, "%.2f", it)) }
+                ride.trainingStressScore?.let { MetricPair("TSS", String.format(Locale.US, "%.0f", it)) }
                 ride.avgPower?.let { MetricPair("Avg Power", "${it}W") }
                 ride.maxPower?.let { MetricPair("Max Power", "${it}W") }
                 ride.avgCadence?.let { MetricPair("Avg Cadence", "${it}rpm") }
@@ -290,8 +290,8 @@ private fun RideRow(ride: RideSummary, useImperial: Boolean, onDelete: () -> Uni
             ) {
                 ride.avgResistance?.let { MetricPair("Avg Resistance", "$it") }
                 ride.maxResistance?.let { MetricPair("Max Resistance", "$it") }
-                ride.avgIncline?.let { MetricPair("Avg Incline", String.format("%.1f%%", it)) }
-                ride.maxIncline?.let { MetricPair("Max Incline", String.format("%.1f%%", it)) }
+                ride.avgIncline?.let { MetricPair("Avg Incline", String.format(Locale.US, "%.1f%%", it)) }
+                ride.maxIncline?.let { MetricPair("Max Incline", String.format(Locale.US, "%.1f%%", it)) }
                 ride.totalElevationGainMeters?.let {
                     MetricPair("Elevation", UnitFormatter.elevationDisplay(it, useImperial))
                 }
