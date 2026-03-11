@@ -100,7 +100,7 @@ class HyperboreaService : Service() {
     private fun activate() {
         logger.i(TAG, "Activating orchestrator")
         scope.launch {
-            licenseChecker.check()
+            licenseChecker.check(silent = true)
             if (licenseChecker.state.value !is LicenseState.Licensed) {
                 logger.w(TAG, "Cannot activate: not licensed")
                 return@launch
