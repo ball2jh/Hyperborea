@@ -24,6 +24,10 @@ val r2BaseUrl = localProperties.getProperty("r2.base.url")
     ?: findProperty("r2.base.url") as String?
     ?: ""
 
+if (serverUrl == "https://example.com") {
+    logger.warn("WARNING: server.url not configured — license API will not work")
+}
+
 fun signingConfigFingerprint(config: com.android.build.api.dsl.ApkSigningConfig): String {
     val file = config.storeFile ?: return ""
     if (!file.exists()) return ""
@@ -56,15 +60,15 @@ android {
     signingConfigs {
         create("platform") {
             storeFile = rootProject.file("iFit/firmware/keys/platform.p12")
-            storePassword = "android"
+            storePassword = localProperties.getProperty("platform.keystore.password") ?: ""
             keyAlias = "platform"
-            keyPassword = "android"
+            keyPassword = localProperties.getProperty("platform.key.password") ?: ""
         }
         create("release") {
             storeFile = rootProject.file("release.jks")
-            storePassword = "hyperborea"
+            storePassword = localProperties.getProperty("release.keystore.password") ?: ""
             keyAlias = "hyperborea"
-            keyPassword = "hyperborea"
+            keyPassword = localProperties.getProperty("release.key.password") ?: ""
         }
     }
 

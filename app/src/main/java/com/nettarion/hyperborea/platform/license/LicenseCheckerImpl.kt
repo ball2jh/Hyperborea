@@ -54,7 +54,7 @@ class LicenseCheckerImpl @Inject constructor(
                 return
             }
 
-            logger.d(TAG, "Got response: ${responseBody.take(200)}")
+            logger.d(TAG, "Got response (${responseBody.length} bytes)")
             val response = JSONObject(responseBody)
             val payload = response.getString("payload")
             val signature = response.getString("signature")

@@ -78,6 +78,11 @@ Target is API 25 (Android 7.1.2). Key restrictions:
 - Use `@Suppress("DEPRECATION")` for deprecated pre-API 26 methods as needed
 - BLE permissions: `BLUETOOTH` + `BLUETOOTH_ADMIN` + `ACCESS_FINE_LOCATION` (pre-API 31 model)
 
+## Security
+
+- **Certificate pinning**: `app/src/main/res/xml/network_security_config.xml` should have real SHA-256 pins once the server domain is finalized. Until then, pinning is not configured. When adding pins, use both a primary and a backup pin to avoid bricking the app on certificate rotation.
+- **Signing passwords**: Keystore passwords for `platform` and `release` signing configs are read from `local.properties` (gitignored). Required properties: `platform.keystore.password`, `platform.key.password`, `release.keystore.password`, `release.key.password`.
+
 ## Lint
 
 AGP lint can analyze stale merged manifests if source files changed after a prior build. When modifying `AndroidManifest.xml` or resources, run `./gradlew clean lint` instead of just `lint`.
