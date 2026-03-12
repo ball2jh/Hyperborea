@@ -31,6 +31,13 @@ interface HardwareAdapter : Adapter {
      */
     suspend fun disconnect()
 
+    /**
+     * Transient hardware identification: connect, perform handshake to get device
+     * identity, then disconnect. Does not affect adapter state or exercise data.
+     * Returns DeviceInfo derived from the handshake, or null on failure.
+     */
+    suspend fun identify(): DeviceInfo?
+
     suspend fun sendCommand(command: DeviceCommand)
 
     fun setInitialElapsedTime(seconds: Long)

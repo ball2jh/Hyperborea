@@ -12,5 +12,7 @@ data class Profile(
     val maxHeartRate: Int? = null,
     val useImperial: Boolean = true,
     val enabledBroadcasts: Set<BroadcastId> = BroadcastId.entries.toSet(),
+    val overlayEnabled: Boolean = false,
+    val savedSensorAddress: String? = null,
     val createdAt: Long = 0,
 )

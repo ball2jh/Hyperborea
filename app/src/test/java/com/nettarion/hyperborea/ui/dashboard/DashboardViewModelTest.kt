@@ -6,7 +6,11 @@ import com.nettarion.hyperborea.MainDispatcherRule
 import com.nettarion.hyperborea.core.adapter.AdapterState
 import com.nettarion.hyperborea.core.adapter.BroadcastAdapter
 import com.nettarion.hyperborea.core.adapter.BroadcastId
+import com.nettarion.hyperborea.core.adapter.DiscoveredSensor
 import com.nettarion.hyperborea.core.adapter.HardwareAdapter
+import com.nettarion.hyperborea.core.adapter.SensorAdapter
+import com.nettarion.hyperborea.core.adapter.SensorId
+import com.nettarion.hyperborea.core.adapter.SensorReading
 import com.nettarion.hyperborea.core.model.ClientInfo
 import com.nettarion.hyperborea.core.model.DeviceCommand
 import com.nettarion.hyperborea.core.model.DeviceIdentity
@@ -74,6 +78,7 @@ class DashboardViewModelTest {
         override fun canOperate(snapshot: SystemSnapshot): Boolean = true
         override suspend fun connect() {}
         override suspend fun disconnect() {}
+        override suspend fun identify(): DeviceInfo? = null
         override suspend fun sendCommand(command: DeviceCommand) {}
         override fun setInitialElapsedTime(seconds: Long) {}
     }
@@ -85,9 +90,24 @@ class DashboardViewModelTest {
 
     private val fakeUserPreferences = object : UserPreferences {
         override val enabledBroadcasts: StateFlow<Set<BroadcastId>> = this@DashboardViewModelTest.enabledBroadcasts
+        override val overlayEnabled: StateFlow<Boolean> = MutableStateFlow(false)
+        override val savedSensorAddress: StateFlow<String?> = MutableStateFlow(null)
         override fun setBroadcastEnabled(id: BroadcastId, enabled: Boolean) {
             toggledBroadcasts.add(id to enabled)
         }
+        override fun setOverlayEnabled(enabled: Boolean) {}
+        override fun setSavedSensorAddress(address: String?) {}
+    }
+
+    private val fakeSensorAdapter = object : SensorAdapter {
+        override val id = SensorId.HEART_RATE
+        override val state: StateFlow<AdapterState> = MutableStateFlow(AdapterState.Inactive)
+        override val reading: StateFlow<SensorReading?> = MutableStateFlow(null)
+        override val prerequisites: List<Prerequisite> = emptyList()
+        override fun canOperate(snapshot: SystemSnapshot) = true
+        override suspend fun startScan(): Flow<DiscoveredSensor> = emptyFlow()
+        override suspend fun connect(address: String) {}
+        override suspend fun disconnect() {}
     }
 
     private val fakeProfileRepository = object : ProfileRepository {
@@ -168,6 +188,7 @@ class DashboardViewModelTest {
             orchestrator = orchestrator,
             hardwareAdapter = fakeHardwareAdapter,
             broadcastAdapters = broadcastAdapters,
+            sensorAdapter = fakeSensorAdapter,
             systemMonitor = fakeSystemMonitor,
             userPreferences = fakeUserPreferences,
             profileRepository = fakeProfileRepository,

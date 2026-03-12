@@ -22,7 +22,7 @@ class WifiAdapterTest {
     @Before
     fun setUp() {
         nsdRegistrar = mockk(relaxed = true)
-        adapter = WifiAdapter(nsdRegistrar, logger, deviceName = { "Test Bike" })
+        adapter = WifiAdapter(nsdRegistrar, logger)
     }
 
     @After
@@ -105,7 +105,7 @@ class WifiAdapterTest {
     @Test
     fun `start registers mDNS`() = runTest {
         adapter.start(emptyFlow(), buildDeviceInfo())
-        verify { nsdRegistrar.register(WifiServer.PORT, "Test Bike") }
+        verify { nsdRegistrar.register(WifiServer.PORT, "Test Device") }
     }
 
     @Test

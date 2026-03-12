@@ -97,13 +97,18 @@ class AdminViewModelTest {
         override fun canOperate(snapshot: SystemSnapshot): Boolean = true
         override suspend fun connect() {}
         override suspend fun disconnect() {}
+        override suspend fun identify(): DeviceInfo? = null
         override suspend fun sendCommand(command: DeviceCommand) {}
         override fun setInitialElapsedTime(seconds: Long) {}
     }
 
     private val fakeUserPreferences = object : UserPreferences {
         override val enabledBroadcasts: StateFlow<Set<BroadcastId>> = this@AdminViewModelTest.enabledBroadcasts
+        override val overlayEnabled: StateFlow<Boolean> = MutableStateFlow(false)
+        override val savedSensorAddress: StateFlow<String?> = MutableStateFlow(null)
         override fun setBroadcastEnabled(id: BroadcastId, enabled: Boolean) {}
+        override fun setOverlayEnabled(enabled: Boolean) {}
+        override fun setSavedSensorAddress(address: String?) {}
     }
 
     private val fakeSupportClient = object : SupportHttpClient {

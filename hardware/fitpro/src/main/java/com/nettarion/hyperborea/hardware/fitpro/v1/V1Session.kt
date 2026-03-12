@@ -128,6 +128,21 @@ class V1Session(
         logger.i(TAG, "V1 session stopped")
     }
 
+    override suspend fun identify(): DeviceIdentity? {
+        try {
+            transport.open()
+            transport.clearBuffer()
+            handshake()
+            return _deviceIdentity.value
+        } catch (e: CancellationException) { throw e }
+        catch (e: Exception) {
+            logger.e(TAG, "Identify failed", e)
+            return null
+        } finally {
+            try { transport.close() } catch (_: Exception) {}
+        }
+    }
+
     override suspend fun writeFeature(command: DeviceCommand) {
         if (_sessionState.value !is SessionState.Streaming) return
 

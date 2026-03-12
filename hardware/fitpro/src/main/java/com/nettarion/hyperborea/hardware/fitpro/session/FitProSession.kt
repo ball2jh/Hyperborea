@@ -11,6 +11,7 @@ interface FitProSession {
     val sessionState: StateFlow<SessionState>
     suspend fun start()
     suspend fun stop()
+    suspend fun identify(): DeviceIdentity?
     suspend fun writeFeature(command: DeviceCommand)
 }
 

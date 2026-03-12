@@ -80,6 +80,7 @@ class AdminViewModel @Inject constructor(
     val appTrackState: StateFlow<TrackState> = updateManager.appTrack.state
     val checking: StateFlow<Boolean> = updateManager.checking
     val enabledBroadcasts: StateFlow<Set<BroadcastId>> = userPreferences.enabledBroadcasts
+    val overlayEnabled: StateFlow<Boolean> = userPreferences.overlayEnabled
 
     private val _exportResult = MutableStateFlow<ExportResult?>(null)
     val exportResult: StateFlow<ExportResult?> = _exportResult.asStateFlow()
@@ -162,6 +163,9 @@ class AdminViewModel @Inject constructor(
 
     fun toggleBroadcast(id: BroadcastId, enabled: Boolean) =
         userPreferences.setBroadcastEnabled(id, enabled)
+
+    fun toggleOverlay(enabled: Boolean) =
+        userPreferences.setOverlayEnabled(enabled)
 
     fun uploadSupport() {
         if (_supportUploadState.value is SupportUploadState.Uploading) return

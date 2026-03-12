@@ -4,7 +4,11 @@ import com.nettarion.hyperborea.core.AppLogger
 import com.nettarion.hyperborea.core.RetryPolicy
 import com.nettarion.hyperborea.core.adapter.AdapterState
 import com.nettarion.hyperborea.core.adapter.HardwareAdapter
+import com.nettarion.hyperborea.core.adapter.SensorAdapter
+import com.nettarion.hyperborea.core.adapter.SensorReading
 import com.nettarion.hyperborea.core.model.DeviceCommand
+import com.nettarion.hyperborea.core.model.DeviceInfo
+import com.nettarion.hyperborea.core.model.ExerciseData
 import com.nettarion.hyperborea.core.profile.RideRecorder
 import com.nettarion.hyperborea.core.system.SystemController
 import com.nettarion.hyperborea.core.system.SystemMonitor
@@ -14,11 +18,14 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.catch
+import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.filterNotNull
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
@@ -37,6 +44,7 @@ class Orchestrator(
     private val rideRecorder: RideRecorder,
     private val logger: AppLogger,
     private val scope: CoroutineScope,
+    private val sensorAdapter: SensorAdapter? = null,
 ) {
 
     private val _state = MutableStateFlow<OrchestratorState>(OrchestratorState.Idle)
@@ -52,6 +60,35 @@ class Orchestrator(
     private var isReconnecting = false
     private var preservedElapsedSeconds: Long = 0L
 
+    suspend fun probe(): DeviceInfo? {
+        mutex.withLock {
+            if (_state.value !is OrchestratorState.Idle) return null
+
+            try {
+                if (!ensureReady()) return null
+
+                _state.value = OrchestratorState.Preparing("Identifying hardware")
+                val deviceInfo = withTimeoutOrNull(PROBE_TIMEOUT_MS) {
+                    hardwareAdapter.identify()
+                }
+                if (deviceInfo == null) {
+                    _state.value = OrchestratorState.Error("Failed to identify hardware")
+                    return null
+                }
+
+                broadcastManager.updateDeviceInfo(deviceInfo)
+                _state.value = OrchestratorState.Idle
+                logger.i(TAG, "Probe complete: ${deviceInfo.name}")
+                return deviceInfo
+            } catch (e: CancellationException) { throw e }
+            catch (e: Exception) {
+                logger.e(TAG, "Probe failed", e)
+                _state.value = OrchestratorState.Error("Probe failed: ${e.message}", e)
+                return null
+            }
+        }
+    }
+
     suspend fun start() {
         mutex.withLock {
             val current = _state.value
@@ -66,20 +103,17 @@ class Orchestrator(
         }
     }
 
-    private suspend fun startInternal() {
-        // Ecosystem prerequisites
+    private suspend fun ensureReady(): Boolean {
         _state.value = OrchestratorState.Preparing("Fulfilling ecosystem prerequisites")
-        if (!fulfillPrerequisites(ecosystemManager.prerequisites, "ecosystem")) return
+        if (!fulfillPrerequisites(ecosystemManager.prerequisites, "ecosystem")) return false
 
         refreshAndAwait()
 
-        // Hardware prerequisites
         _state.value = OrchestratorState.Preparing("Fulfilling hardware prerequisites")
-        if (!fulfillPrerequisites(hardwareAdapter.prerequisites, "hardware")) return
+        if (!fulfillPrerequisites(hardwareAdapter.prerequisites, "hardware")) return false
 
         refreshAndAwait()
 
-        // Check hardware can operate
         val snapshot = systemMonitor.snapshot.value
         logger.d(TAG, "Snapshot: USB=${snapshot.status.isUsbHostAvailable}, " +
             "BLE=${snapshot.status.isBluetoothLeAdvertisingSupported}, " +
@@ -88,8 +122,13 @@ class Orchestrator(
             val msg = "Hardware cannot operate with current system state"
             logger.e(TAG, msg)
             _state.value = OrchestratorState.Error(msg)
-            return
+            return false
         }
+        return true
+    }
+
+    private suspend fun startInternal() {
+        if (!ensureReady()) return
 
         // Connect hardware
         _state.value = OrchestratorState.Preparing("Connecting to bike")
@@ -103,10 +142,24 @@ class Orchestrator(
             return
         }
 
-        // Wire data source to broadcasts
+        // Connect sensor if available (non-fatal)
+        connectSensor()
+
+        // Wire data source to broadcasts (merge sensor readings if available)
         val deviceInfo = hardwareAdapter.deviceInfo.value
             ?: throw IllegalStateException("Hardware connected but deviceInfo is null")
-        broadcastManager.connectDataSource(hardwareAdapter.exerciseData)
+        val mergedData: StateFlow<ExerciseData?> = if (sensorAdapter != null) {
+            combine(hardwareAdapter.exerciseData, sensorAdapter.reading) { exercise, sensor ->
+                if (exercise == null) return@combine null
+                when (sensor) {
+                    is SensorReading.HeartRate -> exercise.copy(heartRate = sensor.bpm)
+                    null -> exercise
+                }
+            }.stateIn(scope, SharingStarted.Eagerly, hardwareAdapter.exerciseData.value)
+        } else {
+            hardwareAdapter.exerciseData
+        }
+        broadcastManager.connectDataSource(mergedData)
         broadcastManager.updateDeviceInfo(deviceInfo)
 
         // Command pipeline: broadcasts → hardware
@@ -123,7 +176,7 @@ class Orchestrator(
         }
 
         _state.value = OrchestratorState.Running()
-        rideRecorder.start(hardwareAdapter.exerciseData.filterNotNull())
+        rideRecorder.start(mergedData.filterNotNull())
         logger.i(TAG, "Orchestrator running")
 
         // Hardware disconnect monitor — reconnect with backoff
@@ -178,6 +231,19 @@ class Orchestrator(
                         isReconnecting = false
                     }
                 }
+            }
+        }
+    }
+
+    private fun connectSensor() {
+        val sensor = sensorAdapter ?: return
+        scope.launch {
+            try {
+                // Sensor connection is non-fatal — workout continues without HR if it fails
+                logger.i(TAG, "Sensor adapter available: ${sensor.id.displayName}")
+            } catch (e: CancellationException) { throw e }
+            catch (e: Exception) {
+                logger.w(TAG, "Sensor connection failed (non-fatal): ${e.message}")
             }
         }
     }
@@ -259,6 +325,9 @@ class Orchestrator(
 
             hardwareAdapter.disconnect()
 
+            try { sensorAdapter?.disconnect() }
+            catch (e: Exception) { logger.w(TAG, "Sensor disconnect failed: ${e.message}") }
+
             _state.value = OrchestratorState.Idle
             logger.i(TAG, "Orchestrator stopped")
         }
@@ -275,6 +344,9 @@ class Orchestrator(
         hardwareMonitorJob?.cancel()
         hardwareMonitorJob = null
         isReconnecting = false
+
+        try { sensorAdapter?.disconnect() }
+        catch (e: Exception) { logger.w(TAG, "Sensor disconnect failed: ${e.message}") }
 
         _state.value = OrchestratorState.Error(reason)
         logger.i(TAG, "Orchestrator stopped: $reason")
@@ -293,6 +365,7 @@ class Orchestrator(
 
     private companion object {
         const val TAG = "Orchestrator"
+        const val PROBE_TIMEOUT_MS = 10_000L
         const val PREREQUISITE_TIMEOUT_MS = 10_000L
         const val REFRESH_TIMEOUT_MS = 5_000L
     }

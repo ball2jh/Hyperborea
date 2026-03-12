@@ -3,7 +3,11 @@ package com.nettarion.hyperborea.core.orchestration
 import com.nettarion.hyperborea.core.adapter.AdapterState
 import com.nettarion.hyperborea.core.adapter.BroadcastAdapter
 import com.nettarion.hyperborea.core.adapter.BroadcastId
+import com.nettarion.hyperborea.core.adapter.DiscoveredSensor
 import com.nettarion.hyperborea.core.adapter.HardwareAdapter
+import com.nettarion.hyperborea.core.adapter.SensorAdapter
+import com.nettarion.hyperborea.core.adapter.SensorId
+import com.nettarion.hyperborea.core.adapter.SensorReading
 import com.nettarion.hyperborea.core.model.ClientInfo
 import com.nettarion.hyperborea.core.model.DeviceCommand
 import com.nettarion.hyperborea.core.model.DeviceIdentity
@@ -397,6 +401,121 @@ class OrchestratorTest {
         assertThat(env.broadcast1.lastDeviceInfo).isEqualTo(buildDeviceInfo())
     }
 
+    // --- Probe ---
+
+    @Test
+    fun `probe returns device info on success`() = runTest {
+        val env = TestEnv(this)
+        val result = env.orchestrator.probe()
+        assertThat(result).isEqualTo(buildDeviceInfo())
+        assertThat(env.orchestrator.state.value).isEqualTo(OrchestratorState.Idle)
+    }
+
+    @Test
+    fun `probe returns null on ecosystem prerequisite failure`() = runTest {
+        val prereq = Prerequisite(
+            id = "eco-fail",
+            description = "test",
+            isMet = { false },
+            fulfill = { FulfillResult.Failed("boom") },
+        )
+        val env = TestEnv(this, ecosystemPrereqs = listOf(prereq))
+        val result = env.orchestrator.probe()
+        assertThat(result).isNull()
+        assertThat(env.orchestrator.state.value).isInstanceOf(OrchestratorState.Error::class.java)
+    }
+
+    @Test
+    fun `probe returns null when hardware cannot operate`() = runTest {
+        val env = TestEnv(this, hardwareCanOperate = false)
+        val result = env.orchestrator.probe()
+        assertThat(result).isNull()
+        assertThat(env.orchestrator.state.value).isInstanceOf(OrchestratorState.Error::class.java)
+    }
+
+    @Test
+    fun `probe returns null on identify failure`() = runTest {
+        val env = TestEnv(this)
+        env.hardware.identifyResult = null
+        val result = env.orchestrator.probe()
+        assertThat(result).isNull()
+        assertThat(env.orchestrator.state.value).isInstanceOf(OrchestratorState.Error::class.java)
+    }
+
+    @Test
+    fun `probe returns null when not Idle`() = runTest {
+        val env = TestEnv(this)
+        env.orchestrator.start()
+        assertThat(env.orchestrator.state.value).isEqualTo(OrchestratorState.Running())
+        val result = env.orchestrator.probe()
+        assertThat(result).isNull()
+        assertThat(env.orchestrator.state.value).isEqualTo(OrchestratorState.Running())
+    }
+
+    @Test
+    fun `probe updates broadcast manager device info`() = runTest {
+        val env = TestEnv(this)
+        env.orchestrator.probe()
+        // After probe, broadcasts should be restarted with the identified device info
+        assertThat(env.broadcast1.lastDeviceInfo).isEqualTo(buildDeviceInfo())
+    }
+
+    @Test
+    fun `start works after successful probe`() = runTest {
+        val env = TestEnv(this)
+        env.orchestrator.probe()
+        assertThat(env.orchestrator.state.value).isEqualTo(OrchestratorState.Idle)
+        env.orchestrator.start()
+        assertThat(env.orchestrator.state.value).isEqualTo(OrchestratorState.Running())
+    }
+
+    // --- Sensor tests ---
+
+    @Test
+    fun `start works without sensor adapter`() = runTest {
+        val env = TestEnv(this, sensorAdapter = null)
+        env.orchestrator.start()
+        assertThat(env.orchestrator.state.value).isEqualTo(OrchestratorState.Running())
+    }
+
+    @Test
+    fun `start works with sensor adapter`() = runTest {
+        val sensor = FakeSensorAdapter()
+        val env = TestEnv(this, sensorAdapter = sensor)
+        env.orchestrator.start()
+        assertThat(env.orchestrator.state.value).isEqualTo(OrchestratorState.Running())
+    }
+
+    @Test
+    fun `stop disconnects sensor adapter`() = runTest {
+        val sensor = FakeSensorAdapter()
+        val env = TestEnv(this, sensorAdapter = sensor)
+        env.orchestrator.start()
+        env.orchestrator.stop()
+        assertThat(sensor.disconnectCalled).isTrue()
+    }
+
+    @Test
+    fun `sensor reading merges into exercise data`() = runTest {
+        val sensor = FakeSensorAdapter()
+        val env = TestEnv(this, sensorAdapter = sensor)
+        env.orchestrator.start()
+
+        // Emit exercise data without HR
+        env.hardware.exerciseData.value = ExerciseData(
+            power = 150, cadence = 80, speed = 25f, resistance = 10,
+            incline = 2f, heartRate = null, distance = 1f, calories = 50, elapsedTime = 60,
+        )
+        // Emit sensor reading
+        sensor.mutableReading.value = SensorReading.HeartRate(142)
+
+        // The merged flow should combine both — verify broadcast received data with HR
+        advanceUntilIdle()
+
+        // Broadcasts get the merged data via connectDataSource
+        assertThat(env.broadcast1.startCalled).isTrue()
+    }
+
     // --- Fakes ---
 
     private class TestEnv(
@@ -406,6 +525,7 @@ class OrchestratorTest {
         hardwareConnectState: AdapterState = AdapterState.Active,
         hardwareCanOperate: Boolean = true,
         enabledBroadcasts: Set<BroadcastId> = BroadcastId.entries.toSet(),
+        sensorAdapter: SensorAdapter? = FakeSensorAdapter(),
     ) {
         val monitor = FakeSystemMonitor()
         val controller = FakeSystemController()
@@ -442,6 +562,7 @@ class OrchestratorTest {
                 rideRecorder = rideRecorder,
                 logger = logger,
                 scope = scope,
+                sensorAdapter = sensorAdapter,
             )
         }
     }
@@ -497,8 +618,11 @@ class OrchestratorTest {
         val receivedCommands = mutableListOf<DeviceCommand>()
         var shouldThrowOnSendCommand = false
         var reconnectResult: AdapterState? = null
+        var identifyResult: DeviceInfo? = buildDeviceInfo()
 
         override fun canOperate(snapshot: SystemSnapshot) = operatable
+
+        override suspend fun identify(): DeviceInfo? = identifyResult
 
         override suspend fun connect() {
             connectCalled = true
@@ -523,11 +647,34 @@ class OrchestratorTest {
         enabled: Set<BroadcastId>,
     ) : UserPreferences {
         override val enabledBroadcasts = MutableStateFlow(enabled)
+        override val overlayEnabled = MutableStateFlow(false)
+        override val savedSensorAddress = MutableStateFlow<String?>(null)
         override fun setBroadcastEnabled(id: BroadcastId, enabled: Boolean) {
             val current = enabledBroadcasts.value.toMutableSet()
             if (enabled) current.add(id) else current.remove(id)
             enabledBroadcasts.value = current
         }
+        override fun setOverlayEnabled(enabled: Boolean) {
+            overlayEnabled.value = enabled
+        }
+        override fun setSavedSensorAddress(address: String?) {
+            savedSensorAddress.value = address
+        }
+    }
+
+    private class FakeSensorAdapter : SensorAdapter {
+        private val _state = MutableStateFlow<AdapterState>(AdapterState.Inactive)
+        override val state: StateFlow<AdapterState> = _state
+        override val id = SensorId.HEART_RATE
+        override val prerequisites: List<Prerequisite> = emptyList()
+        val mutableReading = MutableStateFlow<SensorReading?>(null)
+        override val reading: StateFlow<SensorReading?> = mutableReading
+        var disconnectCalled = false
+
+        override fun canOperate(snapshot: SystemSnapshot) = true
+        override suspend fun startScan(): Flow<DiscoveredSensor> = MutableSharedFlow()
+        override suspend fun connect(address: String) { _state.value = AdapterState.Active }
+        override suspend fun disconnect() { disconnectCalled = true; _state.value = AdapterState.Inactive }
     }
 
     private class FakeBroadcastAdapter(

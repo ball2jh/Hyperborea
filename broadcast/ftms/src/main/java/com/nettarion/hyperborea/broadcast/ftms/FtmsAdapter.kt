@@ -3,7 +3,6 @@ package com.nettarion.hyperborea.broadcast.ftms
 import android.content.Context
 import com.nettarion.hyperborea.core.AppLogger
 import com.nettarion.hyperborea.core.adapter.BaseBroadcastAdapter
-import com.nettarion.hyperborea.core.adapter.BroadcastAdapter.Companion.DEFAULT_DEVICE_NAME
 import com.nettarion.hyperborea.core.adapter.BroadcastId
 import com.nettarion.hyperborea.core.model.DeviceInfo
 import com.nettarion.hyperborea.core.model.ExerciseData
@@ -14,7 +13,6 @@ import kotlinx.coroutines.CoroutineScope
 class FtmsAdapter(
     private val context: Context,
     logger: AppLogger,
-    private val deviceName: () -> String?,
 ) : BaseBroadcastAdapter(logger, TAG) {
 
     override val id: BroadcastId = BroadcastId.FTMS
@@ -38,7 +36,7 @@ class FtmsAdapter(
             onError = { msg -> setError(msg) },
         )
         server = bleServer
-        bleServer.start(deviceName() ?: DEFAULT_DEVICE_NAME)
+        bleServer.start(deviceInfo.name)
         return { data -> bleServer.broadcastData(data) }
     }
 

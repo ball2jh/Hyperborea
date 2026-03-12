@@ -294,10 +294,18 @@ class BroadcastManagerTest {
         enabled: Set<BroadcastId>,
     ) : UserPreferences {
         override val enabledBroadcasts = MutableStateFlow(enabled)
+        override val overlayEnabled = MutableStateFlow(false)
+        override val savedSensorAddress = MutableStateFlow<String?>(null)
         override fun setBroadcastEnabled(id: BroadcastId, enabled: Boolean) {
             val current = enabledBroadcasts.value.toMutableSet()
             if (enabled) current.add(id) else current.remove(id)
             enabledBroadcasts.value = current
+        }
+        override fun setOverlayEnabled(enabled: Boolean) {
+            overlayEnabled.value = enabled
+        }
+        override fun setSavedSensorAddress(address: String?) {
+            savedSensorAddress.value = address
         }
     }
 

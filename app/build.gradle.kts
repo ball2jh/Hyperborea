@@ -137,6 +137,7 @@ dependencies {
     implementation(project(":broadcast:ftms"))
     implementation(project(":broadcast:wifi"))
     implementation(project(":ecosystem:ifit"))
+    implementation(project(":sensor:hrm"))
 
     implementation(libs.coroutines.android)
     implementation(platform(libs.compose.bom))

@@ -3,6 +3,7 @@ package com.nettarion.hyperborea.di
 import com.nettarion.hyperborea.core.AppLogger
 import com.nettarion.hyperborea.core.adapter.BroadcastAdapter
 import com.nettarion.hyperborea.core.adapter.HardwareAdapter
+import com.nettarion.hyperborea.core.adapter.SensorAdapter
 import com.nettarion.hyperborea.core.orchestration.BroadcastManager
 import com.nettarion.hyperborea.core.orchestration.EcosystemManager
 import com.nettarion.hyperborea.core.orchestration.Orchestrator
@@ -74,8 +75,10 @@ object PlatformModule {
         rideRecorder: RideRecorder,
         logger: AppLogger,
         scope: CoroutineScope,
+        sensorAdapter: SensorAdapter,
     ): Orchestrator = Orchestrator(
         systemMonitor, systemController, ecosystemManager,
         hardwareAdapter, broadcastManager, rideRecorder, logger, scope,
+        sensorAdapter = sensorAdapter,
     )
 }

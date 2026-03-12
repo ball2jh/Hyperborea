@@ -14,6 +14,8 @@ data class ProfileEntity(
     val maxHeartRate: Int?,
     val useImperial: Boolean = false,
     val enabledBroadcasts: String,
+    val overlayEnabled: Boolean = false,
+    val savedSensorAddress: String? = null,
     val createdAt: Long,
     val isActive: Boolean = false,
 )

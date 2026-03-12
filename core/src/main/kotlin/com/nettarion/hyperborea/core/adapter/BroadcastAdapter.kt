@@ -10,10 +10,6 @@ import kotlinx.coroutines.flow.StateFlow
 
 interface BroadcastAdapter : Adapter {
 
-    companion object {
-        const val DEFAULT_DEVICE_NAME = "Hyperborea"
-    }
-
     val id: BroadcastId
     val connectedClients: StateFlow<Set<ClientInfo>>
 

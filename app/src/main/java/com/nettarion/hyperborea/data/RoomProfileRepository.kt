@@ -114,6 +114,8 @@ private fun ProfileEntity.toDomain() = Profile(
             try { BroadcastId.valueOf(name) } catch (_: IllegalArgumentException) { null }
         }
         .toSet(),
+    overlayEnabled = overlayEnabled,
+    savedSensorAddress = savedSensorAddress,
     createdAt = createdAt,
 )
 
@@ -127,6 +129,8 @@ private fun Profile.toEntity(isActive: Boolean) = ProfileEntity(
     maxHeartRate = maxHeartRate,
     useImperial = useImperial,
     enabledBroadcasts = enabledBroadcasts.joinToString(",") { it.name },
+    overlayEnabled = overlayEnabled,
+    savedSensorAddress = savedSensorAddress,
     createdAt = createdAt,
     isActive = isActive,
 )

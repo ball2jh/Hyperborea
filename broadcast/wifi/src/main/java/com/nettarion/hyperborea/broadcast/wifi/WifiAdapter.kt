@@ -2,14 +2,12 @@ package com.nettarion.hyperborea.broadcast.wifi
 
 import com.nettarion.hyperborea.core.AppLogger
 import com.nettarion.hyperborea.core.adapter.BaseBroadcastAdapter
-import com.nettarion.hyperborea.core.adapter.BroadcastAdapter.Companion.DEFAULT_DEVICE_NAME
 import com.nettarion.hyperborea.core.adapter.BroadcastId
 import com.nettarion.hyperborea.core.model.DeviceInfo
 import com.nettarion.hyperborea.core.model.ExerciseData
 import com.nettarion.hyperborea.core.orchestration.Prerequisite
 import com.nettarion.hyperborea.core.system.SystemSnapshot
 import javax.inject.Inject
-import javax.inject.Named
 import javax.inject.Singleton
 import kotlinx.coroutines.CoroutineScope
 
@@ -17,7 +15,6 @@ import kotlinx.coroutines.CoroutineScope
 class WifiAdapter @Inject constructor(
     private val nsdRegistrar: NsdRegistrar,
     logger: AppLogger,
-    @Named("deviceName") private val deviceName: () -> String?,
 ) : BaseBroadcastAdapter(logger, TAG) {
 
     override val id: BroadcastId = BroadcastId.WIFI
@@ -44,7 +41,7 @@ class WifiAdapter @Inject constructor(
         server = wifiServer
         wifiServer.start()
 
-        nsdRegistrar.register(WifiServer.PORT, deviceName() ?: DEFAULT_DEVICE_NAME)
+        nsdRegistrar.register(WifiServer.PORT, deviceInfo.name)
 
         return { data -> wifiServer.broadcastData(data) }
     }

@@ -40,6 +40,7 @@ import androidx.compose.material3.TextButton
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
@@ -54,6 +55,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.nettarion.hyperborea.core.adapter.AdapterState
 import com.nettarion.hyperborea.core.adapter.BroadcastId
 import com.nettarion.hyperborea.core.LogLevel
+import com.nettarion.hyperborea.ui.sensor.SensorViewModel
 import com.nettarion.hyperborea.ui.theme.LocalHyperboreaColors
 
 @Composable
@@ -126,6 +128,8 @@ fun AdminDrawer(
                 ) {
                     BroadcastsSection(viewModel)
                     HorizontalDivider(color = colors.divider)
+                    SensorsSection()
+                    HorizontalDivider(color = colors.divider)
                     LogsSection(viewModel, onExpandLogs)
                     HorizontalDivider(color = colors.divider)
                     DiagnosticsSection(viewModel)
@@ -176,6 +180,7 @@ private fun CollapsibleSection(
 private fun BroadcastsSection(viewModel: AdminViewModel) {
     val colors = LocalHyperboreaColors.current
     val enabledBroadcasts by viewModel.enabledBroadcasts.collectAsStateWithLifecycle()
+    val overlayEnabled by viewModel.overlayEnabled.collectAsStateWithLifecycle()
     val snapshot by viewModel.systemSnapshot.collectAsStateWithLifecycle()
 
     CollapsibleSection("Broadcasts", initiallyExpanded = true) {
@@ -214,6 +219,160 @@ private fun BroadcastsSection(viewModel: AdminViewModel) {
                 )
             }
         }
+
+        HorizontalDivider(color = colors.divider, modifier = Modifier.padding(vertical = 4.dp))
+
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 16.dp, vertical = 8.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    text = "System Overlay",
+                    style = MaterialTheme.typography.bodyLarge,
+                    color = colors.textHigh,
+                )
+                Text(
+                    text = "Show exercise data over other apps",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = colors.textMedium,
+                )
+            }
+            Switch(
+                checked = overlayEnabled,
+                onCheckedChange = { viewModel.toggleOverlay(it) },
+                colors = SwitchDefaults.colors(
+                    checkedThumbColor = MaterialTheme.colorScheme.primary,
+                    checkedTrackColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.3f),
+                ),
+            )
+        }
+    }
+}
+
+@Composable
+private fun SensorsSection(
+    viewModel: SensorViewModel = hiltViewModel(),
+) {
+    val colors = LocalHyperboreaColors.current
+    val sensorState by viewModel.sensorState.collectAsStateWithLifecycle()
+    val savedAddress by viewModel.savedAddress.collectAsStateWithLifecycle()
+    val scanning by viewModel.scanning.collectAsStateWithLifecycle()
+    val discovered by viewModel.discoveredDevices.collectAsStateWithLifecycle()
+    val heartRate by viewModel.heartRate.collectAsStateWithLifecycle()
+    var showScanDialog by remember { mutableStateOf(false) }
+
+    CollapsibleSection("Sensors") {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 16.dp, vertical = 8.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    text = "Heart Rate Monitor",
+                    style = MaterialTheme.typography.bodyLarge,
+                    color = colors.textHigh,
+                )
+                val statusText = when {
+                    sensorState is AdapterState.Active && heartRate != null -> "${heartRate} bpm"
+                    sensorState is AdapterState.Active -> "Connected"
+                    sensorState is AdapterState.Activating -> "Connecting\u2026"
+                    sensorState is AdapterState.Error -> "Disconnected"
+                    savedAddress != null -> "Saved (not connected)"
+                    else -> "None"
+                }
+                Text(
+                    text = statusText,
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = if (sensorState is AdapterState.Active) colors.statusActive else colors.textMedium,
+                )
+            }
+            if (savedAddress != null) {
+                OutlinedButton(onClick = { viewModel.forgetDevice() }) {
+                    Text("Forget")
+                }
+                Spacer(Modifier.width(8.dp))
+            }
+            OutlinedButton(onClick = { showScanDialog = true }) {
+                Text("Scan")
+            }
+        }
+    }
+
+    if (showScanDialog) {
+        LaunchedEffect(Unit) { viewModel.startScan() }
+        DisposableEffect(Unit) { onDispose { viewModel.stopScan() } }
+
+        AlertDialog(
+            onDismissRequest = {
+                showScanDialog = false
+                viewModel.stopScan()
+            },
+            title = { Text("Heart Rate Monitors") },
+            text = {
+                Column {
+                    if (scanning && discovered.isEmpty()) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        ) {
+                            CircularProgressIndicator(modifier = Modifier.size(16.dp), strokeWidth = 2.dp)
+                            Text("Scanning\u2026", color = colors.textMedium)
+                        }
+                    }
+                    discovered.forEach { sensor ->
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clickable {
+                                    viewModel.connectDevice(sensor.address)
+                                    showScanDialog = false
+                                }
+                                .padding(vertical = 8.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text(
+                                    text = sensor.name ?: "Unknown",
+                                    style = MaterialTheme.typography.bodyLarge,
+                                    color = colors.textHigh,
+                                )
+                                Text(
+                                    text = sensor.address,
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = colors.textLow,
+                                )
+                            }
+                            Text(
+                                text = "${sensor.rssi} dBm",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = colors.textLow,
+                            )
+                        }
+                    }
+                    if (scanning && discovered.isNotEmpty()) {
+                        Spacer(Modifier.height(8.dp))
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        ) {
+                            CircularProgressIndicator(modifier = Modifier.size(12.dp), strokeWidth = 2.dp)
+                            Text("Still scanning\u2026", style = MaterialTheme.typography.bodySmall, color = colors.textLow)
+                        }
+                    }
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    showScanDialog = false
+                    viewModel.stopScan()
+                }) { Text("Close") }
+            },
+        )
     }
 }
 

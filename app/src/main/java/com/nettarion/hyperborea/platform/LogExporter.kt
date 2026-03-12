@@ -84,8 +84,7 @@ class LogExporter @Inject constructor(
         }
 
         val dir = logsDir()
-        val timestamp = formatFileTimestamp()
-        val file = File(dir, "combined_$timestamp.log")
+        val file = File(dir, "combined_latest.log")
         file.writeText(merged)
         return file
     }
@@ -112,7 +111,7 @@ class LogExporter @Inject constructor(
         }
 
         val dir = logsDir()
-        val file = File(dir, "components_${formatFileTimestamp()}.txt")
+        val file = File(dir, "components_latest.txt")
         file.writeText(text)
         return file
     }

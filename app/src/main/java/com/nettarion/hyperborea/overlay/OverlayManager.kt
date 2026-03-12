@@ -14,12 +14,14 @@ import com.nettarion.hyperborea.core.orchestration.Orchestrator
 import com.nettarion.hyperborea.core.orchestration.OrchestratorState
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.launch
 
 class OverlayManager(
     private val context: Context,
     private val orchestrator: Orchestrator,
     private val hardwareAdapter: HardwareAdapter,
+    private val overlayEnabled: StateFlow<Boolean>,
     private val logger: AppLogger,
     private val scope: CoroutineScope,
     private val onPause: () -> Unit,
@@ -137,7 +139,8 @@ class OverlayManager(
     }
 
     private fun shouldShowOverlay(): Boolean {
-        return !isAppInForeground &&
+        return overlayEnabled.value &&
+            !isAppInForeground &&
             !userDismissed &&
             (lastState is OrchestratorState.Running || lastState is OrchestratorState.Paused)
     }

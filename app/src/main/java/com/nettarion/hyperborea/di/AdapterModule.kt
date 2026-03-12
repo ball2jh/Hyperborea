@@ -7,9 +7,11 @@ import com.nettarion.hyperborea.broadcast.wifi.WifiAdapter
 import com.nettarion.hyperborea.core.AppLogger
 import com.nettarion.hyperborea.core.adapter.BroadcastAdapter
 import com.nettarion.hyperborea.core.adapter.HardwareAdapter
+import com.nettarion.hyperborea.core.adapter.SensorAdapter
 import com.nettarion.hyperborea.hardware.fitpro.FitProAdapter
 import com.nettarion.hyperborea.hardware.fitpro.transport.HidTransportFactory
 import com.nettarion.hyperborea.hardware.fitpro.transport.UsbHidTransportFactory
+import com.nettarion.hyperborea.sensor.hrm.HrmAdapter
 import dagger.Binds
 import dagger.Module
 import dagger.Provides
@@ -17,7 +19,7 @@ import dagger.hilt.InstallIn
 import dagger.hilt.android.qualifiers.ApplicationContext
 import dagger.hilt.components.SingletonComponent
 import dagger.multibindings.IntoSet
-import javax.inject.Named
+import kotlinx.coroutines.CoroutineScope
 import javax.inject.Singleton
 
 @Module
@@ -40,8 +42,7 @@ abstract class AdapterModule {
         fun provideFtmsBroadcastAdapter(
             @ApplicationContext context: Context,
             logger: AppLogger,
-            @Named("deviceName") deviceName: () -> String?,
-        ): BroadcastAdapter = FtmsAdapter(context, logger, deviceName)
+        ): BroadcastAdapter = FtmsAdapter(context, logger)
 
         @Provides
         @Singleton
@@ -58,9 +59,11 @@ abstract class AdapterModule {
         ): NsdRegistrar = NsdRegistrar(context, logger)
 
         @Provides
-        @Named("deviceName")
-        fun provideDeviceName(
-            hardwareAdapter: HardwareAdapter,
-        ): () -> String? = { hardwareAdapter.deviceInfo.value?.name }
+        @Singleton
+        fun provideHrmAdapter(
+            @ApplicationContext context: Context,
+            logger: AppLogger,
+            scope: CoroutineScope,
+        ): SensorAdapter = HrmAdapter(context, logger, scope)
     }
 }

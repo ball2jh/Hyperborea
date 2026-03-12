@@ -13,9 +13,11 @@ import com.nettarion.hyperborea.core.system.SystemLogCapture
 import com.nettarion.hyperborea.core.system.SystemMonitor
 import com.nettarion.hyperborea.platform.LogExporter
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import javax.inject.Inject
 import javax.inject.Singleton
 
@@ -31,6 +33,8 @@ class DiagnosticBootstrap @Inject constructor(
 ) {
     fun start() {
         scope.launch {
+            lockUpdateZip()
+
             logger.i(TAG, "=== Hyperborea diagnostic boot ===")
             logger.i(TAG, "Build: ${BuildConfig.VERSION_NAME} (${BuildConfig.VERSION_CODE})")
 
@@ -112,6 +116,24 @@ class DiagnosticBootstrap @Inject constructor(
                     logger.e(TAG, "Log export failed: ${e.message}", e)
                 }
             }
+        }
+    }
+
+    private suspend fun lockUpdateZip() = withContext(Dispatchers.IO) {
+        try {
+            val process = Runtime.getRuntime().exec(arrayOf(
+                "su", "-c", "touch /data/update.zip && toybox chattr +i /data/update.zip",
+            ))
+            val error = process.errorStream.bufferedReader().readText().trim()
+            val exitCode = process.waitFor()
+            process.destroy()
+            if (exitCode == 0 && error.isEmpty()) {
+                logger.i(TAG, "Locked /data/update.zip (immutable)")
+            } else {
+                logger.w(TAG, "Failed to lock /data/update.zip (exit=$exitCode): $error")
+            }
+        } catch (e: Exception) {
+            logger.w(TAG, "Failed to lock /data/update.zip: ${e.message}")
         }
     }
 

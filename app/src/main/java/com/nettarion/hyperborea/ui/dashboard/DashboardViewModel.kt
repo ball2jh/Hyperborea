@@ -10,6 +10,7 @@ import com.nettarion.hyperborea.core.AppLogger
 import com.nettarion.hyperborea.core.adapter.AdapterState
 import com.nettarion.hyperborea.core.adapter.BroadcastAdapter
 import com.nettarion.hyperborea.core.adapter.BroadcastId
+import com.nettarion.hyperborea.core.adapter.SensorAdapter
 import com.nettarion.hyperborea.core.fit.FitActivityBuilder
 import com.nettarion.hyperborea.core.model.ClientInfo
 import com.nettarion.hyperborea.core.adapter.HardwareAdapter
@@ -42,6 +43,7 @@ class DashboardViewModel @Inject constructor(
     private val orchestrator: Orchestrator,
     private val hardwareAdapter: HardwareAdapter,
     private val broadcastAdapters: Set<@JvmSuppressWildcards BroadcastAdapter>,
+    private val sensorAdapter: SensorAdapter,
     private val systemMonitor: SystemMonitor,
     private val userPreferences: UserPreferences,
     private val profileRepository: ProfileRepository,
@@ -78,8 +80,8 @@ class DashboardViewModel @Inject constructor(
         hardwareAdapter.exerciseData,
         hardwareAdapter.state,
         hardwareAdapter.deviceInfo,
-        combine(systemMonitor.snapshot.map { it.status }, broadcastsFlow, profileRepository.activeProfile, ::Triple),
-    ) { orchState, exercise, hwState, deviceInfo, (status, broadcasts, profile) ->
+        combine(systemMonitor.snapshot.map { it.status }, broadcastsFlow, profileRepository.activeProfile, sensorAdapter.state, ::Quad),
+    ) { orchState, exercise, hwState, deviceInfo, (status, broadcasts, profile, sState) ->
         DashboardUiState(
             orchestratorState = orchState,
             exerciseData = exercise,
@@ -88,6 +90,7 @@ class DashboardViewModel @Inject constructor(
             broadcasts = broadcasts,
             systemStatus = status,
             profileName = profile?.name,
+            sensorState = sState,
         )
     }.stateIn(
         viewModelScope,
@@ -153,6 +156,9 @@ class DashboardViewModel @Inject constructor(
     val rideExportResult: StateFlow<ExportResult?> = _exportResult.asStateFlow()
 
     init {
+        viewModelScope.launch {
+            orchestrator.probe()
+        }
         viewModelScope.launch {
             orchestrator.lastSavedRideId.collect { rideId ->
                 if (rideId == null) return@collect
@@ -228,6 +234,8 @@ class DashboardViewModel @Inject constructor(
         const val TAG = "Dashboard"
     }
 }
+
+private data class Quad<A, B, C, D>(val first: A, val second: B, val third: C, val fourth: D)
 
 sealed interface PostSaveEvent {
     data class ViewRide(val rideId: Long) : PostSaveEvent

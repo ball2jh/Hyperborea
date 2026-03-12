@@ -22,7 +22,8 @@ class WifiServiceDefinition(deviceInfo: DeviceInfo) {
         CharDef(FTMS_CONTROL_POINT, (PROP_WRITE.toInt() or PROP_INDICATE.toInt()).toByte(), null),
         CharDef(TRAINER_CONTROL, PROP_WRITE, null),
         CharDef(dataCharacteristic, PROP_NOTIFY, null),
-        CharDef(TRAINING_STATUS, PROP_READ, FtmsServiceMetadata.TRAINING_STATUS_VALUE),
+        CharDef(TRAINING_STATUS, (PROP_READ.toInt() or PROP_NOTIFY.toInt()).toByte(), FtmsServiceMetadata.TRAINING_STATUS_VALUE),
+        CharDef(FITNESS_MACHINE_STATUS, PROP_NOTIFY, null),
     )
 
     private val cpsChars = listOf(
@@ -78,6 +79,7 @@ class WifiServiceDefinition(deviceInfo: DeviceInfo) {
         val FTMS_CONTROL_POINT = ShortUuid(FtmsServiceMetadata.FTMS_CONTROL_POINT)
         val TRAINER_CONTROL = ShortUuid(FtmsServiceMetadata.TRAINER_CONTROL)
         val TRAINING_STATUS = ShortUuid(FtmsServiceMetadata.TRAINING_STATUS)
+        val FITNESS_MACHINE_STATUS = ShortUuid(FtmsServiceMetadata.FITNESS_MACHINE_STATUS)
 
         // CPS characteristics
         val CPS_FEATURE = ShortUuid(FtmsServiceMetadata.CPS_FEATURE)

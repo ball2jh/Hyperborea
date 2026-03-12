@@ -175,6 +175,30 @@ class FitProAdapter @Inject constructor(
         }
     }
 
+    override suspend fun identify(): DeviceInfo? {
+        try {
+            val result = transportFactory.create(FITPRO_VENDOR_ID, FITPRO_PRODUCT_ID_V1)
+            val transport = result.transport
+            val productId = result.productId
+
+            val baseInfo = DeviceDatabase.fromProductId(productId) ?: return null
+
+            val session = when (productId) {
+                FITPRO_PRODUCT_ID_V1 -> V1Session(transport, logger, scope, baseInfo)
+                FITPRO_PRODUCT_ID_V2, FITPRO_PRODUCT_ID_V2_FTDI -> V2Session(transport, logger, scope, baseInfo)
+                else -> return null
+            }
+
+            val identity = session.identify() ?: return baseInfo
+            val modelNumber = identity.model?.toIntOrNull()
+            return if (modelNumber != null) DeviceDatabase.fromModel(modelNumber) else baseInfo
+        } catch (e: CancellationException) { throw e }
+        catch (e: Exception) {
+            logger.e(TAG, "Identify failed", e)
+            return null
+        }
+    }
+
     override suspend fun disconnect() {
         if (_state.value is AdapterState.Inactive) return
         logger.i(TAG, "Disconnecting")

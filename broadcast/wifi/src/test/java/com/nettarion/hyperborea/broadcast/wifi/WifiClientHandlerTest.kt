@@ -89,8 +89,8 @@ class WifiClientHandlerTest {
         val resp = responses[0]
         assertThat(resp.id).isEqualTo(WifiCodec.ID_DISCOVER_CHARACTERISTICS)
         assertThat(resp.code).isEqualTo(WifiCodec.RESP_SUCCESS)
-        // 16 (service blob) + 8 * 17 (char entries) = 152
-        assertThat(resp.payload.size).isEqualTo(152)
+        // 16 (service blob) + 9 * 17 (char entries) = 169
+        assertThat(resp.payload.size).isEqualTo(169)
     }
 
     @Test

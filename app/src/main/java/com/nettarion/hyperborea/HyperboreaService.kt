@@ -14,6 +14,7 @@ import com.nettarion.hyperborea.core.adapter.HardwareAdapter
 import com.nettarion.hyperborea.core.orchestration.BroadcastManager
 import com.nettarion.hyperborea.core.orchestration.Orchestrator
 import com.nettarion.hyperborea.core.orchestration.OrchestratorState
+import com.nettarion.hyperborea.core.profile.UserPreferences
 import com.nettarion.hyperborea.overlay.OverlayManager
 import dagger.hilt.android.AndroidEntryPoint
 import kotlinx.coroutines.CoroutineScope
@@ -29,6 +30,7 @@ class HyperboreaService : Service() {
     @Inject lateinit var orchestrator: Orchestrator
     @Inject lateinit var broadcastManager: BroadcastManager
     @Inject lateinit var hardwareAdapter: HardwareAdapter
+    @Inject lateinit var userPreferences: UserPreferences
     @Inject lateinit var logger: AppLogger
     @Inject lateinit var scope: CoroutineScope
     @Inject lateinit var licenseChecker: LicenseChecker
@@ -45,13 +47,17 @@ class HyperboreaService : Service() {
             context = this,
             orchestrator = orchestrator,
             hardwareAdapter = hardwareAdapter,
+            overlayEnabled = userPreferences.overlayEnabled,
             logger = logger,
             scope = scope,
             onPause = { pause() },
             onResume = { resume() },
             onStop = { deactivate(saveRide = true) },
         )
-        scope.launch { broadcastManager.start() }
+        scope.launch {
+            orchestrator.probe()
+            broadcastManager.start()
+        }
         startStateObserver()
         logger.i(TAG, "Service created")
     }

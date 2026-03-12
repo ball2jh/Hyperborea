@@ -15,6 +15,7 @@ data class DashboardUiState(
     val broadcasts: List<BroadcastUiState>,
     val systemStatus: SystemStatus,
     val profileName: String? = null,
+    val sensorState: AdapterState = AdapterState.Inactive,
 )
 
 data class BroadcastUiState(

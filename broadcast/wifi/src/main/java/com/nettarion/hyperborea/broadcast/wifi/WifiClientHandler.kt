@@ -89,6 +89,11 @@ class WifiClientHandler(
             )
             sendNotification(WifiCodec.encodeNotification(WifiServiceDefinition.CPS_MEASUREMENT, value))
         }
+
+        if (enabledNotifications.contains(WifiServiceDefinition.TRAINING_STATUS)) {
+            val value = FtmsDataEncoder.encodeTrainingStatus(data.workoutMode)
+            sendNotification(WifiCodec.encodeNotification(WifiServiceDefinition.TRAINING_STATUS, value))
+        }
     }
 
     fun close() {
@@ -101,12 +106,28 @@ class WifiClientHandler(
 
     private suspend fun handleRequest(request: WifiMessage.Request) {
         when (request) {
-            is WifiMessage.DiscoverServices -> handleDiscoverServices(request)
-            is WifiMessage.DiscoverCharacteristics -> handleDiscoverCharacteristics(request)
-            is WifiMessage.ReadCharacteristic -> handleReadCharacteristic(request)
-            is WifiMessage.WriteCharacteristic -> handleWriteCharacteristic(request)
-            is WifiMessage.EnableNotifications -> handleEnableNotifications(request)
+            is WifiMessage.DiscoverServices -> {
+                logger.d(TAG, "[$clientId] TNP DiscoverServices")
+                handleDiscoverServices(request)
+            }
+            is WifiMessage.DiscoverCharacteristics -> {
+                logger.d(TAG, "[$clientId] TNP DiscoverCharacteristics service=${request.serviceUuid}")
+                handleDiscoverCharacteristics(request)
+            }
+            is WifiMessage.ReadCharacteristic -> {
+                logger.d(TAG, "[$clientId] TNP ReadCharacteristic char=${request.charUuid}")
+                handleReadCharacteristic(request)
+            }
+            is WifiMessage.WriteCharacteristic -> {
+                logger.d(TAG, "[$clientId] TNP WriteCharacteristic char=${request.charUuid} len=${request.value.size}")
+                handleWriteCharacteristic(request)
+            }
+            is WifiMessage.EnableNotifications -> {
+                logger.d(TAG, "[$clientId] TNP EnableNotifications char=${request.charUuid} enable=${request.enable}")
+                handleEnableNotifications(request)
+            }
             is WifiMessage.UnknownCompat -> {
+                logger.d(TAG, "[$clientId] TNP UnknownCompat seq=${request.sequence}")
                 send(WifiCodec.encodeResponse(WifiCodec.ID_UNKNOWN_COMPAT, request.sequence, WifiCodec.RESP_SUCCESS))
             }
         }
@@ -124,8 +145,12 @@ class WifiClientHandler(
     private suspend fun handleDiscoverCharacteristics(request: WifiMessage.DiscoverCharacteristics) {
         val chars = serviceDef.characteristicsFor(request.serviceUuid)
         if (chars == null) {
+            logger.d(TAG, "[$clientId] TNP DiscoverCharacteristics: service ${request.serviceUuid} not found")
             send(WifiCodec.encodeResponse(WifiCodec.ID_DISCOVER_CHARACTERISTICS, request.sequence, WifiCodec.RESP_SERVICE_NOT_FOUND))
             return
+        }
+        for ((uuid, props) in chars) {
+            logger.d(TAG, "[$clientId]   char=$uuid props=0x${(props.toInt() and 0xFF).toString(16).padStart(2, '0')}")
         }
         val serviceBlob = WifiCodec.encodeUuidBlob(request.serviceUuid)
         val payload = ByteArray(16 + chars.size * 17)

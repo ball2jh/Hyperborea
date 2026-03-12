@@ -24,6 +24,16 @@ class ProfileUserPreferences(
             .map { it?.enabledBroadcasts ?: BroadcastId.entries.toSet() }
             .stateIn(scope, SharingStarted.Eagerly, BroadcastId.entries.toSet())
 
+    override val overlayEnabled: StateFlow<Boolean> =
+        profileRepository.activeProfile
+            .map { it?.overlayEnabled ?: false }
+            .stateIn(scope, SharingStarted.Eagerly, false)
+
+    override val savedSensorAddress: StateFlow<String?> =
+        profileRepository.activeProfile
+            .map { it?.savedSensorAddress }
+            .stateIn(scope, SharingStarted.Eagerly, null)
+
     private val toggleMutex = Mutex()
 
     override fun setBroadcastEnabled(id: BroadcastId, enabled: Boolean) {
@@ -35,6 +45,26 @@ class ProfileUserPreferences(
                 if (enabled) current.add(id) else current.remove(id)
                 val updated = profile.copy(enabledBroadcasts = current)
                 profileRepository.updateProfile(updated)
+            }
+        }
+    }
+
+    override fun setOverlayEnabled(enabled: Boolean) {
+        scope.launch {
+            toggleMutex.withLock {
+                val profile = profileRepository.activeProfile.value ?: return@withLock
+                logger.i(TAG, "Overlay ${if (enabled) "enabled" else "disabled"}")
+                profileRepository.updateProfile(profile.copy(overlayEnabled = enabled))
+            }
+        }
+    }
+
+    override fun setSavedSensorAddress(address: String?) {
+        scope.launch {
+            toggleMutex.withLock {
+                val profile = profileRepository.activeProfile.value ?: return@withLock
+                logger.i(TAG, "Sensor address ${address ?: "cleared"}")
+                profileRepository.updateProfile(profile.copy(savedSensorAddress = address))
             }
         }
     }
