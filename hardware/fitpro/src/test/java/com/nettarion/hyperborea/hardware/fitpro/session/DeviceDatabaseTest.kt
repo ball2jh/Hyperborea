@@ -242,6 +242,43 @@ class DeviceDatabaseTest {
 
     // ── Catalog Summary ──
 
+    // ── Derived Max Power ──
+
+    @Test
+    fun `fromHandshake with S22i derives maxPower from power curve`() {
+        val info = DeviceDatabase.fromHandshake(0, 425738)
+        assertThat(info.maxPower).isEqualTo(3187)
+    }
+
+    @Test
+    fun `fromHandshake with unknown part falls back to type default maxPower`() {
+        val info = DeviceDatabase.fromHandshake(0, 1)
+        assertThat(info.maxPower).isEqualTo(2000) // BIKE default
+    }
+
+    @Test
+    fun `defaultsForType TREADMILL has 1200 maxPower`() {
+        val info = DeviceDatabase.defaultsForType(DeviceType.TREADMILL)
+        assertThat(info.maxPower).isEqualTo(1200)
+    }
+
+    @Test
+    fun `PowerCurves maxPower for table 17 is 3187`() {
+        assertThat(PowerCurves.maxPower(17)).isEqualTo(3187)
+    }
+
+    @Test
+    fun `PowerCurves maxPower for negative index returns null`() {
+        assertThat(PowerCurves.maxPower(-1)).isNull()
+    }
+
+    @Test
+    fun `PowerCurves maxPower for out of bounds index returns null`() {
+        assertThat(PowerCurves.maxPower(32)).isNull()
+    }
+
+    // ── Catalog Summary ──
+
     @Test
     fun `catalogSummary returns diagnostic string for known part`() {
         val summary = DeviceDatabase.catalogSummary(392570)
@@ -251,6 +288,7 @@ class DeviceDatabaseTest {
         assertThat(summary).contains("bike")
         assertThat(summary).contains("res=0-24")
         assertThat(summary).contains("incline=-10..20")
+        assertThat(summary).contains("power=0-3187W")
         assertThat(summary).contains("curve=17")
     }
 

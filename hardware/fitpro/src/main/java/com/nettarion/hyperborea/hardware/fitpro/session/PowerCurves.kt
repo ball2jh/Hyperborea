@@ -11,6 +11,12 @@ object PowerCurves {
         override fun hashCode() = 31 * rpm + watts.contentHashCode()
     }
 
+    fun maxPower(tableIndex: Int): Int? {
+        val table = tables.getOrNull(tableIndex) ?: return null
+        if (table.isEmpty()) return null
+        return table.maxOf { row -> row.watts.max() }
+    }
+
     val tables: Array<List<Row>> = arrayOf(
         listOf( // table 0
             Row(20, intArrayOf(6, 7, 7, 7, 9, 10, 13, 21, 28, 29, 29)),
