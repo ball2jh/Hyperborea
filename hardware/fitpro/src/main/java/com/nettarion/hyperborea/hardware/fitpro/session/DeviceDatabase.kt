@@ -53,7 +53,7 @@ object DeviceDatabase {
         minResistance = if (type == DeviceType.TREADMILL) 0 else 1,
         minIncline = defaultMinIncline(type),
         maxIncline = defaultMaxIncline(type),
-        maxPower = 2000,
+        maxPower = defaultMaxPower(type),
         minPower = 0,
         powerStep = 1,
         resistanceStep = 1.0f,
@@ -82,6 +82,7 @@ object DeviceDatabase {
         val maxSpd = IfitDeviceCatalog.maxSpeedTenthsKph[idx].toInt()
         val spdKph = if (maxSpd > 0) "${maxSpd / 10}.${maxSpd % 10}kph" else "0kph"
         val curve = IfitDeviceCatalog.powerCurveIndices[idx].toInt()
+        val maxPower = if (curve >= 0) PowerCurves.maxPower(curve) else null
 
         return buildString {
             append(name)
@@ -90,6 +91,7 @@ object DeviceDatabase {
             append(" res=0-$maxRes")
             append(" incline=$minInc..$maxInc")
             append(" speed=$spdKph")
+            append(" power=0-${maxPower ?: "?"}W")
             append(" curve=$curve")
         }
     }
@@ -148,7 +150,8 @@ object DeviceDatabase {
             minResistance = if (t == DeviceType.TREADMILL) 0 else 1,
             minIncline = minIncline ?: defaultMinIncline(t),
             maxIncline = maxIncline ?: defaultMaxIncline(t),
-            maxPower = 2000,
+            maxPower = powerCurveIndex?.let { PowerCurves.maxPower(it) }
+                ?: defaultMaxPower(t),
             minPower = 0,
             powerStep = 1,
             resistanceStep = 1.0f,
@@ -199,6 +202,13 @@ object DeviceDatabase {
         DeviceType.TREADMILL -> 40f
         DeviceType.ROWER -> 0f
         DeviceType.ELLIPTICAL -> 15f
+    }
+
+    private fun defaultMaxPower(type: DeviceType): Int = when (type) {
+        DeviceType.BIKE -> 2000
+        DeviceType.TREADMILL -> 1200
+        DeviceType.ROWER -> 1000
+        DeviceType.ELLIPTICAL -> 1500
     }
 
     private fun defaultMaxSpeed(type: DeviceType): Float = when (type) {
