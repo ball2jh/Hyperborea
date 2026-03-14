@@ -36,8 +36,10 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.nettarion.hyperborea.core.model.DerivedMetrics
 import com.nettarion.hyperborea.core.model.RideSummary
 import com.nettarion.hyperborea.core.model.WorkoutSample
+import com.nettarion.hyperborea.core.model.ZoneDistribution
 import com.nettarion.hyperborea.ui.theme.Amber
 import com.nettarion.hyperborea.ui.theme.ElectricBlue
 import com.nettarion.hyperborea.ui.theme.LocalHyperboreaColors
@@ -60,6 +62,7 @@ fun RideDetailScreen(
     val summary by viewModel.rideSummary.collectAsStateWithLifecycle()
     val samples by viewModel.samples.collectAsStateWithLifecycle()
     val profile by viewModel.profile.collectAsStateWithLifecycle()
+    val derived by viewModel.derivedMetrics.collectAsStateWithLifecycle()
     val exportResult by viewModel.exportResult.collectAsStateWithLifecycle()
     val colors = LocalHyperboreaColors.current
 
@@ -124,6 +127,7 @@ fun RideDetailScreen(
                     modifier = Modifier
                         .fillMaxHeight()
                         .weight(0.35f)
+                        .verticalScroll(rememberScrollState())
                         .padding(20.dp),
                 ) {
                     val useImperial = profile?.useImperial == true
@@ -131,9 +135,9 @@ fun RideDetailScreen(
                     Text("Summary", style = MaterialTheme.typography.titleSmall, color = colors.textHigh)
                     Spacer(Modifier.height(12.dp))
 
-                    SummaryStats(ride, useImperial)
+                    SummaryStats(ride, derived, samples, useImperial)
 
-                    Spacer(Modifier.weight(1f))
+                    Spacer(Modifier.height(16.dp))
 
                     Button(
                         onClick = viewModel::exportFit,
@@ -192,7 +196,12 @@ private fun ChartIfData(
 }
 
 @Composable
-private fun SummaryStats(ride: RideSummary, useImperial: Boolean) {
+private fun SummaryStats(
+    ride: RideSummary,
+    derived: DerivedMetrics?,
+    samples: List<WorkoutSample>,
+    useImperial: Boolean,
+) {
     val colors = LocalHyperboreaColors.current
 
     @Composable
@@ -206,6 +215,13 @@ private fun SummaryStats(ride: RideSummary, useImperial: Boolean) {
             Text(label, style = MaterialTheme.typography.bodySmall, color = colors.textMedium)
             Text(value, style = MaterialTheme.typography.bodySmall, color = colors.textHigh)
         }
+    }
+
+    @Composable
+    fun sectionHeader(title: String) {
+        HorizontalDivider(Modifier.padding(top = 12.dp, bottom = 4.dp), color = colors.divider)
+        Text(title, style = MaterialTheme.typography.labelSmall, color = colors.textMedium)
+        Spacer(Modifier.height(4.dp))
     }
 
     stat("Distance", UnitFormatter.distanceDisplay(ride.distanceKm, useImperial))
@@ -240,6 +256,142 @@ private fun SummaryStats(ride: RideSummary, useImperial: Boolean) {
     ride.avgIncline?.let { stat("Avg Incline", String.format(Locale.US, "%.1f%%", it)) }
     ride.maxIncline?.let { stat("Max Incline", String.format(Locale.US, "%.1f%%", it)) }
     ride.totalElevationGainMeters?.let { stat("Elevation", UnitFormatter.elevationDisplay(it, useImperial)) }
+
+    // Analysis section
+    if (derived != null) {
+        val hasAnalysis = listOfNotNull(
+            derived.workKj, derived.variabilityIndex, derived.efficiencyFactor,
+            derived.avgPowerPerKg, derived.maxPowerPerKg, derived.caloriesPerHour,
+        ).isNotEmpty()
+
+        if (hasAnalysis) {
+            sectionHeader("Analysis")
+            derived.workKj?.let { stat("Work", "${it.toInt()} kJ") }
+            derived.variabilityIndex?.let { stat("VI", String.format(Locale.US, "%.2f", it)) }
+            derived.efficiencyFactor?.let { stat("EF", String.format(Locale.US, "%.2f", it)) }
+            derived.avgPowerPerKg?.let { stat("Avg W/kg", String.format(Locale.US, "%.2f W/kg", it)) }
+            derived.maxPowerPerKg?.let { stat("Max W/kg", String.format(Locale.US, "%.2f W/kg", it)) }
+            derived.caloriesPerHour?.let { stat("Cal/hr", String.format(Locale.US, "%.0f", it)) }
+        }
+    }
+
+    // Power Zones section
+    val hasPowerData = samples.any { it.power != null }
+    val pz = derived?.powerZones
+    if (pz != null) {
+        ZoneSection("Power Zones (FTP: ${pz.referenceValue}W)", pz)
+    } else if (hasPowerData) {
+        sectionHeader("Power Zones")
+        Text(
+            "Set FTP in your profile to see power zones",
+            style = MaterialTheme.typography.bodySmall,
+            color = colors.textMedium,
+        )
+    }
+
+    // HR Zones section
+    val hasHrData = samples.any { it.heartRate != null }
+    val hz = derived?.hrZones
+    if (hz != null) {
+        ZoneSection("HR Zones (Max: ${hz.referenceValue} bpm)", hz)
+    } else if (hasHrData) {
+        sectionHeader("HR Zones")
+        Text(
+            "Set max HR in your profile to see heart rate zones",
+            style = MaterialTheme.typography.bodySmall,
+            color = colors.textMedium,
+        )
+    }
+}
+
+@Composable
+private fun ZoneSection(title: String, distribution: ZoneDistribution) {
+    val colors = LocalHyperboreaColors.current
+    HorizontalDivider(Modifier.padding(top = 12.dp, bottom = 4.dp), color = colors.divider)
+    Text(title, style = MaterialTheme.typography.labelSmall, color = colors.textMedium)
+    Spacer(Modifier.height(6.dp))
+
+    val maxSeconds = distribution.zones.maxOf { it.seconds }.coerceAtLeast(1)
+    val zoneColors = if (distribution.zones.size == 7) PowerZoneColors else HrZoneColors
+
+    distribution.zones.forEachIndexed { index, zone ->
+        if (zone.seconds > 0) {
+            ZoneBar(
+                name = zone.name,
+                seconds = zone.seconds,
+                fraction = zone.seconds.toFloat() / maxSeconds,
+                color = zoneColors.getOrElse(index) { colors.textMedium },
+            )
+        }
+    }
+}
+
+@Composable
+private fun ZoneBar(
+    name: String,
+    seconds: Int,
+    fraction: Float,
+    color: androidx.compose.ui.graphics.Color,
+) {
+    val colors = LocalHyperboreaColors.current
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(vertical = 2.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text(
+            text = name,
+            style = MaterialTheme.typography.bodySmall,
+            color = colors.textMedium,
+            modifier = Modifier.width(110.dp),
+            fontSize = 10.sp,
+        )
+        Box(
+            modifier = Modifier
+                .weight(1f)
+                .height(14.dp),
+        ) {
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth(fraction.coerceIn(0.02f, 1f))
+                    .fillMaxHeight()
+                    .background(color, RoundedCornerShape(3.dp)),
+            )
+        }
+        Text(
+            text = formatZoneTime(seconds),
+            style = MaterialTheme.typography.bodySmall,
+            color = colors.textHigh,
+            modifier = Modifier.width(48.dp),
+            fontSize = 10.sp,
+            textAlign = androidx.compose.ui.text.style.TextAlign.End,
+        )
+    }
+}
+
+private val PowerZoneColors = listOf(
+    androidx.compose.ui.graphics.Color(0xFF94A3B8), // Z1 gray
+    androidx.compose.ui.graphics.Color(0xFF3B82F6), // Z2 blue
+    androidx.compose.ui.graphics.Color(0xFF22C55E), // Z3 green
+    androidx.compose.ui.graphics.Color(0xFFF59E0B), // Z4 amber
+    androidx.compose.ui.graphics.Color(0xFFF97316), // Z5 orange
+    androidx.compose.ui.graphics.Color(0xFFEF4444), // Z6 red
+    androidx.compose.ui.graphics.Color(0xFFDC2626), // Z7 deep red
+)
+
+private val HrZoneColors = listOf(
+    androidx.compose.ui.graphics.Color(0xFF94A3B8), // Z1 gray
+    androidx.compose.ui.graphics.Color(0xFF3B82F6), // Z2 blue
+    androidx.compose.ui.graphics.Color(0xFF22C55E), // Z3 green
+    androidx.compose.ui.graphics.Color(0xFFF59E0B), // Z4 amber
+    androidx.compose.ui.graphics.Color(0xFFEF4444), // Z5 red
+)
+
+private fun formatZoneTime(seconds: Int): String {
+    val m = seconds / 60
+    val s = seconds % 60
+    return if (m > 0) "${m}m${s}s" else "${s}s"
 }
 
 private fun formatDuration(seconds: Long): String {
