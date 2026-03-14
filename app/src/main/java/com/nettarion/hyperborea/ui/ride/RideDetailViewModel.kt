@@ -7,8 +7,10 @@ import androidx.lifecycle.viewModelScope
 import com.nettarion.hyperborea.core.AppLogger
 import com.nettarion.hyperborea.core.fit.FitActivityBuilder
 import com.nettarion.hyperborea.core.model.Profile
+import com.nettarion.hyperborea.core.model.DerivedMetrics
 import com.nettarion.hyperborea.core.model.RideSummary
 import com.nettarion.hyperborea.core.model.WorkoutSample
+import com.nettarion.hyperborea.core.model.computeDerivedMetrics
 import com.nettarion.hyperborea.core.profile.ProfileRepository
 import com.nettarion.hyperborea.ui.admin.ExportResult
 import dagger.hilt.android.lifecycle.HiltViewModel
@@ -18,6 +20,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.filterNotNull
 import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.stateIn
@@ -50,6 +53,10 @@ class RideDetailViewModel @Inject constructor(
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
     val profile: StateFlow<Profile?> = profileRepository.activeProfile
+
+    val derivedMetrics: StateFlow<DerivedMetrics?> = combine(rideSummary, samples, profile) { s, sa, p ->
+        if (s != null) computeDerivedMetrics(s, sa, p) else null
+    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), null)
 
     private val _exportResult = MutableStateFlow<ExportResult?>(null)
     val exportResult: StateFlow<ExportResult?> = _exportResult.asStateFlow()
