@@ -1,4 +1,4 @@
-package com.nettarion.hyperborea.core.fit
+package com.nettarion.hyperborea.core.fitfile
 
 import com.nettarion.hyperborea.core.model.RideSummary
 import com.nettarion.hyperborea.core.model.WorkoutSample

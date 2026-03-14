@@ -386,7 +386,7 @@ class OrchestratorTest {
         val env = TestEnv(this)
         env.orchestrator.start()
         env.orchestrator.stop()
-        // Broadcasts should still be running (BroadcastManager not stopped),
+        // Broadcasts keep running (BroadcastManager not stopped — service lifecycle),
         // but data source disconnected. Verify orchestrator reached Idle.
         assertThat(env.orchestrator.state.value).isEqualTo(OrchestratorState.Idle)
     }
@@ -516,6 +516,68 @@ class OrchestratorTest {
         assertThat(env.broadcast1.startCalled).isTrue()
     }
 
+    // --- DMK safety key handling ---
+
+    @Test
+    fun `DMK workoutMode 8 transitions Running to Paused`() = runTest {
+        val env = TestEnv(this)
+        env.orchestrator.start()
+        assertThat(env.orchestrator.state.value).isEqualTo(OrchestratorState.Running())
+
+        // Emit exercise data with DMK workout mode
+        env.hardware.exerciseData.value = ExerciseData(
+            power = 0, cadence = 0, speed = 0f, resistance = 0,
+            incline = 0f, heartRate = null, distance = null, calories = null,
+            elapsedTime = 60, workoutMode = 8,
+        )
+        advanceUntilIdle()
+
+        assertThat(env.orchestrator.state.value).isEqualTo(OrchestratorState.Paused)
+    }
+
+    @Test
+    fun `IDLE workoutMode 1 after DMK transitions Paused to Running`() = runTest {
+        val env = TestEnv(this)
+        env.orchestrator.start()
+
+        // First go to Paused via DMK
+        env.hardware.exerciseData.value = ExerciseData(
+            power = 0, cadence = 0, speed = 0f, resistance = 0,
+            incline = 0f, heartRate = null, distance = null, calories = null,
+            elapsedTime = 60, workoutMode = 8,
+        )
+        advanceUntilIdle()
+        assertThat(env.orchestrator.state.value).isEqualTo(OrchestratorState.Paused)
+
+        // Then re-insert safety key (IDLE mode)
+        env.hardware.exerciseData.value = ExerciseData(
+            power = 0, cadence = 0, speed = 0f, resistance = 0,
+            incline = 0f, heartRate = null, distance = null, calories = null,
+            elapsedTime = 60, workoutMode = 1,
+        )
+        advanceUntilIdle()
+
+        assertThat(env.orchestrator.state.value).isEqualTo(OrchestratorState.Running())
+        assertThat(env.hardware.receivedCommands).contains(DeviceCommand.ResumeWorkout)
+    }
+
+    @Test
+    fun `DMK is no-op when not Running`() = runTest {
+        val env = TestEnv(this)
+        env.orchestrator.start()
+        env.orchestrator.pause() // manually paused
+
+        env.hardware.exerciseData.value = ExerciseData(
+            power = 0, cadence = 0, speed = 0f, resistance = 0,
+            incline = 0f, heartRate = null, distance = null, calories = null,
+            elapsedTime = 60, workoutMode = 8,
+        )
+        advanceUntilIdle()
+
+        // Should stay Paused (was already paused)
+        assertThat(env.orchestrator.state.value).isEqualTo(OrchestratorState.Paused)
+    }
+
     // --- Fakes ---
 
     private class TestEnv(
@@ -560,6 +622,7 @@ class OrchestratorTest {
                 hardwareAdapter = hardware,
                 broadcastManager = broadcastManager,
                 rideRecorder = rideRecorder,
+                userPreferences = preferences,
                 logger = logger,
                 scope = scope,
                 sensorAdapter = sensorAdapter,
@@ -641,6 +704,7 @@ class OrchestratorTest {
         }
 
         override fun setInitialElapsedTime(seconds: Long) {}
+        override fun refreshDeviceInfo() {}
     }
 
     private class FakeUserPreferences(
@@ -649,6 +713,7 @@ class OrchestratorTest {
         override val enabledBroadcasts = MutableStateFlow(enabled)
         override val overlayEnabled = MutableStateFlow(false)
         override val savedSensorAddress = MutableStateFlow<String?>(null)
+        override val fanMode = MutableStateFlow(com.nettarion.hyperborea.core.model.FanMode.OFF)
         override fun setBroadcastEnabled(id: BroadcastId, enabled: Boolean) {
             val current = enabledBroadcasts.value.toMutableSet()
             if (enabled) current.add(id) else current.remove(id)
@@ -659,6 +724,9 @@ class OrchestratorTest {
         }
         override fun setSavedSensorAddress(address: String?) {
             savedSensorAddress.value = address
+        }
+        override fun setFanMode(mode: com.nettarion.hyperborea.core.model.FanMode) {
+            fanMode.value = mode
         }
     }
 

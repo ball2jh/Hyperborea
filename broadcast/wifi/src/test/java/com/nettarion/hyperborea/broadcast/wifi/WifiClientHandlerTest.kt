@@ -461,9 +461,11 @@ class WifiClientHandlerTest {
 
         handler.runReadLoop()
 
-        assertThat(commands).hasSize(1)
-        val cmd = commands[0] as DeviceCommand.SetIncline
-        assertThat(cmd.percent).isEqualTo(5.0f)
+        assertThat(commands).hasSize(2)
+        val fanCmd = commands[0] as DeviceCommand.SetFanSpeed
+        assertThat(fanCmd.level).isEqualTo(0) // wind=0 → OFF
+        val inclineCmd = commands[1] as DeviceCommand.SetIncline
+        assertThat(inclineCmd.percent).isEqualTo(5.0f)
     }
 
     @Test

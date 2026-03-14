@@ -104,7 +104,7 @@ fun WorkoutChart(
         }
 
         // Label + stats overlay
-        val labelText = "$label ($unit)"
+        val labelText = if (unit.isNotEmpty()) "$label ($unit)" else label
         val labelResult = textMeasurer.measure(labelText, TextStyle(color = TextMedium, fontSize = 10.sp))
         drawText(labelResult, topLeft = Offset(chartLeft + 4f, 2f))
 

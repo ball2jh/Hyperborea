@@ -18,6 +18,9 @@ class FtmsDataEncoderTest {
         distance: Float? = null,
         calories: Int? = null,
         elapsedTime: Long = 0L,
+        verticalGain: Float? = null,
+        strokeRate: Int? = null,
+        strokeCount: Int? = null,
     ) = ExerciseData(
         power = power,
         cadence = cadence,
@@ -28,6 +31,9 @@ class FtmsDataEncoderTest {
         distance = distance,
         calories = calories,
         elapsedTime = elapsedTime,
+        verticalGain = verticalGain,
+        strokeRate = strokeRate,
+        strokeCount = strokeCount,
     )
 
     // --- encodeData dispatch ---
@@ -260,6 +266,26 @@ class FtmsDataEncoderTest {
     }
 
     @Test
+    fun `encodeTreadmillData with vertical gain sets bit 5 and encodes elevation gain`() {
+        val data = exerciseData(verticalGain = 123.4f) // 123.4 meters
+        val result = FtmsDataEncoder.encodeTreadmillData(data)
+        val flags = uint16LE(result, 0)
+        assertThat(flags and (1 shl 5)).isNotEqualTo(0)
+        // Positive gain: 123.4 * 10 = 1234
+        assertThat(uint16LE(result, 4)).isEqualTo(1234)
+        // Negative gain: 0
+        assertThat(uint16LE(result, 6)).isEqualTo(0)
+    }
+
+    @Test
+    fun `encodeTreadmillData without vertical gain does not set bit 5`() {
+        val data = exerciseData()
+        val result = FtmsDataEncoder.encodeTreadmillData(data)
+        val flags = uint16LE(result, 0)
+        assertThat(flags and (1 shl 5)).isEqualTo(0)
+    }
+
+    @Test
     fun `encodeTreadmillData with all fields`() {
         val data = exerciseData(
             speed = 10.0f, incline = 3.0f, power = 200,
@@ -376,6 +402,29 @@ class FtmsDataEncoderTest {
         assertThat(flags and (1 shl 8)).isNotEqualTo(0)    // energy
         assertThat(flags and (1 shl 9)).isNotEqualTo(0)    // heart rate
         assertThat(flags and (1 shl 11)).isNotEqualTo(0)   // elapsed time
+    }
+
+    @Test
+    fun `encodeRowerData uses strokeRate over cadence when both present`() {
+        val data = exerciseData(strokeRate = 24, cadence = 90)
+        val result = FtmsDataEncoder.encodeRowerData(data)
+        // Stroke rate: 24 * 2 = 48 (not 90 * 2 = 180)
+        assertThat(result[2].toInt() and 0xFF).isEqualTo(48)
+    }
+
+    @Test
+    fun `encodeRowerData falls back to cadence when strokeRate is null`() {
+        val data = exerciseData(cadence = 30)
+        val result = FtmsDataEncoder.encodeRowerData(data)
+        // Cadence fallback: 30 * 2 = 60
+        assertThat(result[2].toInt() and 0xFF).isEqualTo(60)
+    }
+
+    @Test
+    fun `encodeRowerData encodes actual strokeCount`() {
+        val data = exerciseData(strokeCount = 500)
+        val result = FtmsDataEncoder.encodeRowerData(data)
+        assertThat(uint16LE(result, 3)).isEqualTo(500)
     }
 
     // --- Cross Trainer Data ---

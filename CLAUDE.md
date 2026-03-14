@@ -21,6 +21,10 @@ Hyperborea is an Android app that bridges ICON Fitness equipment (NordicTrack, P
 ./gradlew :core:test             # Run tests for a single module
 ```
 
+## Device Commands
+
+After rebooting the device, use `adb wait-for-device` to block until ADB reconnects before running subsequent commands (e.g., `adb wait-for-device shell am start ...`).
+
 ## Architecture
 
 ### Module Dependency Graph
@@ -54,7 +58,7 @@ When modifying or extending the codebase, investigate the existing code to under
 - **Read/write split for system interaction.** Passive observation (monitoring) and active mutation (control) are separate interfaces with different permissions and failure modes.
 - **Sealed types for exhaustive handling.** Commands and states use sealed interfaces so the compiler enforces exhaustive `when` handling.
 - **Composition root in `:app`.** Only `:app` knows about concrete implementations. Feature modules never import each other. DI modules use `@Binds` for interface binding.
-- **Logging convention.** Use a `TAG` companion constant per class. Inject the logger interface from `:core`. Logcat tags are prefixed `Hyperborea.`, filterable with `adb logcat -s "Hyperborea.*"`.
+- **Logging convention.** Use a `TAG` companion constant per class. Inject the logger interface from `:core`. Logcat tags are prefixed `Hyperborea.`. Filter with `adb logcat -d | grep "Hyperborea\."` — the `-s` flag requires exact tag names (no wildcards on API 25).
 
 ### Data Flow
 

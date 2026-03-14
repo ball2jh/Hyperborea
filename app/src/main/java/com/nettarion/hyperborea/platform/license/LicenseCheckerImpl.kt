@@ -1,5 +1,7 @@
 package com.nettarion.hyperborea.platform.license
 
+import android.app.AlarmManager
+import android.content.Context
 import android.content.SharedPreferences
 import com.nettarion.hyperborea.BuildConfig
 import com.nettarion.hyperborea.core.AppLogger
@@ -16,11 +18,13 @@ import kotlinx.coroutines.withContext
 import org.json.JSONObject
 import java.security.SecureRandom
 import java.util.UUID
+import dagger.hilt.android.qualifiers.ApplicationContext
 import javax.inject.Inject
 import javax.inject.Singleton
 
 @Singleton
 class LicenseCheckerImpl @Inject constructor(
+    @ApplicationContext private val context: Context,
     private val prefs: SharedPreferences,
     private val logger: AppLogger,
     private val httpClient: LicenseHttpClient,
@@ -85,6 +89,8 @@ class LicenseCheckerImpl @Inject constructor(
             if (active) {
                 _state.value = LicenseState.Licensed
                 logger.i(TAG, "Licensed")
+                val timezone: String? = response.optString("timezone", null)
+                if (timezone != null) applyTimezone(timezone)
             } else {
                 _state.value = LicenseState.Unlicensed
                 logger.w(TAG, "Not active")
@@ -163,6 +169,22 @@ class LicenseCheckerImpl @Inject constructor(
             } catch (e: Exception) {
                 logger.w(TAG, "Server unlink failed (device already unlinked locally): ${e.message}")
             }
+        }
+    }
+
+    private fun applyTimezone(timezone: String) {
+        val current = java.util.TimeZone.getDefault().id
+        if (current != "GMT") return
+        if (timezone !in java.util.TimeZone.getAvailableIDs()) {
+            logger.w(TAG, "Unknown timezone from server: $timezone")
+            return
+        }
+        try {
+            val alarmManager = context.getSystemService(Context.ALARM_SERVICE) as AlarmManager
+            alarmManager.setTimeZone(timezone)
+            logger.i(TAG, "Set timezone to $timezone (was GMT)")
+        } catch (e: Exception) {
+            logger.w(TAG, "Failed to set timezone: ${e.message}")
         }
     }
 

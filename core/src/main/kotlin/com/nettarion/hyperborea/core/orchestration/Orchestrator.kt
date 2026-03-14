@@ -9,7 +9,9 @@ import com.nettarion.hyperborea.core.adapter.SensorReading
 import com.nettarion.hyperborea.core.model.DeviceCommand
 import com.nettarion.hyperborea.core.model.DeviceInfo
 import com.nettarion.hyperborea.core.model.ExerciseData
+import com.nettarion.hyperborea.core.model.FanMode
 import com.nettarion.hyperborea.core.profile.RideRecorder
+import com.nettarion.hyperborea.core.profile.UserPreferences
 import com.nettarion.hyperborea.core.system.SystemController
 import com.nettarion.hyperborea.core.system.SystemMonitor
 
@@ -42,6 +44,7 @@ class Orchestrator(
     private val hardwareAdapter: HardwareAdapter,
     private val broadcastManager: BroadcastManager,
     private val rideRecorder: RideRecorder,
+    private val userPreferences: UserPreferences,
     private val logger: AppLogger,
     private val scope: CoroutineScope,
     private val sensorAdapter: SensorAdapter? = null,
@@ -54,6 +57,7 @@ class Orchestrator(
     private val mutex = Mutex()
     private var hardwareMonitorJob: Job? = null
     private var commandPipelineJob: Job? = null
+    private var workoutModeMonitorJob: Job? = null
 
     private val hardwareRetryPolicy = RetryPolicy(maxAttempts = 5, initialDelayMs = 2000, maxDelayMs = 15000)
     @Volatile
@@ -92,7 +96,10 @@ class Orchestrator(
     suspend fun start() {
         mutex.withLock {
             val current = _state.value
-            if (current is OrchestratorState.Running || current is OrchestratorState.Preparing || current is OrchestratorState.Paused) return
+            if (current is OrchestratorState.Running || current is OrchestratorState.Preparing || current is OrchestratorState.Paused) {
+                logger.d(TAG, "start() ignored (current state: $current)")
+                return
+            }
 
             try {
                 startInternal()
@@ -128,7 +135,10 @@ class Orchestrator(
     }
 
     private suspend fun startInternal() {
-        if (!ensureReady()) return
+        if (!ensureReady()) {
+            logger.d(TAG, "startInternal() aborted: ensureReady() failed")
+            return
+        }
 
         // Connect hardware
         _state.value = OrchestratorState.Preparing("Connecting to bike")
@@ -177,7 +187,35 @@ class Orchestrator(
 
         _state.value = OrchestratorState.Running()
         rideRecorder.start(mergedData.filterNotNull())
+
+        // Send fan AUTO command if configured
+        if (userPreferences.fanMode.value == FanMode.AUTO) {
+            hardwareAdapter.sendCommand(DeviceCommand.SetFanSpeed(4)) // AUTO
+        }
+
         logger.i(TAG, "Orchestrator running")
+
+        // DMK safety key monitor — pause on key removal, resume on re-insertion
+        workoutModeMonitorJob = scope.launch {
+            hardwareAdapter.exerciseData.filterNotNull()
+                .collect { data ->
+                    when (data.workoutMode) {
+                        WORKOUT_MODE_DMK -> {
+                            if (_state.value is OrchestratorState.Running) {
+                                logger.w(TAG, "Safety key removed — pausing")
+                                _state.value = OrchestratorState.Paused
+                            }
+                        }
+                        WORKOUT_MODE_IDLE -> {
+                            if (_state.value is OrchestratorState.Paused) {
+                                logger.i(TAG, "Safety key re-inserted — resuming")
+                                hardwareAdapter.sendCommand(DeviceCommand.ResumeWorkout)
+                                _state.value = OrchestratorState.Running()
+                            }
+                        }
+                    }
+                }
+        }
 
         // Hardware disconnect monitor — reconnect with backoff
         hardwareMonitorJob = scope.launch {
@@ -289,7 +327,10 @@ class Orchestrator(
 
     suspend fun pause() {
         mutex.withLock {
-            if (_state.value !is OrchestratorState.Running) return
+            if (_state.value !is OrchestratorState.Running) {
+                logger.d(TAG, "pause() ignored (not Running, current: ${_state.value})")
+                return
+            }
             hardwareAdapter.sendCommand(DeviceCommand.PauseWorkout)
             _state.value = OrchestratorState.Paused
             logger.i(TAG, "Orchestrator paused")
@@ -298,7 +339,10 @@ class Orchestrator(
 
     suspend fun resume() {
         mutex.withLock {
-            if (_state.value !is OrchestratorState.Paused) return
+            if (_state.value !is OrchestratorState.Paused) {
+                logger.d(TAG, "resume() ignored (not Paused, current: ${_state.value})")
+                return
+            }
             hardwareAdapter.sendCommand(DeviceCommand.ResumeWorkout)
             _state.value = OrchestratorState.Running()
             logger.i(TAG, "Orchestrator resumed")
@@ -308,7 +352,10 @@ class Orchestrator(
     suspend fun stop(saveRide: Boolean = true) {
         mutex.withLock {
             val current = _state.value
-            if (current is OrchestratorState.Idle || current is OrchestratorState.Stopping) return
+            if (current is OrchestratorState.Idle || current is OrchestratorState.Stopping) {
+                logger.d(TAG, "stop() ignored (current state: $current)")
+                return
+            }
 
             _state.value = OrchestratorState.Stopping
             preservedElapsedSeconds = 0L
@@ -321,7 +368,15 @@ class Orchestrator(
 
             hardwareMonitorJob?.cancel()
             hardwareMonitorJob = null
+            workoutModeMonitorJob?.cancel()
+            workoutModeMonitorJob = null
             isReconnecting = false
+
+            // Turn off fan if it was managed by Hyperborea
+            if (userPreferences.fanMode.value != FanMode.OFF) {
+                try { hardwareAdapter.sendCommand(DeviceCommand.SetFanSpeed(0)) }
+                catch (e: Exception) { logger.w(TAG, "Failed to turn off fan: ${e.message}") }
+            }
 
             hardwareAdapter.disconnect()
 
@@ -343,6 +398,8 @@ class Orchestrator(
 
         hardwareMonitorJob?.cancel()
         hardwareMonitorJob = null
+        workoutModeMonitorJob?.cancel()
+        workoutModeMonitorJob = null
         isReconnecting = false
 
         try { sensorAdapter?.disconnect() }
@@ -368,5 +425,7 @@ class Orchestrator(
         const val PROBE_TIMEOUT_MS = 10_000L
         const val PREREQUISITE_TIMEOUT_MS = 10_000L
         const val REFRESH_TIMEOUT_MS = 5_000L
+        const val WORKOUT_MODE_IDLE = 1
+        const val WORKOUT_MODE_DMK = 8
     }
 }

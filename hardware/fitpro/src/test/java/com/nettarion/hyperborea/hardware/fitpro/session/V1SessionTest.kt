@@ -57,7 +57,7 @@ class V1SessionTest {
     }
 
     @Test
-    fun `start sends Connect packet first`() = runTest {
+    fun `start sends SupportedDevices then Connect`() = runTest {
         val session = createSession(this)
 
         backgroundScope.launch {
@@ -68,8 +68,10 @@ class V1SessionTest {
         advanceUntilIdle()
 
         assertThat(transport.writtenPackets).isNotEmpty()
-        val first = transport.writtenPackets[0]
-        assertThat(first[2]).isEqualTo(0x04) // CMD_CONNECT
+        // First packet is SupportedDevices (0x80)
+        assertThat(transport.writtenPackets[0][2]).isEqualTo(0x80.toByte())
+        // Second packet is Connect (0x04)
+        assertThat(transport.writtenPackets[1][2]).isEqualTo(0x04)
     }
 
     @Test
@@ -233,15 +235,28 @@ class V1SessionTest {
     }
 
     private suspend fun respondToHandshake() {
+        transport.emitIncoming(buildSupportedDevicesResponse())
         transport.emitIncoming(buildConnectAck())
         transport.emitIncoming(buildDeviceInfoResponse())
         transport.emitIncoming(buildSystemInfoResponse())
         transport.emitIncoming(buildVersionInfoResponse())
         transport.emitIncoming(buildSecurityUnlockedResponse())
+        transport.emitIncoming(buildCapabilityResponse())
     }
 
     private suspend fun respondWithDataResponse() {
         transport.emitIncoming(buildDataResponsePacket(wattsValue = 180))
+    }
+
+    private fun buildSupportedDevicesResponse(vararg deviceIds: Int = intArrayOf(2, 7, 0x42)): ByteArray {
+        // device=2, len=TBD, cmd=0x80, status=0x02, count, deviceIds...
+        val count = deviceIds.size
+        val totalLen = 4 + 1 + count + 1 // header + count + ids + checksum
+        val data = byteArrayOf(
+            0x02, totalLen.toByte(), 0x80.toByte(), 0x02,
+            count.toByte(),
+        ) + deviceIds.map { it.toByte() }.toByteArray()
+        return data + V1Codec.checksum(data)
     }
 
     private fun buildConnectAck(): ByteArray {
@@ -369,11 +384,13 @@ class V1SessionTest {
         val session = createSession(this)
 
         backgroundScope.launch {
+            transport.emitIncoming(buildSupportedDevicesResponse())
             transport.emitIncoming(buildConnectAck())
             transport.emitIncoming(buildDeviceInfoResponseWithSw(75))
             transport.emitIncoming(buildSystemInfoResponse())
             transport.emitIncoming(buildVersionInfoResponse())
             // No security response needed
+            transport.emitIncoming(buildCapabilityResponse())
         }
 
         session.start()
@@ -532,6 +549,71 @@ class V1SessionTest {
         assertThat(session.exerciseData.value!!.cadence).isEqualTo(90)
     }
 
+    @Test
+    fun `rower fields in data response populate exerciseData`() = runTest {
+        val session = startStreamingSession()
+
+        backgroundScope.launch {
+            transport.emitIncoming(buildDataResponseWithRowerFields(
+                strokes = 42, strokesPerMinute = 28, splitTime = 120, avgSplitTime = 115,
+            ))
+        }
+        advanceTimeBy(200)
+        advanceUntilIdle()
+
+        val data = session.exerciseData.value
+        assertThat(data).isNotNull()
+        assertThat(data!!.strokeCount).isEqualTo(42)
+        assertThat(data.strokeRate).isEqualTo(28)
+        assertThat(data.splitTime).isEqualTo(120)
+        assertThat(data.avgSplitTime).isEqualTo(115)
+    }
+
+    // --- SUPPORTED_DEVICES ---
+
+    @Test
+    fun `handshake detects treadmill from supported devices`() = runTest {
+        val session = createSession(this)
+
+        backgroundScope.launch {
+            transport.emitIncoming(buildSupportedDevicesResponse(2, 4, 0x42)) // MAIN, TREADMILL, GRADE
+            transport.emitIncoming(buildConnectAck())
+            transport.emitIncoming(buildDeviceInfoResponse())
+            transport.emitIncoming(buildSystemInfoResponse())
+            transport.emitIncoming(buildVersionInfoResponse())
+            transport.emitIncoming(buildSecurityUnlockedResponse())
+            transport.emitIncoming(buildCapabilityResponse())
+        }
+
+        session.start()
+        advanceUntilIdle()
+
+        assertThat(session.sessionState.value).isEqualTo(SessionState.Streaming)
+        assertThat(session.capabilities).isNotNull()
+        assertThat(session.capabilities!!.equipmentDeviceId).isEqualTo(4)
+    }
+
+    @Test
+    fun `handshake defaults to FITNESS_BIKE when no equipment device in list`() = runTest {
+        val session = createSession(this)
+
+        backgroundScope.launch {
+            transport.emitIncoming(buildSupportedDevicesResponse(2, 3, 0x42)) // MAIN, PORTAL, GRADE
+            transport.emitIncoming(buildConnectAck())
+            transport.emitIncoming(buildDeviceInfoResponse())
+            transport.emitIncoming(buildSystemInfoResponse())
+            transport.emitIncoming(buildVersionInfoResponse())
+            transport.emitIncoming(buildSecurityUnlockedResponse())
+            transport.emitIncoming(buildCapabilityResponse())
+        }
+
+        session.start()
+        advanceUntilIdle()
+
+        assertThat(session.sessionState.value).isEqualTo(SessionState.Streaming)
+        assertThat(session.capabilities!!.equipmentDeviceId).isEqualTo(V1Message.DEVICE_FITNESS_BIKE)
+    }
+
     // --- Helper for streaming state ---
 
     private suspend fun TestScope.startStreamingSession(): V1Session {
@@ -545,6 +627,18 @@ class V1SessionTest {
 
     // --- Additional packet builders ---
 
+    private fun buildCapabilityResponse(): ByteArray {
+        // Capability fields sorted by fieldIndex:
+        // MAX_GRADE(27,2), MIN_GRADE(28,2), MAX_KPH(30,2), MIN_KPH(31,2),
+        // MAX_RESISTANCE_LEVEL(42,1), MOTOR_TOTAL_DISTANCE(69,4), TOTAL_TIME(70,4)
+        // Total = 17 bytes
+        val fieldData = ByteArray(17)
+        val totalLen = 4 + fieldData.size + 1
+        val header = byteArrayOf(0x08, totalLen.toByte(), 0x02, 0x02) // status=DONE
+        val withoutChecksum = header + fieldData
+        return withoutChecksum + V1Codec.checksum(withoutChecksum)
+    }
+
     private fun buildDeviceInfoResponseWithSw(sw: Int): ByteArray {
         val data = byteArrayOf(
             0x02, 0x0F, 0x81.toByte(), 0x02,
@@ -557,41 +651,15 @@ class V1SessionTest {
     }
 
     private fun buildDataResponseWithCadence(rpm: Int): ByteArray {
-        val fieldData = mutableListOf<Byte>()
-        // GRADE(1) - 2 bytes
-        fieldData.addAll(listOf(0, 0))
-        // RESISTANCE(2) - 2 bytes
-        fieldData.addAll(listOf(0, 0))
-        // WATTS(3) - 2 bytes
-        fieldData.addAll(listOf(0, 0))
-        // CURRENT_DISTANCE(4) - 4 bytes
-        fieldData.addAll(listOf(0, 0, 0, 0))
-        // RPM(5) - 2 bytes
-        fieldData.add((rpm and 0xFF).toByte())
-        fieldData.add(((rpm shr 8) and 0xFF).toByte())
-        // DISTANCE(6) - 4 bytes
-        fieldData.addAll(listOf(0, 0, 0, 0))
-        // PULSE(10) - 4 bytes
-        fieldData.addAll(listOf(0, 0, 0, 0))
-        // RUNNING_TIME(11) - 4 bytes
-        fieldData.addAll(listOf(0, 0, 0, 0))
-        // WORKOUT_MODE(12) - 1 byte
-        fieldData.add(0)
-        // CALORIES(13) - 4 bytes
-        fieldData.addAll(listOf(0, 0, 0, 0))
-        // ACTUAL_KPH(16) - 2 bytes
-        fieldData.addAll(listOf(0, 0))
-        // ACTUAL_INCLINE(17) - 2 bytes
-        fieldData.addAll(listOf(0, 0))
-        // CURRENT_TIME(20) - 4 bytes
-        fieldData.addAll(listOf(0, 0, 0, 0))
-        // CURRENT_CALORIES(21) - 4 bytes
-        fieldData.addAll(listOf(0, 0, 0, 0))
+        // 35 periodicReadFields sorted by fieldIndex = 87 bytes total
+        // RPM is at offset 12 (after KPH=2, GRADE=2, RESISTANCE=2, WATTS=2, CURRENT_DISTANCE=4)
+        val fieldData = ByteArray(87)
+        fieldData[12] = (rpm and 0xFF).toByte()
+        fieldData[13] = ((rpm shr 8) and 0xFF).toByte()
 
-        val payload = fieldData.toByteArray()
-        val totalLen = 4 + payload.size + 1
+        val totalLen = 4 + fieldData.size + 1
         val header = byteArrayOf(0x07, totalLen.toByte(), 0x02, 0x02)
-        val withoutChecksum = header + payload
+        val withoutChecksum = header + fieldData
         return withoutChecksum + V1Codec.checksum(withoutChecksum)
     }
 
@@ -602,55 +670,131 @@ class V1SessionTest {
 
     /**
      * Build a DataResponse packet with known field values.
-     * The response after the 4-byte header contains field data in the order
-     * of periodicReadFields sorted by fieldIndex.
+     * 35 periodicReadFields sorted by fieldIndex = 87 bytes total.
+     * Offsets: WATTS=6, RPM=12, WORKOUT_MODE=33.
      */
     private fun buildDataResponsePacket(wattsValue: Int = 100, rpmValue: Int = 0, workoutMode: Int = 0): ByteArray {
-        // periodicReadFields sorted by fieldIndex:
-        // GRADE(1,2), RESISTANCE(2,2), WATTS(3,2), CURRENT_DISTANCE(4,4),
-        // RPM(5,2), DISTANCE(6,4), PULSE(10,4), RUNNING_TIME(11,4),
-        // WORKOUT_MODE(12,1), CALORIES(13,4), ACTUAL_KPH(16,2),
-        // ACTUAL_INCLINE(17,2), CURRENT_TIME(20,4), CURRENT_CALORIES(21,4)
-        // Total = 2+2+2+4+2+4+4+4+1+4+2+2+4+4 = 41 bytes
+        val fieldData = ByteArray(87)
+        // WATTS at offset 6 (after KPH=2, GRADE=2, RESISTANCE=2)
+        fieldData[6] = (wattsValue and 0xFF).toByte()
+        fieldData[7] = ((wattsValue shr 8) and 0xFF).toByte()
+        // RPM at offset 12 (after WATTS=2, CURRENT_DISTANCE=4)
+        fieldData[12] = (rpmValue and 0xFF).toByte()
+        fieldData[13] = ((rpmValue shr 8) and 0xFF).toByte()
+        // WORKOUT_MODE at offset 33 (after KEY_OBJECT=14, VOLUME=1, PULSE=4)
+        fieldData[33] = workoutMode.toByte()
 
-        val fieldData = mutableListOf<Byte>()
-
-        // GRADE(1) - 2 bytes - value 0
-        fieldData.addAll(listOf(0, 0))
-        // RESISTANCE(2) - 2 bytes - value 0
-        fieldData.addAll(listOf(0, 0))
-        // WATTS(3) - 2 bytes - value wattsValue
-        fieldData.add((wattsValue and 0xFF).toByte())
-        fieldData.add(((wattsValue shr 8) and 0xFF).toByte())
-        // CURRENT_DISTANCE(4) - 4 bytes - value 0
-        fieldData.addAll(listOf(0, 0, 0, 0))
-        // RPM(5) - 2 bytes - value rpmValue
-        fieldData.add((rpmValue and 0xFF).toByte())
-        fieldData.add(((rpmValue shr 8) and 0xFF).toByte())
-        // DISTANCE(6) - 4 bytes - value 0
-        fieldData.addAll(listOf(0, 0, 0, 0))
-        // PULSE(10) - 4 bytes - value 0
-        fieldData.addAll(listOf(0, 0, 0, 0))
-        // RUNNING_TIME(11) - 4 bytes - value 0
-        fieldData.addAll(listOf(0, 0, 0, 0))
-        // WORKOUT_MODE(12) - 1 byte - value workoutMode
-        fieldData.add(workoutMode.toByte())
-        // CALORIES(13) - 4 bytes - value 0
-        fieldData.addAll(listOf(0, 0, 0, 0))
-        // ACTUAL_KPH(16) - 2 bytes - value 0
-        fieldData.addAll(listOf(0, 0))
-        // ACTUAL_INCLINE(17) - 2 bytes - value 0
-        fieldData.addAll(listOf(0, 0))
-        // CURRENT_TIME(20) - 4 bytes - value 0
-        fieldData.addAll(listOf(0, 0, 0, 0))
-        // CURRENT_CALORIES(21) - 4 bytes - value 0
-        fieldData.addAll(listOf(0, 0, 0, 0))
-
-        val payload = fieldData.toByteArray()
-        val totalLen = 4 + payload.size + 1
+        val totalLen = 4 + fieldData.size + 1
         val header = byteArrayOf(0x07, totalLen.toByte(), 0x02, 0x02) // status=DONE
-        val withoutChecksum = header + payload
+        val withoutChecksum = header + fieldData
         return withoutChecksum + V1Codec.checksum(withoutChecksum)
+    }
+
+    /**
+     * Build a DataResponse with specific speed and resistance values.
+     * 35 periodicReadFields sorted by fieldIndex = 87 bytes total.
+     * Key offsets: RESISTANCE=4, WATTS=6, ACTUAL_KPH=36.
+     * ACTUAL_KPH uses SPEED converter (raw / 100 → kph).
+     */
+    private fun buildDataResponseWithSpeedAndResistance(
+        wattsValue: Int = 0,
+        speedRaw: Int = 0,        // ACTUAL_KPH raw value (kph × 100, e.g., 2000 = 20.0 kph)
+        resistanceValue: Int = 0, // raw resistance (converted by resistanceRawToLevel)
+    ): ByteArray {
+        val fieldData = ByteArray(87)
+        // RESISTANCE at offset 4 (after KPH=2, GRADE=2)
+        fieldData[4] = (resistanceValue and 0xFF).toByte()
+        fieldData[5] = ((resistanceValue shr 8) and 0xFF).toByte()
+        // WATTS at offset 6
+        fieldData[6] = (wattsValue and 0xFF).toByte()
+        fieldData[7] = ((wattsValue shr 8) and 0xFF).toByte()
+        // ACTUAL_KPH at offset 36 (after KEY_OBJECT=14B, VOLUME=1, PULSE=4, WORKOUT_MODE=1, LAP_TIME=2)
+        fieldData[36] = (speedRaw and 0xFF).toByte()
+        fieldData[37] = ((speedRaw shr 8) and 0xFF).toByte()
+
+        val totalLen = 4 + fieldData.size + 1
+        val header = byteArrayOf(0x07, totalLen.toByte(), 0x02, 0x02) // status=DONE
+        val withoutChecksum = header + fieldData
+        return withoutChecksum + V1Codec.checksum(withoutChecksum)
+    }
+
+    private fun buildDataResponseWithRowerFields(
+        strokes: Int = 0,
+        strokesPerMinute: Int = 0,
+        splitTime: Int = 0,
+        avgSplitTime: Int = 0,
+    ): ByteArray {
+        val fieldData = ByteArray(87)
+        // STROKES at offset 78, 2 bytes LE
+        fieldData[78] = (strokes and 0xFF).toByte()
+        fieldData[79] = ((strokes shr 8) and 0xFF).toByte()
+        // STROKES_PER_MINUTE at offset 80, 1 byte
+        fieldData[80] = strokesPerMinute.toByte()
+        // FIVE_HUNDRED_SPLIT at offset 81, 2 bytes LE
+        fieldData[81] = (splitTime and 0xFF).toByte()
+        fieldData[82] = ((splitTime shr 8) and 0xFF).toByte()
+        // AVG_FIVE_HUNDRED_SPLIT at offset 83, 2 bytes LE
+        fieldData[83] = (avgSplitTime and 0xFF).toByte()
+        fieldData[84] = ((avgSplitTime shr 8) and 0xFF).toByte()
+
+        val totalLen = 4 + fieldData.size + 1
+        val header = byteArrayOf(0x07, totalLen.toByte(), 0x02, 0x02) // status=DONE
+        val withoutChecksum = header + fieldData
+        return withoutChecksum + V1Codec.checksum(withoutChecksum)
+    }
+
+    // --- Power estimation ---
+
+    @Test
+    fun `WATTS greater than zero used as-is without estimation`() = runTest {
+        val session = startStreamingSession()
+
+        backgroundScope.launch {
+            // WATTS=180 → used directly, no estimation
+            transport.emitIncoming(buildDataResponsePacket(wattsValue = 180))
+        }
+        advanceTimeBy(200)
+        advanceUntilIdle()
+
+        assertThat(session.exerciseData.value).isNotNull()
+        assertThat(session.exerciseData.value!!.power).isEqualTo(180)
+    }
+
+    @Test
+    fun `WATTS zero with speed and resistance estimates power`() = runTest {
+        val session = startStreamingSession()
+
+        backgroundScope.launch {
+            // WATTS=0, speed=20kph (raw=2000), resistance raw=5000 → power estimated via fallback
+            transport.emitIncoming(buildDataResponseWithSpeedAndResistance(
+                wattsValue = 0, speedRaw = 2000, resistanceValue = 5000,
+            ))
+        }
+        advanceTimeBy(200)
+        advanceUntilIdle()
+
+        val data = session.exerciseData.value
+        assertThat(data).isNotNull()
+        // Estimated power should be > 0 (fallback formula with speed=20kph, resistance~12)
+        assertThat(data!!.power).isGreaterThan(0)
+    }
+
+    @Test
+    fun `WATTS zero with speed zero keeps power at zero`() = runTest {
+        val session = startStreamingSession()
+
+        backgroundScope.launch {
+            // WATTS=0, speed=0 → estimator returns null, power stays 0
+            transport.emitIncoming(buildDataResponseWithSpeedAndResistance(
+                wattsValue = 0, speedRaw = 0, resistanceValue = 5000,
+            ))
+        }
+        advanceTimeBy(200)
+        advanceUntilIdle()
+
+        val data = session.exerciseData.value
+        assertThat(data).isNotNull()
+        assertThat(data!!.power).isEqualTo(0)
     }
 
     @Test
@@ -750,10 +894,13 @@ class V1SessionTest {
     }
 
     @Test
-    fun `commandToFields SetTargetPower maps to WATT_GOAL`() {
+    fun `commandToFields SetTargetPower maps to WATT_GOAL and enables ERG`() {
         val session = createUnstartedSession()
         val fields = session.commandToFields(DeviceCommand.SetTargetPower(200))
-        assertThat(fields).containsExactly(V1DataField.WATT_GOAL, 200f)
+        assertThat(fields).containsExactly(
+            V1DataField.WATT_GOAL, 200f,
+            V1DataField.IS_CONSTANT_WATTS_MODE, 1f,
+        )
     }
 
     @Test
@@ -775,5 +922,82 @@ class V1SessionTest {
         val session = createUnstartedSession()
         val fields = session.commandToFields(DeviceCommand.ResumeWorkout)
         assertThat(fields).containsExactly(V1DataField.WORKOUT_MODE, 2f)
+    }
+
+    @Test
+    fun `commandToFields SetFanSpeed maps to FAN_STATE`() {
+        val session = createUnstartedSession()
+        val fields = session.commandToFields(DeviceCommand.SetFanSpeed(3))
+        assertThat(fields).containsExactly(V1DataField.FAN_STATE, 3f)
+    }
+
+    @Test
+    fun `commandToFields SetVolume maps to VOLUME`() {
+        val session = createUnstartedSession()
+        val fields = session.commandToFields(DeviceCommand.SetVolume(5))
+        assertThat(fields).containsExactly(V1DataField.VOLUME, 5f)
+    }
+
+    @Test
+    fun `commandToFields SetGear maps to GEAR`() {
+        val session = createUnstartedSession()
+        val fields = session.commandToFields(DeviceCommand.SetGear(3))
+        assertThat(fields).containsExactly(V1DataField.GEAR, 3f)
+    }
+
+    @Test
+    fun `commandToFields SetDistanceGoal maps to DISTANCE_GOAL`() {
+        val session = createUnstartedSession()
+        val fields = session.commandToFields(DeviceCommand.SetDistanceGoal(5000))
+        assertThat(fields).containsExactly(V1DataField.DISTANCE_GOAL, 5000f)
+    }
+
+    @Test
+    fun `commandToFields SetWarmupTimeout maps to WARMUP_TIMEOUT`() {
+        val session = createUnstartedSession()
+        val fields = session.commandToFields(DeviceCommand.SetWarmupTimeout(300))
+        assertThat(fields).containsExactly(V1DataField.WARMUP_TIMEOUT, 300f)
+    }
+
+    @Test
+    fun `commandToFields SetCooldownTimeout maps to COOLDOWN_TIMEOUT`() {
+        val session = createUnstartedSession()
+        val fields = session.commandToFields(DeviceCommand.SetCooldownTimeout(180))
+        assertThat(fields).containsExactly(V1DataField.COOLDOWN_TIMEOUT, 180f)
+    }
+
+    @Test
+    fun `commandToFields SetPauseTimeout maps to PAUSE_TIMEOUT`() {
+        val session = createUnstartedSession()
+        val fields = session.commandToFields(DeviceCommand.SetPauseTimeout(60))
+        assertThat(fields).containsExactly(V1DataField.PAUSE_TIMEOUT, 60f)
+    }
+
+    @Test
+    fun `commandToFields SetWarmUpMode maps to WORKOUT_MODE 10`() {
+        val session = createUnstartedSession()
+        val fields = session.commandToFields(DeviceCommand.SetWarmUpMode(true))
+        assertThat(fields).containsExactly(V1DataField.WORKOUT_MODE, 10f)
+    }
+
+    @Test
+    fun `commandToFields SetCoolDownMode maps to WORKOUT_MODE 11`() {
+        val session = createUnstartedSession()
+        val fields = session.commandToFields(DeviceCommand.SetCoolDownMode(true))
+        assertThat(fields).containsExactly(V1DataField.WORKOUT_MODE, 11f)
+    }
+
+    @Test
+    fun `commandToFields SetErgMode enable maps to IS_CONSTANT_WATTS_MODE 1`() {
+        val session = createUnstartedSession()
+        val fields = session.commandToFields(DeviceCommand.SetErgMode(true))
+        assertThat(fields).containsExactly(V1DataField.IS_CONSTANT_WATTS_MODE, 1f)
+    }
+
+    @Test
+    fun `commandToFields SetErgMode disable maps to IS_CONSTANT_WATTS_MODE 0`() {
+        val session = createUnstartedSession()
+        val fields = session.commandToFields(DeviceCommand.SetErgMode(false))
+        assertThat(fields).containsExactly(V1DataField.IS_CONSTANT_WATTS_MODE, 0f)
     }
 }

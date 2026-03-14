@@ -173,6 +173,66 @@ class ControlPointParserTest {
         assertThat(result).isInstanceOf(ControlPointParser.ControlPointResult.Unsupported::class.java)
     }
 
+    // --- extractFanCommand ---
+
+    @Test
+    fun `extractFanCommand wind zero returns OFF`() {
+        // opcode 0x11, wind=0 (sint16 LE)
+        val payload = byteArrayOf(0x11, 0x00, 0x00, 0x00, 0x00)
+        val cmd = ControlPointParser.extractFanCommand(payload)
+        assertThat(cmd).isNotNull()
+        assertThat(cmd!!.level).isEqualTo(0)
+    }
+
+    @Test
+    fun `extractFanCommand wind 2000 returns LOW`() {
+        // wind = 2000 (0x07D0 LE) → 2.0 m/s → LOW
+        val payload = byteArrayOf(0x11, 0xD0.toByte(), 0x07, 0x00, 0x00)
+        val cmd = ControlPointParser.extractFanCommand(payload)
+        assertThat(cmd).isNotNull()
+        assertThat(cmd!!.level).isEqualTo(1)
+    }
+
+    @Test
+    fun `extractFanCommand wind 6000 returns MEDIUM`() {
+        // wind = 6000 (0x1770 LE) → 6.0 m/s → MEDIUM
+        val payload = byteArrayOf(0x11, 0x70, 0x17, 0x00, 0x00)
+        val cmd = ControlPointParser.extractFanCommand(payload)
+        assertThat(cmd).isNotNull()
+        assertThat(cmd!!.level).isEqualTo(2)
+    }
+
+    @Test
+    fun `extractFanCommand wind 10000 returns HIGH`() {
+        // wind = 10000 (0x2710 LE) → 10.0 m/s → HIGH
+        val payload = byteArrayOf(0x11, 0x10, 0x27, 0x00, 0x00)
+        val cmd = ControlPointParser.extractFanCommand(payload)
+        assertThat(cmd).isNotNull()
+        assertThat(cmd!!.level).isEqualTo(3)
+    }
+
+    @Test
+    fun `extractFanCommand negative wind uses abs`() {
+        // wind = -6000 (0xE890 as sint16 LE) → abs = 6.0 m/s → MEDIUM
+        val raw = (-6000).toShort()
+        val payload = byteArrayOf(0x11, (raw.toInt() and 0xFF).toByte(), ((raw.toInt() shr 8) and 0xFF).toByte(), 0x00, 0x00)
+        val cmd = ControlPointParser.extractFanCommand(payload)
+        assertThat(cmd).isNotNull()
+        assertThat(cmd!!.level).isEqualTo(2)
+    }
+
+    @Test
+    fun `extractFanCommand non-0x11 opcode returns null`() {
+        val payload = byteArrayOf(0x03, 0x00, 0x00)
+        assertThat(ControlPointParser.extractFanCommand(payload)).isNull()
+    }
+
+    @Test
+    fun `extractFanCommand too short payload returns null`() {
+        val payload = byteArrayOf(0x11, 0x00)
+        assertThat(ControlPointParser.extractFanCommand(payload)).isNull()
+    }
+
     // --- Response encoding ---
 
     @Test

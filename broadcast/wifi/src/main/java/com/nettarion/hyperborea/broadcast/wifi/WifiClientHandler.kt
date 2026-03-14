@@ -185,6 +185,7 @@ class WifiClientHandler(
         val result = when (request.charUuid) {
             WifiServiceDefinition.FTMS_CONTROL_POINT -> {
                 val parsed = ControlPointParser.parseFtmsControlPoint(request.value)
+                logger.d(TAG, "[$clientId] FTMS control point parsed: $parsed")
                 // Send FTMS CP indication response via notification
                 if (request.value.isNotEmpty()) {
                     val cpResp = ControlPointParser.encodeResponse(
@@ -196,9 +197,15 @@ class WifiClientHandler(
                     )
                     send(WifiCodec.encodeNotification(WifiServiceDefinition.FTMS_CONTROL_POINT, cpResp))
                 }
+                // Extract fan command from simulation parameters (opcode 0x11)
+                ControlPointParser.extractFanCommand(request.value)?.let { onCommand(it) }
                 parsed
             }
-            WifiServiceDefinition.TRAINER_CONTROL -> ControlPointParser.parseTrainerControl(request.value)
+            WifiServiceDefinition.TRAINER_CONTROL -> {
+                val parsed = ControlPointParser.parseTrainerControl(request.value)
+                logger.d(TAG, "[$clientId] Trainer control parsed: $parsed")
+                parsed
+            }
             else -> null
         }
 

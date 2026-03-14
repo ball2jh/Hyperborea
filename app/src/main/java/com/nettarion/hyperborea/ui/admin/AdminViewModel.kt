@@ -6,14 +6,15 @@ import com.nettarion.hyperborea.core.LicenseChecker
 import android.os.Environment
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
-import com.nettarion.hyperborea.BuildConfig
 import com.nettarion.hyperborea.core.adapter.AdapterState
 import com.nettarion.hyperborea.core.AppLogger
 import com.nettarion.hyperborea.core.adapter.BroadcastAdapter
 import com.nettarion.hyperborea.core.adapter.BroadcastId
 import com.nettarion.hyperborea.core.model.ClientInfo
+import com.nettarion.hyperborea.core.model.DeviceCommand
 import com.nettarion.hyperborea.core.model.DeviceIdentity
 import com.nettarion.hyperborea.core.model.ExerciseData
+import com.nettarion.hyperborea.core.model.FanMode
 import com.nettarion.hyperborea.core.adapter.HardwareAdapter
 import com.nettarion.hyperborea.core.LogEntry
 import com.nettarion.hyperborea.core.LogStore
@@ -22,12 +23,13 @@ import com.nettarion.hyperborea.core.system.SystemLogStore
 import com.nettarion.hyperborea.core.system.SystemMonitor
 import com.nettarion.hyperborea.core.system.SystemSnapshot
 import com.nettarion.hyperborea.core.profile.UserPreferences
+import com.nettarion.hyperborea.platform.support.SupportDiagnosticsBuilder
 import com.nettarion.hyperborea.platform.support.SupportHttpClient
-import com.nettarion.hyperborea.platform.support.truncateLogExport
 import com.nettarion.hyperborea.platform.update.TrackState
 import com.nettarion.hyperborea.platform.update.UpdateManager
 import dagger.hilt.android.lifecycle.HiltViewModel
 import dagger.hilt.android.qualifiers.ApplicationContext
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -35,7 +37,6 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.launch
-import org.json.JSONArray
 import org.json.JSONObject
 import java.io.File
 import java.text.SimpleDateFormat
@@ -57,6 +58,10 @@ class AdminViewModel @Inject constructor(
     private val logger: AppLogger,
     @param:ApplicationContext private val context: Context,
 ) : ViewModel() {
+
+    private val diagnosticsBuilder = SupportDiagnosticsBuilder(
+        logStore, systemLogStore, systemMonitor, hardwareAdapter, broadcastAdapters,
+    )
 
     val broadcastDiagnostics: Flow<List<BroadcastDiagnostic>> = run {
         val sorted = broadcastAdapters.sortedBy { it.id.ordinal }
@@ -81,12 +86,16 @@ class AdminViewModel @Inject constructor(
     val checking: StateFlow<Boolean> = updateManager.checking
     val enabledBroadcasts: StateFlow<Set<BroadcastId>> = userPreferences.enabledBroadcasts
     val overlayEnabled: StateFlow<Boolean> = userPreferences.overlayEnabled
+    val fanMode: StateFlow<FanMode> = userPreferences.fanMode
 
     private val _exportResult = MutableStateFlow<ExportResult?>(null)
     val exportResult: StateFlow<ExportResult?> = _exportResult.asStateFlow()
 
     private val _supportUploadState = MutableStateFlow<SupportUploadState>(SupportUploadState.Idle)
     val supportUploadState: StateFlow<SupportUploadState> = _supportUploadState.asStateFlow()
+
+    private val _calibrationState = MutableStateFlow<CalibrationState>(CalibrationState.Idle)
+    val calibrationState: StateFlow<CalibrationState> = _calibrationState.asStateFlow()
 
     fun clearLogs() = logStore.clear()
     fun clearSystemLogs() = systemLogStore.clear()
@@ -167,6 +176,9 @@ class AdminViewModel @Inject constructor(
     fun toggleOverlay(enabled: Boolean) =
         userPreferences.setOverlayEnabled(enabled)
 
+    fun setFanMode(mode: FanMode) =
+        userPreferences.setFanMode(mode)
+
     fun uploadSupport() {
         if (_supportUploadState.value is SupportUploadState.Uploading) return
         _supportUploadState.value = SupportUploadState.Uploading
@@ -181,57 +193,7 @@ class AdminViewModel @Inject constructor(
                     return@launch
                 }
 
-                val snapshot = systemMonitor.snapshot.value
-                val identity = hardwareAdapter.deviceIdentity.value
-
-                val diagnostics = JSONObject().apply {
-                    // Device identity
-                    identity?.let {
-                        put("serialNumber", it.serialNumber ?: JSONObject.NULL)
-                        put("firmwareVersion", it.firmwareVersion ?: JSONObject.NULL)
-                        put("hardwareVersion", it.hardwareVersion ?: JSONObject.NULL)
-                        put("model", it.model ?: JSONObject.NULL)
-                    }
-                    // System status
-                    val status = snapshot.status
-                    put("bleAdvertisingSupported", status.isBluetoothLeAdvertisingSupported)
-                    put("bleEnabled", status.isBluetoothLeEnabled)
-                    put("wifiEnabled", status.isWifiEnabled)
-                    put("usbHostAvailable", status.isUsbHostAvailable)
-                    put("adbEnabled", status.isAdbEnabled)
-                    put("rootAvailable", status.isRootAvailable)
-                    // USB devices
-                    put("usbDevices", JSONArray().apply {
-                        snapshot.usbDevices.forEach { device ->
-                            put(JSONObject().apply {
-                                put("vendorId", "%04X".format(device.vendorId))
-                                put("productId", "%04X".format(device.productId))
-                                put("productName", device.productName ?: JSONObject.NULL)
-                            })
-                        }
-                    })
-                    // Broadcast adapters
-                    put("broadcastAdapters", JSONArray().apply {
-                        broadcastAdapters.sortedBy { it.id.ordinal }.forEach { adapter ->
-                            put(JSONObject().apply {
-                                put("id", adapter.id.name)
-                                put("state", adapter.state.value.javaClass.simpleName)
-                                put("clientCount", adapter.connectedClients.value.size)
-                            })
-                        }
-                    })
-                    // Components summary
-                    put("componentCount", snapshot.components.size)
-                }
-
-                val json = JSONObject().apply {
-                    put("deviceUuid", deviceUuid ?: JSONObject.NULL)
-                    put("appVersion", BuildConfig.VERSION_NAME)
-                    put("timestamp", SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss'Z'", Locale.US).format(Date()))
-                    put("appLogs", truncateLogExport(logStore.export(), 400_000))
-                    put("systemLogs", truncateLogExport(systemLogStore.export(), 400_000))
-                    put("diagnostics", diagnostics)
-                }
+                val json = diagnosticsBuilder.build(deviceUuid)
 
                 val response = supportHttpClient.upload(authToken, json.toString())
                 if (response == null) {
@@ -243,6 +205,7 @@ class AdminViewModel @Inject constructor(
                 if (code.isEmpty()) {
                     _supportUploadState.value = SupportUploadState.Error("Invalid response")
                 } else {
+                    logger.i(TAG, "Support upload succeeded, code=$code")
                     _supportUploadState.value = SupportUploadState.Success(code)
                 }
             } catch (e: Exception) {
@@ -256,9 +219,36 @@ class AdminViewModel @Inject constructor(
         _supportUploadState.value = SupportUploadState.Idle
     }
 
+    fun calibrateIncline() {
+        if (_calibrationState.value is CalibrationState.InProgress) return
+        _calibrationState.value = CalibrationState.InProgress
+        viewModelScope.launch(Dispatchers.IO) {
+            try {
+                hardwareAdapter.sendCommand(DeviceCommand.CalibrateIncline)
+                logger.i(TAG, "Incline calibration completed")
+                _calibrationState.value = CalibrationState.Done
+            } catch (e: CancellationException) { throw e }
+            catch (e: Exception) {
+                logger.e(TAG, "Incline calibration failed", e)
+                _calibrationState.value = CalibrationState.Failed(e.message ?: "Calibration failed")
+            }
+        }
+    }
+
+    fun dismissCalibration() {
+        _calibrationState.value = CalibrationState.Idle
+    }
+
     private companion object {
         const val TAG = "AdminViewModel"
     }
+}
+
+sealed interface CalibrationState {
+    data object Idle : CalibrationState
+    data object InProgress : CalibrationState
+    data object Done : CalibrationState
+    data class Failed(val message: String) : CalibrationState
 }
 
 sealed interface SupportUploadState {

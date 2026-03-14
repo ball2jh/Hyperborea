@@ -19,9 +19,18 @@ class ExerciseDataAccumulator(
     private var targetPower: Int? = null
     private var targetResistance: Int? = null
     private var workoutMode: Int? = null
-    private var lifetimeRunningTime: Long? = null
-    private var lifetimeDistance: Float? = null
-    private var lifetimeCalories: Int? = null
+    private var verticalGain: Float? = null
+    private var verticalNet: Float? = null
+    private var averageWatts: Int? = null
+    private var averageIncline: Float? = null
+    private var lapTime: Long? = null
+    private var pausedTime: Long? = null
+    private var startRequested: Boolean? = null
+    private var goalTime: Long? = null
+    private var strokeCount: Int? = null
+    private var strokeRate: Int? = null
+    private var splitTime: Int? = null
+    private var avgSplitTime: Int? = null
 
     // Elapsed time tracking — own clock, pausable
     private var accumulatedSeconds: Long = initialElapsedSeconds
@@ -68,9 +77,18 @@ class ExerciseDataAccumulator(
     fun updateTargetPower(value: Int) { targetPower = value }
     fun updateTargetResistance(value: Int) { targetResistance = value }
     fun updateWorkoutMode(value: Int) { workoutMode = value }
-    fun updateLifetimeRunningTime(seconds: Long) { lifetimeRunningTime = seconds }
-    fun updateLifetimeDistance(value: Float) { lifetimeDistance = value }
-    fun updateLifetimeCalories(value: Int) { lifetimeCalories = value }
+    fun updateVerticalGain(meters: Float) { verticalGain = meters }
+    fun updateVerticalNet(meters: Float) { verticalNet = meters }
+    fun updateAverageWatts(watts: Int) { averageWatts = watts }
+    fun updateAverageIncline(percent: Float) { averageIncline = percent }
+    fun updateLapTime(seconds: Long) { lapTime = seconds }
+    fun updatePausedTime(seconds: Long) { pausedTime = seconds }
+    fun updateStartRequested(requested: Boolean) { startRequested = requested }
+    fun updateGoalTime(seconds: Long) { goalTime = seconds }
+    fun updateStrokeCount(value: Int) { strokeCount = value }
+    fun updateStrokeRate(value: Int) { strokeRate = value }
+    fun updateSplitTime(value: Int) { splitTime = value }
+    fun updateAvgSplitTime(value: Int) { avgSplitTime = value }
 
     private fun elapsedSeconds(): Long {
         val running = if (runningStartTime > 0L) (clock() - runningStartTime) / 1000L else 0L
@@ -92,9 +110,18 @@ class ExerciseDataAccumulator(
         targetPower = targetPower,
         targetResistance = targetResistance,
         workoutMode = workoutMode,
-        lifetimeRunningTime = lifetimeRunningTime,
-        lifetimeDistance = lifetimeDistance,
-        lifetimeCalories = lifetimeCalories,
+        verticalGain = verticalGain,
+        verticalNet = verticalNet,
+        averageWatts = averageWatts,
+        averageIncline = averageIncline,
+        lapTime = lapTime,
+        pausedTime = pausedTime,
+        startRequested = startRequested,
+        goalTime = goalTime,
+        strokeCount = strokeCount,
+        strokeRate = strokeRate,
+        splitTime = splitTime,
+        avgSplitTime = avgSplitTime,
     )
 
     fun reset() {
@@ -114,8 +141,17 @@ class ExerciseDataAccumulator(
         targetPower = null
         targetResistance = null
         workoutMode = null
-        lifetimeRunningTime = null
-        lifetimeDistance = null
-        lifetimeCalories = null
+        verticalGain = null
+        verticalNet = null
+        averageWatts = null
+        averageIncline = null
+        lapTime = null
+        pausedTime = null
+        startRequested = null
+        goalTime = null
+        strokeCount = null
+        strokeRate = null
+        splitTime = null
+        avgSplitTime = null
     }
 }

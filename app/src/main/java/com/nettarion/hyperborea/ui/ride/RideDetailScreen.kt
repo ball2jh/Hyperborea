@@ -25,9 +25,7 @@ import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Snackbar
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
@@ -43,6 +41,8 @@ import com.nettarion.hyperborea.core.model.ZoneDistribution
 import com.nettarion.hyperborea.ui.theme.Amber
 import com.nettarion.hyperborea.ui.theme.ElectricBlue
 import com.nettarion.hyperborea.ui.theme.LocalHyperboreaColors
+import com.nettarion.hyperborea.ui.util.ExportResultSnackbar
+import com.nettarion.hyperborea.ui.util.rememberExportSnackbarState
 import com.nettarion.hyperborea.ui.theme.StatusActive
 import com.nettarion.hyperborea.ui.theme.StatusError
 import com.nettarion.hyperborea.ui.util.UnitFormatter
@@ -104,7 +104,7 @@ fun RideDetailScreen(
 
                     val chartModifier = Modifier
                         .fillMaxWidth()
-                        .height(120.dp)
+                        .height(140.dp)
 
                     ChartIfData(samples, { it.power }, "Power", "W", ElectricBlue, chartModifier)
                     ChartIfData(samples, { it.heartRate }, "Heart Rate", "bpm", StatusError, chartModifier)
@@ -152,23 +152,11 @@ fun RideDetailScreen(
         }
 
         // Snackbar
-        exportResult?.let { result ->
-            Snackbar(
-                modifier = Modifier
-                    .align(Alignment.BottomCenter)
-                    .padding(16.dp),
-                action = {
-                    TextButton(onClick = viewModel::dismissExportResult) {
-                        Text("Dismiss")
-                    }
-                },
-            ) {
-                Text(
-                    text = result.error ?: "Exported to ${result.filePath}",
-                    maxLines = 2,
-                )
-            }
-        }
+        val exportSnackbar = rememberExportSnackbarState(exportResult, viewModel::dismissExportResult)
+        ExportResultSnackbar(
+            state = exportSnackbar,
+            modifier = Modifier.align(Alignment.BottomCenter),
+        )
     }
 }
 
@@ -192,7 +180,7 @@ private fun ChartIfData(
         lineColor = color,
         modifier = modifier,
     )
-    Spacer(Modifier.height(8.dp))
+    Spacer(Modifier.height(12.dp))
 }
 
 @Composable
@@ -228,7 +216,9 @@ private fun SummaryStats(
     stat("Calories", "${ride.calories}")
     stat("Duration", formatDuration(ride.durationSeconds))
 
-    HorizontalDivider(Modifier.padding(vertical = 6.dp), color = colors.divider)
+    if (listOfNotNull(ride.avgPower, ride.maxPower, ride.normalizedPower).isNotEmpty()) {
+        sectionHeader("Power")
+    }
 
     ride.avgPower?.let { stat("Avg Power", "${it}W") }
     ride.maxPower?.let { stat("Max Power", "${it}W") }
@@ -236,21 +226,21 @@ private fun SummaryStats(
     ride.intensityFactor?.let { stat("IF", String.format(Locale.US, "%.2f", it)) }
     ride.trainingStressScore?.let { stat("TSS", String.format(Locale.US, "%.0f", it)) }
 
-    if (listOfNotNull(ride.avgHeartRate, ride.avgCadence, ride.avgSpeedKph).isNotEmpty()) {
-        HorizontalDivider(Modifier.padding(vertical = 6.dp), color = colors.divider)
+    if (listOfNotNull(ride.avgHeartRate, ride.avgCadence).isNotEmpty()) {
+        sectionHeader("Heart & Effort")
     }
 
     ride.avgHeartRate?.let { stat("Avg HR", "${it} bpm") }
     ride.maxHeartRate?.let { stat("Max HR", "${it} bpm") }
     ride.avgCadence?.let { stat("Avg Cadence", "${it} rpm") }
     ride.maxCadence?.let { stat("Max Cadence", "${it} rpm") }
-    ride.avgSpeedKph?.let { stat("Avg Speed", UnitFormatter.speedDisplay(it, useImperial)) }
-    ride.maxSpeedKph?.let { stat("Max Speed", UnitFormatter.speedDisplay(it, useImperial)) }
 
-    if (listOfNotNull(ride.avgResistance, ride.avgIncline, ride.totalElevationGainMeters).isNotEmpty()) {
-        HorizontalDivider(Modifier.padding(vertical = 6.dp), color = colors.divider)
+    if (listOfNotNull(ride.avgSpeedKph, ride.avgResistance, ride.avgIncline, ride.totalElevationGainMeters).isNotEmpty()) {
+        sectionHeader("Speed & Terrain")
     }
 
+    ride.avgSpeedKph?.let { stat("Avg Speed", UnitFormatter.speedDisplay(it, useImperial)) }
+    ride.maxSpeedKph?.let { stat("Max Speed", UnitFormatter.speedDisplay(it, useImperial)) }
     ride.avgResistance?.let { stat("Avg Resistance", "$it") }
     ride.maxResistance?.let { stat("Max Resistance", "$it") }
     ride.avgIncline?.let { stat("Avg Incline", String.format(Locale.US, "%.1f%%", it)) }

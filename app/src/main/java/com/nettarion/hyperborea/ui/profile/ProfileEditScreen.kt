@@ -18,6 +18,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.ArrowBack
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.FilterChipDefaults
@@ -29,9 +30,13 @@ import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.SolidColor
@@ -46,6 +51,7 @@ fun ProfileEditScreen(
     profileId: Long?,
     onSaved: () -> Unit,
     onBack: () -> Unit,
+    onDeleted: () -> Unit = {},
     viewModel: ProfileEditViewModel = hiltViewModel(),
 ) {
     val colors = LocalHyperboreaColors.current
@@ -232,31 +238,74 @@ fun ProfileEditScreen(
                 }
             }
 
-            // Buttons — bottom right
+            // Buttons — bottom
+            var showDeleteConfirmation by remember { mutableStateOf(false) }
+
+            if (showDeleteConfirmation) {
+                AlertDialog(
+                    onDismissRequest = { showDeleteConfirmation = false },
+                    title = { Text("Delete Profile") },
+                    text = {
+                        Text(
+                            "Delete \"${name.trim()}\"? All rides for this profile will also be deleted. This cannot be undone.",
+                            color = colors.textMedium,
+                        )
+                    },
+                    confirmButton = {
+                        TextButton(onClick = {
+                            showDeleteConfirmation = false
+                            viewModel.deleteProfile(onDeleted)
+                        }) {
+                            Text("Delete", color = MaterialTheme.colorScheme.error)
+                        }
+                    },
+                    dismissButton = {
+                        TextButton(onClick = { showDeleteConfirmation = false }) {
+                            Text("Cancel")
+                        }
+                    },
+                )
+            }
+
             Row(
                 modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.End,
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically,
             ) {
-                OutlinedButton(
-                    onClick = onBack,
-                    shape = RoundedCornerShape(20.dp),
-                    colors = ButtonDefaults.outlinedButtonColors(contentColor = colors.textMedium),
-                    border = BorderStroke(1.dp, colors.divider),
-                ) {
-                    Text("Cancel", modifier = Modifier.padding(horizontal = 16.dp))
+                if (profileId != null) {
+                    TextButton(
+                        onClick = { showDeleteConfirmation = true },
+                        colors = ButtonDefaults.textButtonColors(
+                            contentColor = MaterialTheme.colorScheme.error,
+                        ),
+                    ) {
+                        Text("Delete Profile")
+                    }
+                } else {
+                    Spacer(Modifier.width(1.dp))
                 }
-                Spacer(Modifier.width(12.dp))
-                OutlinedButton(
-                    onClick = { viewModel.save(onSaved) },
-                    enabled = name.isNotBlank(),
-                    shape = RoundedCornerShape(20.dp),
-                    colors = ButtonDefaults.outlinedButtonColors(contentColor = colors.electricBlue),
-                    border = BorderStroke(
-                        1.dp,
-                        if (name.isNotBlank()) colors.electricBlue else colors.divider,
-                    ),
-                ) {
-                    Text("Save", modifier = Modifier.padding(horizontal = 24.dp))
+                Row {
+                    OutlinedButton(
+                        onClick = onBack,
+                        shape = RoundedCornerShape(20.dp),
+                        colors = ButtonDefaults.outlinedButtonColors(contentColor = colors.textMedium),
+                        border = BorderStroke(1.dp, colors.divider),
+                    ) {
+                        Text("Cancel", modifier = Modifier.padding(horizontal = 16.dp))
+                    }
+                    Spacer(Modifier.width(12.dp))
+                    OutlinedButton(
+                        onClick = { viewModel.save(onSaved) },
+                        enabled = name.isNotBlank(),
+                        shape = RoundedCornerShape(20.dp),
+                        colors = ButtonDefaults.outlinedButtonColors(contentColor = colors.electricBlue),
+                        border = BorderStroke(
+                            1.dp,
+                            if (name.isNotBlank()) colors.electricBlue else colors.divider,
+                        ),
+                    ) {
+                        Text("Save", modifier = Modifier.padding(horizontal = 24.dp))
+                    }
                 }
             }
         }

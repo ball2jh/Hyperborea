@@ -1,19 +1,20 @@
 package com.nettarion.hyperborea.ui.ride
 
-import android.app.Application
-import android.os.Environment
-import androidx.lifecycle.AndroidViewModel
+import android.content.Context
+import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.nettarion.hyperborea.core.AppLogger
-import com.nettarion.hyperborea.core.fit.FitActivityBuilder
+import com.nettarion.hyperborea.core.fitfile.FitActivityBuilder
 import com.nettarion.hyperborea.core.model.Profile
 import com.nettarion.hyperborea.core.model.DerivedMetrics
 import com.nettarion.hyperborea.core.model.RideSummary
 import com.nettarion.hyperborea.core.model.WorkoutSample
 import com.nettarion.hyperborea.core.model.computeDerivedMetrics
 import com.nettarion.hyperborea.core.profile.ProfileRepository
+import com.nettarion.hyperborea.platform.FitExporter
 import com.nettarion.hyperborea.ui.admin.ExportResult
 import dagger.hilt.android.lifecycle.HiltViewModel
+import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -25,18 +26,16 @@ import kotlinx.coroutines.flow.filterNotNull
 import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
-import java.io.File
-import java.text.SimpleDateFormat
-import java.util.Date
-import java.util.Locale
 import javax.inject.Inject
 
 @HiltViewModel
 class RideDetailViewModel @Inject constructor(
     private val profileRepository: ProfileRepository,
     private val logger: AppLogger,
-    application: Application,
-) : AndroidViewModel(application) {
+    @param:ApplicationContext private val context: Context,
+) : ViewModel() {
+
+    private val fitExporter = FitExporter(context, logger)
 
     private val _rideId = MutableStateFlow<Long?>(null)
 
@@ -71,32 +70,7 @@ class RideDetailViewModel @Inject constructor(
             try {
                 val sampleList = samples.value
                 val fitBytes = FitActivityBuilder.buildActivityFile(summary, sampleList, profile.value)
-
-                val timestamp = SimpleDateFormat("yyyyMMdd_HHmmss", Locale.US).format(Date(summary.startedAt))
-                val filename = "hyperborea_$timestamp.fit"
-
-                @Suppress("DEPRECATION")
-                val downloadsDir = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS)
-                downloadsDir.mkdirs()
-                val file = File(downloadsDir, filename)
-
-                try {
-                    file.writeBytes(fitBytes)
-                    _exportResult.value = ExportResult(file.absolutePath)
-                    logger.i(TAG, "FIT exported to ${file.absolutePath}")
-                } catch (e: Exception) {
-                    logger.e(TAG, "Failed to write FIT to Downloads", e)
-                    val fallbackDir = getApplication<Application>().getExternalFilesDir(Environment.DIRECTORY_DOWNLOADS)
-                    if (fallbackDir != null) {
-                        fallbackDir.mkdirs()
-                        val fallbackFile = File(fallbackDir, filename)
-                        fallbackFile.writeBytes(fitBytes)
-                        _exportResult.value = ExportResult(fallbackFile.absolutePath)
-                        logger.i(TAG, "FIT exported to ${fallbackFile.absolutePath} (fallback)")
-                    } else {
-                        _exportResult.value = ExportResult(null, error = "Failed to save: ${e.message}")
-                    }
-                }
+                _exportResult.value = fitExporter.exportToFile(fitBytes, summary.startedAt)
             } catch (e: Exception) {
                 logger.e(TAG, "FIT export failed", e)
                 _exportResult.value = ExportResult(null, error = "Export failed: ${e.message}")

@@ -8,6 +8,7 @@ import com.nettarion.hyperborea.core.adapter.BroadcastId
 import com.nettarion.hyperborea.core.model.DeviceCommand
 import com.nettarion.hyperborea.core.model.DeviceInfo
 import com.nettarion.hyperborea.core.model.ExerciseData
+import com.nettarion.hyperborea.core.model.FanMode
 import com.nettarion.hyperborea.core.profile.UserPreferences
 import com.nettarion.hyperborea.core.system.SystemMonitor
 
@@ -81,11 +82,15 @@ class BroadcastManager(
                         if (!isStarted) return@collect
 
                         val toStop = activeBroadcasts.keys - currentEnabledIds
-                        for (id in toStop) stopBroadcast(id)
+                        for (id in toStop) {
+                            logger.i(TAG, "Broadcast toggled off: ${id.displayName}")
+                            stopBroadcast(id)
+                        }
 
                         val toStart = currentEnabledIds - activeBroadcasts.keys
                         for (id in toStart) {
                             val adapter = broadcastAdapters.find { it.id == id } ?: continue
+                            logger.i(TAG, "Broadcast toggled on: ${id.displayName}")
                             startBroadcast(adapter)
                         }
                     }
@@ -129,12 +134,14 @@ class BroadcastManager(
         dataForwardingJob = scope.launch {
             source.filterNotNull().collect { _dataSource.emit(it) }
         }
+        logger.i(TAG, "Data source connected to ${activeBroadcasts.size} broadcast(s)")
     }
 
     fun disconnectDataSource() {
         dataForwardingJob?.cancel()
         dataForwardingJob = null
         _dataSource.resetReplayCache()
+        logger.i(TAG, "Data source disconnected (broadcasts remain active)")
     }
 
     suspend fun updateDeviceInfo(info: DeviceInfo) {
@@ -164,7 +171,14 @@ class BroadcastManager(
         val commandJob = scope.launch {
             adapter.incomingCommands
                 .catch { e -> logger.e(TAG, "Command pipeline error for ${adapter.id.displayName}", e) }
-                .collect { command -> _incomingCommands.emit(command) }
+                .collect { command ->
+                    if (command is DeviceCommand.SetFanSpeed &&
+                        userPreferences.fanMode.value != FanMode.WIND_SIMULATION) {
+                        logger.d(TAG, "Filtered SetFanSpeed command (fan mode: ${userPreferences.fanMode.value})")
+                        return@collect
+                    }
+                    _incomingCommands.emit(command)
+                }
         }
 
         val monitorJob = scope.launch {

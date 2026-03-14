@@ -3,8 +3,11 @@ package com.nettarion.hyperborea.hardware.fitpro
 import com.google.common.truth.Truth.assertThat
 import com.nettarion.hyperborea.core.adapter.AdapterState
 import com.nettarion.hyperborea.core.model.DeviceCommand
+import com.nettarion.hyperborea.core.model.DeviceInfo
 import com.nettarion.hyperborea.core.model.DeviceType
+import com.nettarion.hyperborea.core.model.Metric
 import com.nettarion.hyperborea.core.orchestration.FulfillResult
+import com.nettarion.hyperborea.core.profile.DeviceConfigRepository
 import com.nettarion.hyperborea.core.system.SystemController
 import com.nettarion.hyperborea.core.system.UsbDeviceInfo
 import com.nettarion.hyperborea.core.test.buildSystemSnapshot
@@ -26,12 +29,14 @@ class FitProAdapterTest {
     private val transport = FakeHidTransport()
     private val logger = TestAppLogger()
 
+    private val fakeDeviceConfigRepo = FakeDeviceConfigRepository()
+
     private fun createAdapter(scope: TestScope, productId: Int = 2): FitProAdapter {
         val testFactory = object : HidTransportFactory {
             override fun create(vendorId: Int, @Suppress("PARAMETER_NAME_CHANGED_ON_OVERRIDE") pid: Int) =
                 HidTransportResult(transport, productId)
         }
-        return FitProAdapter(testFactory, logger, scope.backgroundScope)
+        return FitProAdapter(testFactory, logger, scope.backgroundScope, fakeDeviceConfigRepo)
     }
 
     // --- Prerequisites ---
@@ -248,14 +253,15 @@ class FitProAdapterTest {
     fun `connect with product ID 2 uses V1 session`() = runTest {
         val adapter = createAdapter(this, productId = 2)
 
-        // V1 handshake requires: ConnectAck, DeviceInfoResponse, SystemInfoResponse,
-        // VersionInfoResponse, and SecurityResponse (when sw > 75)
+        // V1 handshake: SupportedDevices → Connect → DeviceInfo → SystemInfo → VersionInfo → Security → Capabilities
         backgroundScope.launch {
+            transport.emitIncoming(buildSupportedDevicesResponse())
             transport.emitIncoming(buildConnectAck())
             transport.emitIncoming(buildDeviceInfoResponse())
             transport.emitIncoming(buildSystemInfoResponse())
             transport.emitIncoming(buildVersionInfoResponse())
             transport.emitIncoming(buildSecurityUnlockedResponse())
+            transport.emitIncoming(buildCapabilityResponse())
         }
 
         adapter.connect()
@@ -285,15 +291,17 @@ class FitProAdapterTest {
     }
 
     @Test
-    fun `deviceInfo reflects S22i after V1 connect with model 2117`() = runTest {
+    fun `deviceInfo reflects fallback after V1 connect`() = runTest {
         val adapter = createAdapter(this, productId = 2)
 
         backgroundScope.launch {
+            transport.emitIncoming(buildSupportedDevicesResponse())
             transport.emitIncoming(buildConnectAck())
             transport.emitIncoming(buildDeviceInfoResponse())
             transport.emitIncoming(buildSystemInfoResponse(model = 2117))
             transport.emitIncoming(buildVersionInfoResponse())
             transport.emitIncoming(buildSecurityUnlockedResponse())
+            transport.emitIncoming(buildCapabilityResponse())
         }
 
         adapter.connect()
@@ -301,7 +309,7 @@ class FitProAdapterTest {
 
         assertThat(adapter.state.value).isEqualTo(AdapterState.Active)
         assertThat(adapter.deviceInfo.value).isNotNull()
-        assertThat(adapter.deviceInfo.value!!.name).isEqualTo("NordicTrack S22i")
+        assertThat(adapter.deviceInfo.value!!.name).isEqualTo("FitPro Device")
         assertThat(adapter.deviceInfo.value!!.maxResistance).isEqualTo(24)
     }
 
@@ -312,11 +320,96 @@ class FitProAdapterTest {
                 throw IllegalStateException("No USB device found")
             }
         }
-        val adapter = FitProAdapter(failingFactory, logger, backgroundScope)
+        val adapter = FitProAdapter(failingFactory, logger, backgroundScope, fakeDeviceConfigRepo)
         adapter.connect()
         advanceUntilIdle()
 
         assertThat(adapter.state.value).isInstanceOf(AdapterState.Error::class.java)
+    }
+
+    // --- Device config repository ---
+
+    @Test
+    fun `user config takes priority over DeviceDatabase after V1 connect`() = runTest {
+        val customInfo = DeviceInfo(
+            name = "My Custom Bike",
+            type = DeviceType.BIKE,
+            supportedMetrics = setOf(Metric.POWER, Metric.CADENCE),
+            maxResistance = 30, minResistance = 5,
+            minIncline = -5f, maxIncline = 15f,
+            maxPower = 1500, minPower = 50, powerStep = 5,
+            resistanceStep = 2.0f, inclineStep = 1.0f,
+            speedStep = 1.0f, maxSpeed = 50f,
+        )
+        fakeDeviceConfigRepo.configs[2117] = customInfo
+
+        val adapter = createAdapter(this, productId = 2)
+        backgroundScope.launch {
+            transport.emitIncoming(buildSupportedDevicesResponse())
+            transport.emitIncoming(buildConnectAck())
+            transport.emitIncoming(buildDeviceInfoResponse())
+            transport.emitIncoming(buildSystemInfoResponse(model = 2117))
+            transport.emitIncoming(buildVersionInfoResponse())
+            transport.emitIncoming(buildSecurityUnlockedResponse())
+            transport.emitIncoming(buildCapabilityResponse())
+        }
+
+        adapter.connect()
+        advanceUntilIdle()
+
+        assertThat(adapter.deviceInfo.value).isNotNull()
+        assertThat(adapter.deviceInfo.value!!.name).isEqualTo("My Custom Bike")
+        assertThat(adapter.deviceInfo.value!!.maxResistance).isEqualTo(30)
+    }
+
+    @Test
+    fun `falls back to DeviceDatabase when no user config`() = runTest {
+        // fakeDeviceConfigRepo is empty by default
+        val adapter = createAdapter(this, productId = 2)
+        backgroundScope.launch {
+            transport.emitIncoming(buildSupportedDevicesResponse())
+            transport.emitIncoming(buildConnectAck())
+            transport.emitIncoming(buildDeviceInfoResponse())
+            transport.emitIncoming(buildSystemInfoResponse(model = 2117))
+            transport.emitIncoming(buildVersionInfoResponse())
+            transport.emitIncoming(buildSecurityUnlockedResponse())
+            transport.emitIncoming(buildCapabilityResponse())
+        }
+
+        adapter.connect()
+        advanceUntilIdle()
+
+        assertThat(adapter.deviceInfo.value).isNotNull()
+        assertThat(adapter.deviceInfo.value!!.name).isEqualTo("FitPro Device")
+        assertThat(adapter.deviceInfo.value!!.maxResistance).isEqualTo(24)
+    }
+
+    @Test
+    fun `refreshDeviceInfo re-resolves with updated config`() = runTest {
+        val adapter = createAdapter(this, productId = 2)
+        backgroundScope.launch {
+            transport.emitIncoming(buildSupportedDevicesResponse())
+            transport.emitIncoming(buildConnectAck())
+            transport.emitIncoming(buildDeviceInfoResponse())
+            transport.emitIncoming(buildSystemInfoResponse(model = 2117))
+            transport.emitIncoming(buildVersionInfoResponse())
+            transport.emitIncoming(buildSecurityUnlockedResponse())
+            transport.emitIncoming(buildCapabilityResponse())
+        }
+
+        adapter.connect()
+        advanceUntilIdle()
+
+        // Initially uses DeviceDatabase fallback
+        assertThat(adapter.deviceInfo.value!!.name).isEqualTo("FitPro Device")
+
+        // Save a custom config and refresh
+        val customInfo = adapter.deviceInfo.value!!.copy(name = "Renamed Bike", maxResistance = 32)
+        fakeDeviceConfigRepo.configs[2117] = customInfo
+        adapter.refreshDeviceInfo()
+
+        assertThat(adapter.deviceInfo.value!!.name).isEqualTo("Renamed Bike")
+        assertThat(adapter.deviceInfo.value!!.maxResistance).isEqualTo(32)
     }
 
     // --- Helpers ---
@@ -344,6 +437,16 @@ class FitProAdapterTest {
     }
 
     // --- V1 handshake packet builders ---
+
+    private fun buildSupportedDevicesResponse(): ByteArray {
+        // MAIN=2, FITNESS_BIKE=7, GRADE=0x42
+        val data = byteArrayOf(
+            0x02, 0x09, 0x80.toByte(), 0x02,
+            0x03, // count
+            0x02, 0x07, 0x42, // device IDs
+        )
+        return data + V1Codec.checksum(data)
+    }
 
     private fun buildConnectAck(): ByteArray {
         val data = byteArrayOf(0x07, 0x04, 0x04)
@@ -389,4 +492,48 @@ class FitProAdapterTest {
         )
         return data + V1Codec.checksum(data)
     }
+
+    private fun buildCapabilityResponse(maxResistance: Int = 0): ByteArray {
+        // Capability fields sorted by fieldIndex:
+        // MAX_GRADE(27,2), MIN_GRADE(28,2), MAX_KPH(30,2), MIN_KPH(31,2),
+        // MAX_RESISTANCE_LEVEL(42,1), MOTOR_TOTAL_DISTANCE(69,4), TOTAL_TIME(70,4)
+        // Total = 17 bytes
+        val fieldData = ByteArray(17)
+        // MAX_RESISTANCE_LEVEL at offset 8 (after 2+2+2+2)
+        fieldData[8] = maxResistance.toByte()
+        val totalLen = 4 + fieldData.size + 1
+        val header = byteArrayOf(0x08, totalLen.toByte(), 0x02, 0x02)
+        val withoutChecksum = header + fieldData
+        return withoutChecksum + V1Codec.checksum(withoutChecksum)
+    }
+
+    @Test
+    fun `capabilities merge includes maxResistance from MCU`() = runTest {
+        val adapter = createAdapter(this, productId = 2)
+        backgroundScope.launch {
+            transport.emitIncoming(buildSupportedDevicesResponse())
+            transport.emitIncoming(buildConnectAck())
+            transport.emitIncoming(buildDeviceInfoResponse())
+            transport.emitIncoming(buildSystemInfoResponse(model = 2117))
+            transport.emitIncoming(buildVersionInfoResponse())
+            transport.emitIncoming(buildSecurityUnlockedResponse())
+            transport.emitIncoming(buildCapabilityResponse(maxResistance = 30))
+        }
+
+        adapter.connect()
+        advanceUntilIdle()
+
+        assertThat(adapter.deviceInfo.value).isNotNull()
+        assertThat(adapter.deviceInfo.value!!.maxResistance).isEqualTo(30)
+    }
+
+}
+
+private class FakeDeviceConfigRepository : DeviceConfigRepository {
+    val configs = mutableMapOf<Int, DeviceInfo>()
+
+    override suspend fun getConfig(modelNumber: Int): DeviceInfo? = configs[modelNumber]
+    override suspend fun saveConfig(modelNumber: Int, config: DeviceInfo) { configs[modelNumber] = config }
+    override suspend fun deleteConfig(modelNumber: Int) { configs.remove(modelNumber) }
+    override suspend fun hasConfig(modelNumber: Int): Boolean = modelNumber in configs
 }

@@ -182,23 +182,13 @@ class ExerciseDataAccumulatorTest {
     }
 
     @Test
-    fun `updateLifetimeRunningTime is reflected in snapshot`() {
-        accumulator.start()
-        accumulator.updateLifetimeRunningTime(86400)
-        assertThat(accumulator.snapshot().lifetimeRunningTime).isEqualTo(86400)
-    }
-
-    @Test
-    fun `reset clears target and lifetime fields`() {
+    fun `reset clears target fields`() {
         accumulator.start()
         accumulator.updateTargetPower(200)
         accumulator.updateTargetResistance(15)
         accumulator.updateTargetSpeed(25.5f)
         accumulator.updateTargetIncline(8.0f)
         accumulator.updateWorkoutMode(1)
-        accumulator.updateLifetimeRunningTime(86400)
-        accumulator.updateLifetimeDistance(1234.5f)
-        accumulator.updateLifetimeCalories(56789)
 
         accumulator.reset()
         val snapshot = accumulator.snapshot()
@@ -207,9 +197,6 @@ class ExerciseDataAccumulatorTest {
         assertThat(snapshot.targetSpeed).isNull()
         assertThat(snapshot.targetIncline).isNull()
         assertThat(snapshot.workoutMode).isNull()
-        assertThat(snapshot.lifetimeRunningTime).isNull()
-        assertThat(snapshot.lifetimeDistance).isNull()
-        assertThat(snapshot.lifetimeCalories).isNull()
     }
 
     @Test

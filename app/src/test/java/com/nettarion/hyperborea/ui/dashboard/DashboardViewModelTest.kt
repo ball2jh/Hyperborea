@@ -81,6 +81,7 @@ class DashboardViewModelTest {
         override suspend fun identify(): DeviceInfo? = null
         override suspend fun sendCommand(command: DeviceCommand) {}
         override fun setInitialElapsedTime(seconds: Long) {}
+        override fun refreshDeviceInfo() {}
     }
 
     private val fakeSystemMonitor = object : SystemMonitor {
@@ -92,11 +93,13 @@ class DashboardViewModelTest {
         override val enabledBroadcasts: StateFlow<Set<BroadcastId>> = this@DashboardViewModelTest.enabledBroadcasts
         override val overlayEnabled: StateFlow<Boolean> = MutableStateFlow(false)
         override val savedSensorAddress: StateFlow<String?> = MutableStateFlow(null)
+        override val fanMode: StateFlow<com.nettarion.hyperborea.core.model.FanMode> = MutableStateFlow(com.nettarion.hyperborea.core.model.FanMode.OFF)
         override fun setBroadcastEnabled(id: BroadcastId, enabled: Boolean) {
             toggledBroadcasts.add(id to enabled)
         }
         override fun setOverlayEnabled(enabled: Boolean) {}
         override fun setSavedSensorAddress(address: String?) {}
+        override fun setFanMode(mode: com.nettarion.hyperborea.core.model.FanMode) {}
     }
 
     private val fakeSensorAdapter = object : SensorAdapter {
@@ -180,6 +183,7 @@ class DashboardViewModelTest {
             hardwareAdapter = fakeHardwareAdapter,
             broadcastManager = broadcastManager,
             rideRecorder = rideRecorder,
+            userPreferences = fakeUserPreferences,
             logger = noOpLogger,
             scope = scope,
         )

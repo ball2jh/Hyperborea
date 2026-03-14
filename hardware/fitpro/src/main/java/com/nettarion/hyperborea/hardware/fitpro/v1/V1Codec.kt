@@ -12,6 +12,8 @@ object V1Codec {
     private const val CMD_SYSTEM_INFO: Byte = 0x82.toByte()
     private const val CMD_VERSION_INFO: Byte = 0x84.toByte()
     private const val CMD_VERIFY_SECURITY: Byte = 0x90.toByte()
+    private const val CMD_SUPPORTED_DEVICES: Byte = 0x80.toByte()
+    private const val CMD_CALIBRATE: Byte = 0x06
 
     private const val HEADER_SIZE = 4 // device, length, command, status/payload[0]
 
@@ -21,6 +23,9 @@ object V1Codec {
     private const val LAST_CHUNK_INDEX: Byte = 0xFF.toByte()
 
     fun encode(message: V1Message.Outgoing): List<ByteArray> = when (message) {
+        is V1Message.Outgoing.SupportedDevices -> listOf(
+            encodeSimple(message.deviceId, CMD_SUPPORTED_DEVICES, byteArrayOf())
+        )
         is V1Message.Outgoing.Connect -> listOf(
             encodeSimple(message.deviceId, CMD_CONNECT, byteArrayOf())
         )
@@ -45,6 +50,9 @@ object V1Codec {
             listOf(encodeSimple(message.deviceId, CMD_VERIFY_SECURITY, payload))
         }
         is V1Message.Outgoing.ReadWriteData -> encodeReadWriteData(message)
+        is V1Message.Outgoing.Calibrate -> listOf(
+            encodeSimple(message.deviceId, CMD_CALIBRATE, byteArrayOf(0x00))
+        )
     }
 
     fun decode(packets: List<ByteArray>): V1Message.Incoming? {
@@ -62,6 +70,7 @@ object V1Codec {
             CMD_CONNECT -> V1Message.Incoming.ConnectAck(deviceId)
             CMD_DISCONNECT -> V1Message.Incoming.DisconnectAck(deviceId)
             CMD_READ_WRITE_DATA -> decodeDataResponse(status, payload)
+            CMD_SUPPORTED_DEVICES -> decodeSupportedDevicesResponse(data)
             CMD_DEVICE_INFO -> decodeDeviceInfoResponse(deviceId, data)
             CMD_SYSTEM_INFO -> decodeSystemInfoResponse(data)
             CMD_VERSION_INFO -> decodeVersionInfoResponse(data)
@@ -229,6 +238,14 @@ object V1Codec {
             // Pulse: [userPulse, avgPulse, ?, sourceType]
             byteArrayOf(value.toInt().toByte(), 0, 0, 0)
         }
+        V1Converter.VERTICAL -> {
+            // Vertical: meters * 10000, stored as uint32 LE
+            val encoded = (value * 10000).toInt()
+            val buf = ByteBuffer.allocate(4).order(ByteOrder.LITTLE_ENDIAN)
+            buf.putInt(encoded)
+            buf.array()
+        }
+        V1Converter.KEY_OBJECT -> ByteArray(14)
     }
 
     private fun convertFromBytes(field: V1DataField, data: ByteArray): Float = when (field.converter) {
@@ -266,6 +283,15 @@ object V1Codec {
             // userPulse is byte 0
             (data[0].toInt() and 0xFF).toFloat()
         }
+        V1Converter.VERTICAL -> {
+            // uint32 LE / 10000 → meters
+            val raw = ByteBuffer.wrap(data, 0, 4).order(ByteOrder.LITTLE_ENDIAN).int
+            raw.toFloat() / 10000f
+        }
+        V1Converter.KEY_OBJECT -> {
+            // First byte is key state; remaining 13 bytes unused
+            (data[0].toInt() and 0xFF).toFloat()
+        }
     }
 
     private fun encodeMultiPacket(data: ByteArray): List<ByteArray> {
@@ -299,6 +325,14 @@ object V1Codec {
             reassembled.addAll(chunkData.toList())
         }
         return reassembled.toByteArray()
+    }
+
+    private fun decodeSupportedDevicesResponse(data: ByteArray): V1Message.Incoming.SupportedDevicesResponse {
+        val count = if (data.size > 4) data[4].toInt() and 0xFF else 0
+        val ids = (0 until count).mapNotNull { i ->
+            if (5 + i < data.size) data[5 + i].toInt() and 0xFF else null
+        }
+        return V1Message.Incoming.SupportedDevicesResponse(ids)
     }
 
     private fun decodeDeviceInfoResponse(deviceId: Int, data: ByteArray): V1Message.Incoming.DeviceInfoResponse {
@@ -349,23 +383,42 @@ object V1Codec {
      * For simplicity, we decode by trying all periodic read fields in order,
      * reading converter.sizeBytes at each offset until we run out of data.
      */
-    fun decodeDataResponse(status: Int, payload: ByteArray): V1Message.Incoming {
+    fun decodeDataResponse(status: Int, payload: ByteArray): V1Message.Incoming =
+        decodeDataResponseForFields(status, payload, V1DataField.periodicReadFields, strict = false)
+
+    /**
+     * Decodes a ReadWriteData response for an arbitrary field set.
+     * Uses lenient decoding — decodes as many complete fields as the payload
+     * provides, tolerating MCU responses shorter than expected.
+     */
+    fun decodeDataResponse(
+        status: Int,
+        payload: ByteArray,
+        expectedFields: Set<V1DataField>,
+    ): V1Message.Incoming =
+        decodeDataResponseForFields(status, payload, expectedFields, strict = false)
+
+    private fun decodeDataResponseForFields(
+        status: Int,
+        payload: ByteArray,
+        fieldSet: Set<V1DataField>,
+        strict: Boolean,
+    ): V1Message.Incoming {
         if (status != V1Message.STATUS_DONE) {
             return V1Message.Incoming.DataResponse(status, emptyMap())
         }
 
         val fields = mutableMapOf<V1DataField, Float>()
         var offset = 0
-        val readFields = V1DataField.periodicReadFields.sortedBy { it.fieldIndex }
+        val readFields = fieldSet.sortedBy { it.fieldIndex }
         val expectedSize = readFields.sumOf { it.sizeBytes }
 
-        // If payload doesn't match expected total size, only decode if it's
-        // a complete set — partial payloads could mean misaligned fields
-        if (payload.size != expectedSize) {
+        if (strict && payload.size != expectedSize) {
             return V1Message.Incoming.DataResponse(status, emptyMap())
         }
 
         for (field in readFields) {
+            if (offset + field.sizeBytes > payload.size) break
             val fieldData = payload.copyOfRange(offset, offset + field.sizeBytes)
             fields[field] = convertFromBytes(field, fieldData)
             offset += field.sizeBytes

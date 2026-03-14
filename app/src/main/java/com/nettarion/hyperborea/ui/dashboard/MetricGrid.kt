@@ -27,6 +27,7 @@ fun MetricGrid(
     modifier: Modifier = Modifier,
 ) {
     val colors = LocalHyperboreaColors.current
+    fun isSupported(metric: Metric): Boolean = supportedMetrics?.contains(metric) != false
 
     Column(modifier = modifier.fillMaxSize()) {
         // Primary row: Cadence | POWER | Heart Rate
@@ -37,6 +38,7 @@ fun MetricGrid(
                 unit = "RPM",
                 label = "Cadence",
                 modifier = Modifier.weight(0.7f).fillMaxHeight(),
+                supported = isSupported(Metric.CADENCE),
             )
             VerticalDivider(thickness = 1.dp, color = colors.divider)
             // Power (hero) — amber accent + bottom border
@@ -50,6 +52,7 @@ fun MetricGrid(
                     unitStyle = MaterialTheme.typography.headlineLarge,
                     valueColor = colors.accentWarm,
                     target = exerciseData?.targetPower?.toString(),
+                    supported = isSupported(Metric.POWER),
                 )
                 Box(
                     modifier = Modifier
@@ -67,6 +70,7 @@ fun MetricGrid(
                 unit = "BPM",
                 label = "Heart Rate",
                 modifier = Modifier.weight(0.7f).fillMaxHeight(),
+                supported = isSupported(Metric.HEART_RATE),
             )
         }
         HorizontalDivider(thickness = 1.dp, color = colors.divider)
@@ -87,6 +91,7 @@ fun MetricGrid(
                 labelStyle = secondaryLabelStyle,
                 targetStyle = secondaryTargetStyle,
                 target = exerciseData?.targetSpeed?.let { "%.1f".format(it) },
+                supported = isSupported(Metric.SPEED),
             )
             VerticalDivider(thickness = 1.dp, color = colors.divider)
             MetricCell(
@@ -109,6 +114,7 @@ fun MetricGrid(
                 labelStyle = secondaryLabelStyle,
                 targetStyle = secondaryTargetStyle,
                 target = exerciseData?.targetResistance?.toString(),
+                supported = isSupported(Metric.RESISTANCE),
             )
             VerticalDivider(thickness = 1.dp, color = colors.divider)
             MetricCell(
@@ -121,6 +127,7 @@ fun MetricGrid(
                 labelStyle = secondaryLabelStyle,
                 targetStyle = secondaryTargetStyle,
                 target = exerciseData?.targetIncline?.let { "%.1f".format(it) },
+                supported = isSupported(Metric.INCLINE),
             )
             VerticalDivider(thickness = 1.dp, color = colors.divider)
             MetricCell(
@@ -131,6 +138,7 @@ fun MetricGrid(
                 valueStyle = secondaryValueStyle,
                 unitStyle = secondaryUnitStyle,
                 labelStyle = secondaryLabelStyle,
+                supported = isSupported(Metric.DISTANCE),
             )
             VerticalDivider(thickness = 1.dp, color = colors.divider)
             MetricCell(
@@ -141,6 +149,7 @@ fun MetricGrid(
                 valueStyle = secondaryValueStyle,
                 unitStyle = secondaryUnitStyle,
                 labelStyle = secondaryLabelStyle,
+                supported = isSupported(Metric.CALORIES),
             )
         }
     }

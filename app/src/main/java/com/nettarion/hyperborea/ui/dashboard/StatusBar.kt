@@ -241,7 +241,7 @@ fun StatusBar(
                         imageVector = Icons.Outlined.Person,
                         contentDescription = "Profile",
                         tint = colors.textLow,
-                        modifier = Modifier.size(32.dp),
+                        modifier = Modifier.size(36.dp),
                     )
                 }
             }
@@ -249,7 +249,7 @@ fun StatusBar(
             IconButton(onClick = onSettingsClick) {
                 Icon(
                     imageVector = Icons.Outlined.Settings,
-                    contentDescription = "Settings",
+                    contentDescription = "Quick Settings",
                     tint = colors.textLow,
                     modifier = Modifier.size(32.dp),
                 )

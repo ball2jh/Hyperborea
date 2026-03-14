@@ -6,4 +6,6 @@ data class DeviceIdentity(
     val hardwareVersion: String? = null,
     val model: String? = null,
     val partNumber: String? = null,
+    val equipmentHours: Long? = null,
+    val equipmentDistance: Float? = null,
 )

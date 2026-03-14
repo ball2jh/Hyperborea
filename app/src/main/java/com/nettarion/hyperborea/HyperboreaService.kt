@@ -70,7 +70,10 @@ class HyperboreaService : Service() {
             ACTION_DEACTIVATE_DISCARD -> deactivate(saveRide = false)
             ACTION_PAUSE -> pause()
             ACTION_RESUME -> resume()
-            ACTION_TOGGLE_OVERLAY -> overlayManager.toggle()
+            ACTION_TOGGLE_OVERLAY -> {
+                logger.d(TAG, "Toggle overlay")
+                overlayManager.toggle()
+            }
             ACTION_SHUTDOWN -> shutdown()
             else -> logger.i(TAG, "Started with no action — idle")
         }

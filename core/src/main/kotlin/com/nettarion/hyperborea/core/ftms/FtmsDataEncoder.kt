@@ -135,6 +135,14 @@ object FtmsDataEncoder {
             parts.add(sint16LE(0)) // Ramp angle
         }
 
+        // Elevation Gain: uint16 positive gain + uint16 negative gain, 0.1m resolution (bit 5)
+        val gain = data.verticalGain
+        if (gain != null) {
+            flags = flags or (1 shl 5)
+            parts.add(uint16LE((gain * 10).toInt().coerceIn(0, 0xFFFF))) // positive gain
+            parts.add(uint16LE(0)) // negative gain (not tracked separately)
+        }
+
         // Expended Energy: total uint16 + per-hour uint16 + per-minute uint8 (bit 7)
         val calories = data.calories
         if (calories != null) {
@@ -190,9 +198,9 @@ object FtmsDataEncoder {
         val parts = mutableListOf<ByteArray>()
 
         // Stroke Rate + Count: always present (bit 0 = 0)
-        val cadence = data.cadence ?: 0
-        parts.add(byteArrayOf((cadence * 2).coerceIn(0, 255).toByte()))
-        parts.add(uint16LE(0)) // Stroke count
+        val strokeRate = data.strokeRate ?: data.cadence ?: 0
+        parts.add(byteArrayOf((strokeRate * 2).coerceIn(0, 255).toByte()))
+        parts.add(uint16LE((data.strokeCount ?: 0).coerceIn(0, 0xFFFF)))
 
         // Total Distance: uint24, 1m resolution (bit 2)
         val distance = data.distance

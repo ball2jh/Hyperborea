@@ -1,4 +1,4 @@
-package com.nettarion.hyperborea.core.fit
+package com.nettarion.hyperborea.core.fitfile
 
 import java.io.ByteArrayOutputStream
 

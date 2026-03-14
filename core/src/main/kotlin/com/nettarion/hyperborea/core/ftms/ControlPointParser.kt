@@ -87,6 +87,23 @@ object ControlPointParser {
     }
 
     /**
+     * Extracts a fan speed command from FTMS Indoor Bike Simulation Parameters (opcode 0x11).
+     * Maps the wind speed field to a fan level: OFF (0), LOW (1), MEDIUM (2), HIGH (3).
+     */
+    fun extractFanCommand(ftmsPayload: ByteArray): DeviceCommand.SetFanSpeed? {
+        if (ftmsPayload.size < 3 || ftmsPayload[0] != 0x11.toByte()) return null
+        val windRaw = sint16LEAt(ftmsPayload, 1) // 0.001 m/s resolution
+        val windMps = kotlin.math.abs(windRaw / 1000f)
+        val level = when {
+            windMps < 1f -> 0  // OFF
+            windMps < 4f -> 1  // LOW
+            windMps < 8f -> 2  // MEDIUM
+            else -> 3          // HIGH
+        }
+        return DeviceCommand.SetFanSpeed(level)
+    }
+
+    /**
      * Encodes a FTMS CP response indication: [0x80, requestOpcode, resultCode].
      */
     fun encodeResponse(requestOpcode: Byte, resultCode: Byte): ByteArray =

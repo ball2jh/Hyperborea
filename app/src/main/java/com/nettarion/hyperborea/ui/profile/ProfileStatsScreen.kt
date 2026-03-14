@@ -30,7 +30,6 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
-import androidx.compose.material3.Snackbar
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -46,8 +45,9 @@ import androidx.compose.ui.unit.sp
 import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.nettarion.hyperborea.core.model.RideSummary
-import com.nettarion.hyperborea.ui.admin.ExportResult
 import com.nettarion.hyperborea.ui.theme.LocalHyperboreaColors
+import com.nettarion.hyperborea.ui.util.ExportResultSnackbar
+import com.nettarion.hyperborea.ui.util.rememberExportSnackbarState
 import com.nettarion.hyperborea.ui.util.UnitFormatter
 import java.text.SimpleDateFormat
 import java.util.Date
@@ -68,6 +68,7 @@ fun ProfileStatsScreen(
     val stats by viewModel.aggregateStats.collectAsStateWithLifecycle()
     val exportResult by viewModel.exportResult.collectAsStateWithLifecycle()
     val colors = LocalHyperboreaColors.current
+    val exportSnackbar = rememberExportSnackbarState(exportResult, viewModel::dismissExportResult)
 
     Box(modifier = Modifier.fillMaxSize()) {
     Row(
@@ -96,10 +97,17 @@ fun ProfileStatsScreen(
 
             profile?.let { p ->
                 val initials = p.name.take(2).uppercase()
+                val avatarColors = listOf(
+                    colors.electricBlue,
+                    colors.statusActive,
+                    colors.accentWarm,
+                    colors.statusError,
+                )
+                val avatarColor = avatarColors[(p.id % avatarColors.size).toInt()]
                 Box(
                     modifier = Modifier
                         .size(72.dp)
-                        .background(colors.electricBlue, CircleShape),
+                        .background(avatarColor, CircleShape),
                     contentAlignment = Alignment.Center,
                 ) {
                     Text(
@@ -197,23 +205,10 @@ fun ProfileStatsScreen(
     }
 
     // Export snackbar
-    exportResult?.let { result ->
-        Snackbar(
-            modifier = Modifier
-                .align(Alignment.BottomCenter)
-                .padding(16.dp),
-            action = {
-                TextButton(onClick = viewModel::dismissExportResult) {
-                    Text("Dismiss")
-                }
-            },
-        ) {
-            Text(
-                text = result.error ?: "Exported to ${result.filePath}",
-                maxLines = 2,
-            )
-        }
-    }
+    ExportResultSnackbar(
+        state = exportSnackbar,
+        modifier = Modifier.align(Alignment.BottomCenter),
+    )
     } // Box
 }
 
@@ -298,11 +293,11 @@ private fun RideRow(
                 ride.avgPower?.let {
                     Text("${it}W avg", style = MaterialTheme.typography.bodySmall, color = colors.electricBlue)
                 }
-                IconButton(onClick = onExport, modifier = Modifier.size(24.dp)) {
-                    Icon(Icons.Outlined.Share, contentDescription = "Export FIT", tint = colors.textLow, modifier = Modifier.size(16.dp))
+                IconButton(onClick = onExport, modifier = Modifier.size(32.dp)) {
+                    Icon(Icons.Outlined.Share, contentDescription = "Export FIT", tint = colors.textLow, modifier = Modifier.size(20.dp))
                 }
-                IconButton(onClick = { showDeleteConfirmation = true }, modifier = Modifier.size(24.dp)) {
-                    Icon(Icons.Outlined.Delete, contentDescription = "Delete ride", tint = colors.textLow, modifier = Modifier.size(16.dp))
+                IconButton(onClick = { showDeleteConfirmation = true }, modifier = Modifier.size(32.dp)) {
+                    Icon(Icons.Outlined.Delete, contentDescription = "Delete ride", tint = colors.textLow, modifier = Modifier.size(20.dp))
                 }
             }
         }

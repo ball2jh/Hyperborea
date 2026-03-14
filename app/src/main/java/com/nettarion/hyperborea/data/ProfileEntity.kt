@@ -16,6 +16,7 @@ data class ProfileEntity(
     val enabledBroadcasts: String,
     val overlayEnabled: Boolean = false,
     val savedSensorAddress: String? = null,
+    val fanMode: String = "OFF",
     val createdAt: Long,
     val isActive: Boolean = false,
 )

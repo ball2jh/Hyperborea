@@ -2,9 +2,12 @@ package com.nettarion.hyperborea.di
 
 import android.content.Context
 import com.nettarion.hyperborea.core.AppLogger
+import com.nettarion.hyperborea.core.profile.DeviceConfigRepository
 import com.nettarion.hyperborea.core.profile.ProfileRepository
+import com.nettarion.hyperborea.data.DeviceConfigDao
 import com.nettarion.hyperborea.data.HyperboreaDatabase
 import com.nettarion.hyperborea.data.ProfileDao
+import com.nettarion.hyperborea.data.RoomDeviceConfigRepository
 import com.nettarion.hyperborea.data.RoomProfileRepository
 import dagger.Module
 import dagger.Provides
@@ -40,4 +43,15 @@ object DatabaseModule {
         logger: AppLogger,
         scope: CoroutineScope,
     ): ProfileRepository = RoomProfileRepository(database, dao, logger, scope)
+
+    @Provides
+    @Singleton
+    fun provideDeviceConfigDao(database: HyperboreaDatabase): DeviceConfigDao = database.deviceConfigDao()
+
+    @Provides
+    @Singleton
+    fun provideDeviceConfigRepository(
+        dao: DeviceConfigDao,
+        logger: AppLogger,
+    ): DeviceConfigRepository = RoomDeviceConfigRepository(dao, logger)
 }

@@ -1,4 +1,4 @@
-package com.nettarion.hyperborea.core.fit
+package com.nettarion.hyperborea.core.fitfile
 
 import com.google.common.truth.Truth.assertThat
 import org.junit.Test

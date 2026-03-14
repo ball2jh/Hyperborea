@@ -102,11 +102,16 @@ class OverlayManager(
 
     fun toggle() {
         if (view != null) {
+            logger.d(TAG, "Overlay toggle: dismissing")
             userDismissed = true
             hide()
-        } else {
+        } else if (isAppInForeground) {
+            logger.d(TAG, "Overlay toggle: app in foreground, not showing")
             userDismissed = false
-            if (!isAppInForeground) show()
+        } else {
+            logger.d(TAG, "Overlay toggle: showing")
+            userDismissed = false
+            show()
         }
     }
 
@@ -124,6 +129,7 @@ class OverlayManager(
             is OrchestratorState.Stopping,
             is OrchestratorState.Error,
             -> {
+                logger.d(TAG, "Overlay auto-hidden (state=$state)")
                 userDismissed = false
                 hide()
             }

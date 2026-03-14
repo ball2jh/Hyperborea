@@ -9,6 +9,41 @@ import org.junit.Test
 class V1CodecTest {
 
     @Test
+    fun `encode SupportedDevices produces correct packet`() {
+        val packets = V1Codec.encode(V1Message.Outgoing.SupportedDevices())
+        assertThat(packets).hasSize(1)
+        assertThat(packets[0][0]).isEqualTo(0x02) // DEVICE_MAIN
+        assertThat(packets[0][2]).isEqualTo(0x80.toByte()) // CMD_SUPPORTED_DEVICES
+        assertThat(V1Codec.verifyChecksum(packets[0])).isTrue()
+    }
+
+    @Test
+    fun `decode SupportedDevicesResponse parses device IDs`() {
+        // device=2, len=TBD, cmd=0x80, status=0x02, count=3, ids=[2, 7, 0x42]
+        val data = byteArrayOf(
+            0x02, 0x09, 0x80.toByte(), 0x02,
+            0x03, // count
+            0x02, 0x07, 0x42, // device IDs
+        )
+        val packet = data + V1Codec.checksum(data)
+        val decoded = V1Codec.decodeSingle(packet)
+        assertThat(decoded).isInstanceOf(V1Message.Incoming.SupportedDevicesResponse::class.java)
+        val response = decoded as V1Message.Incoming.SupportedDevicesResponse
+        assertThat(response.deviceIds).containsExactly(2, 7, 0x42).inOrder()
+    }
+
+    @Test
+    fun `decode SupportedDevicesResponse with zero count`() {
+        val data = byteArrayOf(
+            0x02, 0x06, 0x80.toByte(), 0x02,
+            0x00, // count=0
+        )
+        val packet = data + V1Codec.checksum(data)
+        val decoded = V1Codec.decodeSingle(packet) as V1Message.Incoming.SupportedDevicesResponse
+        assertThat(decoded.deviceIds).isEmpty()
+    }
+
+    @Test
     fun `encode Connect produces packet with correct command ID`() {
         val packets = V1Codec.encode(V1Message.Outgoing.Connect())
         assertThat(packets).hasSize(1)
@@ -147,20 +182,18 @@ class V1CodecTest {
 
     @Test
     fun `decode DataResponse with DONE parses field values from payload`() {
-        // periodicReadFields sorted by fieldIndex:
-        //   GRADE(1,2), RESISTANCE(2,2), WATTS(3,2), CURRENT_DISTANCE(4,4),
-        //   RPM(5,2), DISTANCE(6,4), PULSE(10,4), RUNNING_TIME(11,4),
-        //   WORKOUT_MODE(12,1), CALORIES(13,4), ACTUAL_KPH(16,2),
-        //   ACTUAL_INCLINE(17,2), CURRENT_TIME(20,4), CURRENT_CALORIES(21,4)
-        // Total = 2+2+2+4+2+4+4+4+1+4+2+2+4+4 = 41 bytes
-        val fieldData = ByteArray(41)
-        // GRADE at offset 0: signed 16-bit LE -350 = grade -3.5%
+        // periodicReadFields sorted by fieldIndex — compute total size dynamically
+        val readFields = V1DataField.periodicReadFields.sortedBy { it.fieldIndex }
+        val totalDataSize = readFields.sumOf { it.sizeBytes }
+
+        val fieldData = ByteArray(totalDataSize)
+        // GRADE at offset 2 (after KPH=2): signed 16-bit LE -350 = grade -3.5%
         val grade = (-350).toShort()
-        fieldData[0] = grade.toByte()
-        fieldData[1] = (grade.toInt() shr 8).toByte()
-        // WATTS at offset 4 (after GRADE=2, RESISTANCE=2): 200 LE
-        fieldData[4] = 200.toByte()
-        fieldData[5] = 0
+        fieldData[2] = grade.toByte()
+        fieldData[3] = (grade.toInt() shr 8).toByte()
+        // WATTS at offset 6 (after KPH=2, GRADE=2, RESISTANCE=2): 200 LE
+        fieldData[6] = 200.toByte()
+        fieldData[7] = 0
 
         val totalLen = 4 + fieldData.size + 1
         val header = byteArrayOf(0x07, totalLen.toByte(), 0x02, 0x02)
@@ -317,9 +350,9 @@ class V1CodecTest {
     }
 
     @Test
-    fun `decodeDataResponse rejects partial payload`() {
-        // Payload shorter than expected total size → returns empty fields
-        val shortPayload = ByteArray(10) // way too short for 14 periodicReadFields
+    fun `decodeDataResponse leniently decodes partial payload`() {
+        // Payload shorter than expected → lenient decoder decodes complete fields that fit
+        val shortPayload = ByteArray(10) // enough for KPH(2)+GRADE(2)+RESISTANCE(2)+WATTS(2)=8, not CURRENT_DISTANCE(4)
         val totalLen = 4 + shortPayload.size + 1
         val header = byteArrayOf(0x07, totalLen.toByte(), 0x02, 0x02)
         val withoutChecksum = header + shortPayload
@@ -327,7 +360,9 @@ class V1CodecTest {
 
         val decoded = V1Codec.decodeSingle(packet) as V1Message.Incoming.DataResponse
         assertThat(decoded.status).isEqualTo(V1Message.STATUS_DONE)
-        assertThat(decoded.fields).isEmpty()
+        assertThat(decoded.fields).hasSize(4)
+        assertThat(decoded.fields).containsKey(V1DataField.KPH)
+        assertThat(decoded.fields).containsKey(V1DataField.WATTS)
     }
 
     @Test

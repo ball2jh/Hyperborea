@@ -12,6 +12,7 @@ interface FitProSession {
     suspend fun start()
     suspend fun stop()
     suspend fun identify(): DeviceIdentity?
+    suspend fun calibrate()
     suspend fun writeFeature(command: DeviceCommand)
 }
 

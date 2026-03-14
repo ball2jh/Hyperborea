@@ -43,6 +43,11 @@
         android:name="android.permission.INSTALL_PACKAGES"
         tools:ignore="ProtectedPermissions" />
 
+    <!-- Timezone auto-set from license check (granted as privileged app in /system/priv-app/) -->
+    <uses-permission
+        android:name="android.permission.SET_TIME_ZONE"
+        tools:ignore="ProtectedPermissions" />
+
     <application
         android:name=".HyperboreaApp"
         android:networkSecurityConfig="@xml/network_security_config"

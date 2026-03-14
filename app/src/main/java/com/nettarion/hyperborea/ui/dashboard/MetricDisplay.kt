@@ -7,6 +7,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.ui.draw.alpha
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -31,6 +32,7 @@ fun MetricCell(
     targetStyle: TextStyle = MaterialTheme.typography.headlineMedium,
     valueColor: Color = Color.Unspecified,
     target: String? = null,
+    supported: Boolean = true,
 ) {
     val colors = LocalHyperboreaColors.current
     val displayValue = value ?: "\u2014"
@@ -39,8 +41,9 @@ fun MetricCell(
     } else {
         if (value != null) colors.textHigh else colors.textLow
     }
+    val cellAlpha = if (supported) 1f else 0.3f
 
-    Box(modifier = modifier.fillMaxSize().padding(8.dp)) {
+    Box(modifier = modifier.fillMaxSize().alpha(cellAlpha).padding(8.dp)) {
         Text(
             text = label.uppercase(),
             style = labelStyle,

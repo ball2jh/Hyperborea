@@ -25,6 +25,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -43,10 +44,17 @@ fun ProfilePickerScreen(
     onProfileSelected: () -> Unit,
     onCreateProfile: () -> Unit,
     onGuest: () -> Unit = onProfileSelected,
+    autoSelect: Boolean = true,
     viewModel: ProfilePickerViewModel = hiltViewModel(),
 ) {
     val profiles by viewModel.profiles.collectAsStateWithLifecycle()
     val colors = LocalHyperboreaColors.current
+
+    LaunchedEffect(profiles, autoSelect) {
+        if (autoSelect && profiles.size == 1) {
+            viewModel.selectProfile(profiles[0].id, onProfileSelected)
+        }
+    }
 
     Box(
         modifier = Modifier
@@ -77,15 +85,24 @@ fun ProfilePickerScreen(
                 }
             }
             Spacer(Modifier.height(48.dp))
-            Text(
-                text = "Guest",
-                style = MaterialTheme.typography.titleMedium,
-                color = colors.textLow,
+            Column(
+                horizontalAlignment = Alignment.CenterHorizontally,
                 modifier = Modifier
                     .clip(RoundedCornerShape(20.dp))
                     .clickable(onClick = onGuest)
                     .padding(horizontal = 24.dp, vertical = 8.dp),
-            )
+            ) {
+                Text(
+                    text = "Guest",
+                    style = MaterialTheme.typography.titleMedium,
+                    color = colors.textLow,
+                )
+                Text(
+                    text = "Ride without saving",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = colors.textLow.copy(alpha = 0.6f),
+                )
+            }
         }
     }
 }

@@ -114,6 +114,10 @@ class V2Session(
         }
     }
 
+    override suspend fun calibrate() {
+        throw UnsupportedOperationException("CalibrateIncline not supported on V2")
+    }
+
     override suspend fun writeFeature(command: DeviceCommand) {
         if (_sessionState.value !is SessionState.Streaming) return
 
@@ -158,6 +162,26 @@ class V2Session(
                     SYSTEM_MODE_RUNNING,
                 )
             }
+            is DeviceCommand.CalibrateIncline -> {
+                logger.w(TAG, "CalibrateIncline not supported on V2")
+                return
+            }
+            is DeviceCommand.SetFanSpeed -> {
+                logger.w(TAG, "SetFanSpeed not supported on V2")
+                return
+            }
+            is DeviceCommand.SetVolume,
+            is DeviceCommand.SetGear,
+            is DeviceCommand.SetDistanceGoal,
+            is DeviceCommand.SetWarmupTimeout,
+            is DeviceCommand.SetCooldownTimeout,
+            is DeviceCommand.SetPauseTimeout,
+            is DeviceCommand.SetWarmUpMode,
+            is DeviceCommand.SetCoolDownMode,
+            is DeviceCommand.SetErgMode -> {
+                logger.w(TAG, "${command::class.simpleName} not supported on V2")
+                return
+            }
         }
 
         try {
@@ -175,6 +199,7 @@ class V2Session(
 
         // Subscribe in batches of 8
         val batches = V2FeatureId.subscribable.chunked(MAX_SUBSCRIBE_BATCH)
+        logger.d(TAG, "Subscribing to ${V2FeatureId.subscribable.size} features in ${batches.size} batches")
         for (batch in batches) {
             val subscribe = V2Message.Outgoing.Subscribe(batch)
             transport.write(V2Codec.encode(subscribe))
@@ -203,6 +228,8 @@ class V2Session(
         }
     }
 
+    private var lastLogTimeMs = 0L
+
     private fun handleIncoming(data: ByteArray) {
         val message = V2Codec.decode(data) ?: return
 
@@ -210,6 +237,15 @@ class V2Session(
             is V2Message.Incoming.Event -> {
                 applyEvent(message.feature, message.value)
                 _exerciseData.value = accumulator.snapshot()
+
+                val now = System.currentTimeMillis()
+                if (now - lastLogTimeMs >= 1000L) {
+                    lastLogTimeMs = now
+                    val snap = _exerciseData.value
+                    if (snap != null) {
+                        logger.d(TAG, "power=${snap.power}W cadence=${snap.cadence}rpm speed=${snap.speed}kph resistance=${snap.resistance} incline=${snap.incline}%")
+                    }
+                }
             }
             is V2Message.Incoming.SupportedFeatures ->
                 logger.d(TAG, "Supported features: ${message.features.map { it.name }}")

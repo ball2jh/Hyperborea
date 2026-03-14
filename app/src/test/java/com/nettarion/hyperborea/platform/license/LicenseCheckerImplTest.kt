@@ -1,5 +1,6 @@
 package com.nettarion.hyperborea.platform.license
 
+import android.content.ContextWrapper
 import android.content.SharedPreferences
 import app.cash.turbine.test
 import com.google.common.truth.Truth.assertThat
@@ -29,7 +30,7 @@ class LicenseCheckerImplTest {
     fun setUp() {
         prefs = FakeSharedPreferences()
         httpClient = FakeLicenseHttpClient()
-        checker = LicenseCheckerImpl(prefs, TestAppLogger(), httpClient)
+        checker = LicenseCheckerImpl(ContextWrapper(null), prefs, TestAppLogger(), httpClient)
     }
 
     @Test

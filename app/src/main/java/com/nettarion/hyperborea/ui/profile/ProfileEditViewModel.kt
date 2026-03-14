@@ -115,6 +115,14 @@ class ProfileEditViewModel @Inject constructor(
         }
     }
 
+    fun deleteProfile(onDeleted: () -> Unit) {
+        val profile = editingProfile ?: return
+        viewModelScope.launch {
+            profileRepository.deleteProfile(profile.id)
+            onDeleted()
+        }
+    }
+
     fun save(onSaved: () -> Unit) {
         val nameValue = _name.value.trim()
         if (nameValue.isBlank()) return

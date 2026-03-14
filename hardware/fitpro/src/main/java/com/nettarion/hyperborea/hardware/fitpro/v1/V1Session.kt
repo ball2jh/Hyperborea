@@ -5,12 +5,15 @@ import com.nettarion.hyperborea.core.model.DeviceCommand
 import com.nettarion.hyperborea.core.model.DeviceIdentity
 import com.nettarion.hyperborea.core.model.DeviceInfo
 import com.nettarion.hyperborea.core.model.ExerciseData
+import com.nettarion.hyperborea.hardware.fitpro.session.DeviceDatabase
 import com.nettarion.hyperborea.hardware.fitpro.session.ExerciseDataAccumulator
 import com.nettarion.hyperborea.hardware.fitpro.session.FitProSession
+import com.nettarion.hyperborea.hardware.fitpro.session.PowerEstimator
 import com.nettarion.hyperborea.hardware.fitpro.session.SessionState
 import com.nettarion.hyperborea.hardware.fitpro.transport.HidTransport
 import kotlin.math.roundToInt
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
@@ -42,10 +45,19 @@ class V1Session(
     private var pollJob: Job? = null
     private var pendingWriteFields: Map<V1DataField, Float> = emptyMap()
     private val pendingWriteMutex = Mutex()
+    @Volatile private var pendingCalibration: CompletableDeferred<Unit>? = null
     private var lastLogTimeMs = 0L
     private var consecutivePollErrors = 0
     private var lastSentGrade = 0f
     private var lastSentSpeed = 0f
+
+    /** Device capabilities read from MCU during handshake. */
+    var capabilities: V1Capabilities? = null
+        private set
+
+    /** Power curve table index from GlassOS device database, set during handshake. */
+    var powerCurveIndex: Int? = null
+        private set
 
     // Security handshake state — stored for SECURITY_BLOCK re-verification
     private var softwareVersion: Int = 0
@@ -143,7 +155,31 @@ class V1Session(
         }
     }
 
+    override suspend fun calibrate() {
+        try {
+            transport.open()
+            transport.clearBuffer()
+            handshake()
+
+            // GlassOS calibrates from idle — no RUNNING mode needed.
+            // Connect → handshake → calibrate commands at 4s intervals → disconnect.
+            runCalibration()
+        } finally {
+            try { transport.close() } catch (_: Exception) {}
+        }
+    }
+
     override suspend fun writeFeature(command: DeviceCommand) {
+        if (command is DeviceCommand.CalibrateIncline) {
+            if (_sessionState.value !is SessionState.Streaming) {
+                throw IllegalStateException("Not connected")
+            }
+            val deferred = CompletableDeferred<Unit>()
+            pendingCalibration = deferred
+            deferred.await()
+            return
+        }
+
         if (_sessionState.value !is SessionState.Streaming) return
 
         val fields = commandToFields(command)
@@ -177,7 +213,10 @@ class V1Session(
             mapOf(V1DataField.KPH to lastSentSpeed)
         }
         is DeviceCommand.SetTargetPower -> {
-            mapOf(V1DataField.WATT_GOAL to command.watts.toFloat())
+            mapOf(
+                V1DataField.WATT_GOAL to command.watts.toFloat(),
+                V1DataField.IS_CONSTANT_WATTS_MODE to 1f,
+            )
         }
         is DeviceCommand.PauseWorkout -> {
             mapOf(V1DataField.WORKOUT_MODE to WORKOUT_MODE_PAUSE)
@@ -185,11 +224,41 @@ class V1Session(
         is DeviceCommand.ResumeWorkout -> {
             mapOf(V1DataField.WORKOUT_MODE to WORKOUT_MODE_RUNNING)
         }
+        is DeviceCommand.CalibrateIncline -> emptyMap()
+        is DeviceCommand.SetFanSpeed -> mapOf(V1DataField.FAN_STATE to command.level.toFloat())
+        is DeviceCommand.SetVolume -> mapOf(V1DataField.VOLUME to command.level.toFloat())
+        is DeviceCommand.SetGear -> mapOf(V1DataField.GEAR to command.gear.toFloat())
+        is DeviceCommand.SetDistanceGoal -> mapOf(V1DataField.DISTANCE_GOAL to command.meters.toFloat())
+        is DeviceCommand.SetWarmupTimeout -> mapOf(V1DataField.WARMUP_TIMEOUT to command.seconds.toFloat())
+        is DeviceCommand.SetCooldownTimeout -> mapOf(V1DataField.COOLDOWN_TIMEOUT to command.seconds.toFloat())
+        is DeviceCommand.SetPauseTimeout -> mapOf(V1DataField.PAUSE_TIMEOUT to command.seconds.toFloat())
+        is DeviceCommand.SetWarmUpMode -> mapOf(V1DataField.WORKOUT_MODE to WORKOUT_MODE_WARM_UP)
+        is DeviceCommand.SetCoolDownMode -> mapOf(V1DataField.WORKOUT_MODE to WORKOUT_MODE_COOL_DOWN)
+        is DeviceCommand.SetErgMode -> mapOf(V1DataField.IS_CONSTANT_WATTS_MODE to if (command.enable) 1f else 0f)
     }
 
     private suspend fun handshake() {
-        // 1. Connect to FITNESS_BIKE
-        val connectResponse = sendAndAwait(V1Message.Outgoing.Connect())
+        // 0. Query supported devices to find equipment type
+        val supportedDevices = sendAndAwait(V1Message.Outgoing.SupportedDevices())
+        val equipmentDeviceId = if (supportedDevices is V1Message.Incoming.SupportedDevicesResponse) {
+            logger.d(TAG, "Supported devices: ${supportedDevices.deviceIds}")
+            val picked = supportedDevices.deviceIds.firstOrNull { it in V1Message.EQUIPMENT_DEVICE_IDS }
+            if (picked != null) {
+                logger.i(TAG, "Detected equipment device ID: $picked")
+                picked
+            } else {
+                logger.d(TAG, "No equipment device in list, defaulting to FITNESS_BIKE")
+                V1Message.DEVICE_FITNESS_BIKE
+            }
+        } else {
+            logger.w(TAG, "SupportedDevices failed, defaulting to FITNESS_BIKE")
+            V1Message.DEVICE_FITNESS_BIKE
+        }
+
+        delay(COMMAND_DELAY_MS)
+
+        // 1. Connect to detected equipment device
+        val connectResponse = sendAndAwait(V1Message.Outgoing.Connect(equipmentDeviceId))
             ?: throw IllegalStateException("Connect handshake timed out")
         if (connectResponse !is V1Message.Incoming.ConnectAck) {
             throw IllegalStateException("Expected ConnectAck, got: $connectResponse")
@@ -217,6 +286,10 @@ class V1Session(
             partNumber = systemInfo.partNumber
             model = systemInfo.model
             logger.d(TAG, "System info: partNumber=$partNumber, model=$model")
+            powerCurveIndex = DeviceDatabase.powerCurveIndexForPartNumber(partNumber)
+            if (powerCurveIndex != null) {
+                logger.i(TAG, "Power curve table: $powerCurveIndex (from part number $partNumber)")
+            }
         } else {
             logger.w(TAG, "Expected SystemInfoResponse, got: $systemInfo")
         }
@@ -248,6 +321,11 @@ class V1Session(
         } else {
             logger.d(TAG, "Skipping security verification (sw=$softwareVersion <= 75)")
         }
+
+        delay(COMMAND_DELAY_MS)
+
+        // 6. Read startup fields (device limits + equipment stats)
+        readStartupFields(equipmentDeviceId)
     }
 
     private suspend fun verifySecurity() {
@@ -265,18 +343,78 @@ class V1Session(
         }
     }
 
+    private suspend fun readStartupFields(equipmentDeviceId: Int) {
+        val message = V1Message.Outgoing.ReadWriteData(readFields = V1DataField.startupReadFields)
+        val packets = V1Codec.encode(message)
+        for (packet in packets) {
+            transport.write(packet)
+        }
+        delay(READ_DELAY_MS)
+        val raw = transport.readPacket() ?: return
+
+        // Decode with startupReadFields — the default decoder uses periodicReadFields
+        // which would misinterpret the payload as KPH/GRADE/etc.
+        val trimmed = if (raw.size > 1) {
+            val len = raw[1].toInt() and 0xFF
+            if (len in 3..raw.size) raw.copyOf(len) else raw
+        } else raw
+
+        if (trimmed.size < 5) return
+        val status = trimmed[3].toInt() and 0xFF
+        val payload = trimmed.copyOfRange(4, trimmed.size - 1)
+        val response = V1Codec.decodeDataResponse(status, payload, V1DataField.startupReadFields)
+        if (response is V1Message.Incoming.DataResponse && response.status == V1Message.STATUS_DONE) {
+            val fields = response.fields
+            if (fields.isNotEmpty()) {
+                capabilities = V1Capabilities(
+                    maxGrade = fields[V1DataField.MAX_GRADE],
+                    minGrade = fields[V1DataField.MIN_GRADE],
+                    maxKph = fields[V1DataField.MAX_KPH],
+                    minKph = fields[V1DataField.MIN_KPH],
+                    maxResistance = fields[V1DataField.MAX_RESISTANCE_LEVEL]?.toInt()?.takeIf { it > 0 },
+                    equipmentDeviceId = equipmentDeviceId,
+                )
+                logger.i(TAG, "Capabilities: $capabilities")
+
+                val eqHours = fields[V1DataField.TOTAL_TIME]?.toLong()
+                val eqDist = fields[V1DataField.MOTOR_TOTAL_DISTANCE]
+                _deviceIdentity.value = _deviceIdentity.value?.copy(
+                    equipmentHours = eqHours,
+                    equipmentDistance = eqDist,
+                )
+                logger.i(TAG, "Equipment stats: totalTime=${eqHours}s, totalDistance=$eqDist")
+            }
+        } else {
+            logger.d(TAG, "Startup field read: $response")
+        }
+    }
+
     private fun startPollLoop() {
         pollJob = scope.launch {
             while (isActive && _sessionState.value is SessionState.Streaming) {
-                try {
-                    pollOnce()
-                } catch (e: CancellationException) {
-                    throw e
-                } catch (e: Exception) {
-                    consecutivePollErrors++
-                    logger.w(TAG, "Poll error ($consecutivePollErrors/$MAX_CONSECUTIVE_POLL_ERRORS): ${e.message}")
-                    if (consecutivePollErrors >= MAX_CONSECUTIVE_POLL_ERRORS) {
-                        _sessionState.value = SessionState.Error("Repeated poll failures", e)
+                val calibDeferred = pendingCalibration
+                if (calibDeferred != null) {
+                    pendingCalibration = null
+                    try {
+                        runCalibration()
+                        calibDeferred.complete(Unit)
+                    } catch (e: CancellationException) {
+                        calibDeferred.cancel(e)
+                        throw e
+                    } catch (e: Exception) {
+                        calibDeferred.completeExceptionally(e)
+                    }
+                } else {
+                    try {
+                        pollOnce()
+                    } catch (e: CancellationException) {
+                        throw e
+                    } catch (e: Exception) {
+                        consecutivePollErrors++
+                        logger.w(TAG, "Poll error ($consecutivePollErrors/$MAX_CONSECUTIVE_POLL_ERRORS): ${e.message}")
+                        if (consecutivePollErrors >= MAX_CONSECUTIVE_POLL_ERRORS) {
+                            _sessionState.value = SessionState.Error("Repeated poll failures", e)
+                        }
                     }
                 }
                 delay(POLL_INTERVAL_MS)
@@ -309,8 +447,8 @@ class V1Session(
 
         delay(READ_DELAY_MS)
 
-        val response = transport.readPacket()
-        if (response == null) {
+        val firstPacket = transport.readPacket()
+        if (firstPacket == null) {
             if (writeFields.isNotEmpty()) {
                 pendingWriteMutex.withLock {
                     pendingWriteFields = writeFields + pendingWriteFields
@@ -320,9 +458,9 @@ class V1Session(
         }
 
         val decoded = try {
-            V1Codec.decodeSingle(response)
+            readResponse(firstPacket)
         } catch (e: Exception) {
-            logger.w(TAG, "Malformed response (${response.size} bytes): ${e.message}")
+            logger.w(TAG, "Malformed response (${firstPacket.size} bytes): ${e.message}")
             // Re-queue write fields so commands aren't lost
             if (writeFields.isNotEmpty()) {
                 pendingWriteMutex.withLock {
@@ -352,6 +490,7 @@ class V1Session(
             }
 
             applyDataResponse(decoded.fields)
+            estimatePowerIfNeeded()
             consecutivePollErrors = 0
             _exerciseData.value = accumulator.snapshot()
 
@@ -403,15 +542,93 @@ class V1Session(
                     }
                     accumulator.updateWorkoutMode(mode)
                 }
-                V1DataField.RUNNING_TIME -> accumulator.updateLifetimeRunningTime(value.toLong())
-                V1DataField.DISTANCE -> accumulator.updateLifetimeDistance(value)
-                V1DataField.CALORIES -> accumulator.updateLifetimeCalories(value.toInt())
+                V1DataField.VERTICAL_METER_GAIN -> accumulator.updateVerticalGain(value)
+                V1DataField.VERTICAL_METER_NET -> accumulator.updateVerticalNet(value)
+                V1DataField.AVERAGE_WATTS -> accumulator.updateAverageWatts(value.toInt())
+                V1DataField.AVERAGE_GRADE -> accumulator.updateAverageIncline(value)
+                V1DataField.LAP_TIME -> accumulator.updateLapTime(value.toLong())
+                V1DataField.RECOVERABLE_PAUSED_TIME -> accumulator.updatePausedTime(value.toLong())
+                V1DataField.START_REQUESTED -> accumulator.updateStartRequested(value.toInt() != 0)
+                V1DataField.GOAL_TIME -> accumulator.updateGoalTime(value.toLong())
+                V1DataField.STROKES -> accumulator.updateStrokeCount(value.toInt())
+                V1DataField.STROKES_PER_MINUTE -> accumulator.updateStrokeRate(value.toInt())
+                V1DataField.FIVE_HUNDRED_SPLIT -> accumulator.updateSplitTime(value.toInt())
+                V1DataField.AVG_FIVE_HUNDRED_SPLIT -> accumulator.updateAvgSplitTime(value.toInt())
+                V1DataField.KEY_OBJECT,
+                V1DataField.RUNNING_TIME,
+                V1DataField.DISTANCE,
+                V1DataField.CALORIES,
                 V1DataField.MAX_RESISTANCE_LEVEL,
                 V1DataField.WATT_GOAL,
+                V1DataField.FAN_STATE,
                 V1DataField.IDLE_MODE_LOCKOUT,
-                V1DataField.REQUIRE_START_REQUESTED -> { /* Not in periodicReadFields */ }
+                V1DataField.REQUIRE_START_REQUESTED,
+                V1DataField.VOLUME,
+                V1DataField.GEAR,
+                V1DataField.PAUSE_TIMEOUT,
+                V1DataField.WARMUP_TIMEOUT,
+                V1DataField.COOLDOWN_TIMEOUT,
+                V1DataField.DISTANCE_GOAL,
+                V1DataField.IS_CONSTANT_WATTS_MODE,
+                V1DataField.MAX_GRADE,
+                V1DataField.MIN_GRADE,
+                V1DataField.MAX_KPH,
+                V1DataField.MIN_KPH,
+                V1DataField.MAX_PULSE,
+                V1DataField.MAX_RPM,
+                V1DataField.SYSTEM_UNITS,
+                V1DataField.MOTOR_TOTAL_DISTANCE,
+                V1DataField.TOTAL_TIME,
+                V1DataField.IS_READY_TO_DISCONNECT -> { /* write-only, capability, or unprocessed fields */ }
             }
         }
+    }
+
+    private fun estimatePowerIfNeeded() {
+        val snapshot = accumulator.snapshot()
+        if (snapshot.power != null && snapshot.power != 0) return // MCU provides power
+        val speed = snapshot.speed ?: return
+        val resistance = snapshot.resistance ?: return
+        val maxRes = deviceInfo.maxResistance
+        if (maxRes <= 0) return
+
+        val estimated = powerCurveIndex?.let {
+            PowerEstimator.estimate(it, speed, resistance, maxRes, deviceInfo.type)
+        } ?: PowerEstimator.estimateFallback(speed, resistance, maxRes)
+
+        if (estimated != null && estimated > 0) {
+            accumulator.updatePower(estimated)
+        }
+    }
+
+    private suspend fun runCalibration() {
+        logger.i(TAG, "Starting incline calibration")
+        var attempts = 0
+        while (attempts < MAX_CALIBRATION_ATTEMPTS) {
+            val response = sendAndAwait(V1Message.Outgoing.Calibrate())
+            logger.d(TAG, "Calibration poll $attempts: $response")
+            if (response is V1Message.Incoming.GenericResponse) {
+                when (response.status) {
+                    V1Message.STATUS_DONE -> {
+                        logger.i(TAG, "Incline calibration complete")
+                        return
+                    }
+                    V1Message.STATUS_IN_PROGRESS -> {
+                        attempts++
+                        delay(CALIBRATION_POLL_MS)
+                    }
+                    V1Message.STATUS_SECURITY_BLOCK -> {
+                        logger.w(TAG, "Security block during calibration — re-verifying")
+                        verifySecurity()
+                        attempts++
+                    }
+                    else -> throw IllegalStateException("Calibration failed: status=${response.status}")
+                }
+            } else {
+                throw IllegalStateException("Unexpected calibration response: $response")
+            }
+        }
+        throw IllegalStateException("Calibration timed out after $MAX_CALIBRATION_ATTEMPTS attempts")
     }
 
     private suspend fun sendAndAwait(message: V1Message.Outgoing): V1Message.Incoming? {
@@ -420,8 +637,21 @@ class V1Session(
             transport.write(packet)
         }
         delay(READ_DELAY_MS)
-        val response = transport.readPacket()
-        return response?.let { V1Codec.decodeSingle(it) }
+        val firstPacket = transport.readPacket() ?: return null
+        return readResponse(firstPacket)
+    }
+
+    private suspend fun readResponse(firstPacket: ByteArray): V1Message.Incoming? {
+        if (V1Codec.isMultiPacketHeader(firstPacket)) {
+            val expected = V1Codec.expectedPacketCount(firstPacket)
+            val packets = mutableListOf(firstPacket)
+            repeat(expected) {
+                val dataPacket = transport.readPacket() ?: return null
+                packets.add(dataPacket)
+            }
+            return V1Codec.decode(packets)
+        }
+        return V1Codec.decodeSingle(firstPacket)
     }
 
     private fun roundToStep(value: Float, step: Float): Float =
@@ -446,8 +676,12 @@ class V1Session(
         private const val COMMAND_DELAY_MS = 100L
         private const val READ_DELAY_MS = 0L
         private const val MAX_CONSECUTIVE_POLL_ERRORS = 10
+        private const val CALIBRATION_POLL_MS = 4000L // GlassOS uses 4-second intervals
+        private const val MAX_CALIBRATION_ATTEMPTS = 60 // 4 minutes at 4s (GlassOS uses 4-minute timeout)
         private const val WORKOUT_MODE_IDLE = 1f
         private const val WORKOUT_MODE_RUNNING = 2f
         private const val WORKOUT_MODE_PAUSE = 3f
+        private const val WORKOUT_MODE_WARM_UP = 10f
+        private const val WORKOUT_MODE_COOL_DOWN = 11f
     }
 }

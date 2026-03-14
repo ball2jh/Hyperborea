@@ -88,9 +88,11 @@ class FtmsBleServer(
         // Add FTMS service → wait → add CPS service → wait
         server.addService(FtmsServiceBuilder.buildFtmsService(deviceInfo.type))
         withTimeout(SERVICE_ADD_TIMEOUT_MS) { serviceAddedChannel.receive() }
+        logger.d(TAG, "FTMS service added")
 
         server.addService(FtmsServiceBuilder.buildCpsService())
         withTimeout(SERVICE_ADD_TIMEOUT_MS) { serviceAddedChannel.receive() }
+        logger.d(TAG, "CPS service added")
 
         // Start advertising
         startAdvertising()
@@ -99,6 +101,7 @@ class FtmsBleServer(
 
     @SuppressLint("MissingPermission") // Permission verified during start()
     fun stop() {
+        logger.i(TAG, "BLE FTMS server stopping")
         isStopped = true
         stopAdvertising()
 

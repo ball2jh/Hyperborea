@@ -9,6 +9,7 @@ import com.nettarion.hyperborea.core.model.ExerciseData
 import com.nettarion.hyperborea.core.orchestration.FulfillResult
 import com.nettarion.hyperborea.core.adapter.HardwareAdapter
 import com.nettarion.hyperborea.core.orchestration.Prerequisite
+import com.nettarion.hyperborea.core.profile.DeviceConfigRepository
 import com.nettarion.hyperborea.core.system.SystemSnapshot
 import com.nettarion.hyperborea.hardware.fitpro.session.DeviceDatabase
 import com.nettarion.hyperborea.hardware.fitpro.session.ExerciseDataAccumulator
@@ -26,12 +27,14 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.runBlocking
 
 @Singleton
 class FitProAdapter @Inject constructor(
     private val transportFactory: HidTransportFactory,
     private val logger: AppLogger,
     private val scope: CoroutineScope,
+    private val deviceConfigRepository: DeviceConfigRepository,
 ) : HardwareAdapter {
 
     override val prerequisites = listOf(
@@ -118,6 +121,11 @@ class FitProAdapter @Inject constructor(
             // Capture identity available from handshake and derive DeviceInfo
             updateIdentity(newSession.deviceIdentity.value)
 
+            // Merge MCU-reported capabilities into DeviceInfo (V1 only)
+            if (newSession is V1Session) {
+                mergeCapabilities(newSession)
+            }
+
             // Forward exercise data from session
             dataForwardJob = scope.launch {
                 try {
@@ -190,8 +198,8 @@ class FitProAdapter @Inject constructor(
             }
 
             val identity = session.identify() ?: return baseInfo
-            val modelNumber = identity.model?.toIntOrNull()
-            return if (modelNumber != null) DeviceDatabase.fromModel(modelNumber) else baseInfo
+            updateIdentity(identity)
+            return resolveDeviceInfo(identity)
         } catch (e: CancellationException) { throw e }
         catch (e: Exception) {
             logger.e(TAG, "Identify failed", e)
@@ -223,23 +231,89 @@ class FitProAdapter @Inject constructor(
         _deviceIdentity.value = identity
         _deviceInfo.value = when {
             identity == null -> null
-            else -> {
-                val model = identity.model
-                val modelNumber = model?.toIntOrNull()
-                if (modelNumber != null) DeviceDatabase.fromModel(modelNumber)
-                else DeviceDatabase.fallback()
+            else -> resolveDeviceInfo(identity)
+        }
+        // Log catalog summary for diagnostics
+        val partNum = identity?.partNumber?.toIntOrNull()
+        if (partNum != null) {
+            val summary = DeviceDatabase.catalogSummary(partNum)
+            if (summary != null) {
+                logger.i(TAG, "Catalog: $summary")
             }
         }
+    }
+
+    private fun resolveDeviceInfo(identity: DeviceIdentity): DeviceInfo {
+        val modelNumber = identity.model?.toIntOrNull()
+        val partNum = identity.partNumber?.toIntOrNull()
+        if (modelNumber != null) {
+            val custom = runBlocking { deviceConfigRepository.getConfig(modelNumber) }
+            if (custom != null) return custom
+        }
+        return if (modelNumber != null || partNum != null)
+            DeviceDatabase.fromHandshake(modelNumber ?: 0, partNum ?: 0)
+        else DeviceDatabase.fallback()
+    }
+
+    override fun refreshDeviceInfo() {
+        val identity = _deviceIdentity.value ?: return
+        _deviceInfo.value = resolveDeviceInfo(identity)
+        logger.i(TAG, "Refreshed device info: ${_deviceInfo.value?.name}")
     }
 
     override suspend fun sendCommand(command: DeviceCommand) {
         try {
             logger.d(TAG, "Sending command: $command")
-            session?.writeFeature(command)
+            if (command is DeviceCommand.CalibrateIncline) {
+                if (session != null) {
+                    throw IllegalStateException("Cannot calibrate during an active session")
+                }
+                calibrateTransient()
+            } else {
+                session?.writeFeature(command)
+            }
         } catch (e: CancellationException) { throw e }
         catch (e: Exception) {
             logger.e(TAG, "Failed to send command: $command", e)
+            throw e
         }
+    }
+
+    private suspend fun calibrateTransient() {
+        val result = transportFactory.create(FITPRO_VENDOR_ID, FITPRO_PRODUCT_ID_V1)
+        val transport = result.transport
+        val productId = result.productId
+
+        val info = DeviceDatabase.fromProductId(productId)
+            ?: throw IllegalStateException("Unknown product ID: $productId")
+
+        val tempSession = when (productId) {
+            FITPRO_PRODUCT_ID_V1 -> V1Session(transport, logger, scope, info)
+            else -> throw UnsupportedOperationException("Calibration not supported on product ID $productId")
+        }
+
+        tempSession.calibrate()
+    }
+
+    private fun mergeCapabilities(session: V1Session) {
+        val caps = session.capabilities ?: return
+        val current = _deviceInfo.value ?: return
+
+        // Overlay protocol-detected equipment type
+        val detectedType = caps.equipmentDeviceId?.let { DeviceDatabase.deviceTypeFromEquipmentId(it) }
+        val typeDefaults = detectedType?.let { DeviceDatabase.defaultsForType(it) }
+
+        _deviceInfo.value = current.copy(
+            type = detectedType ?: current.type,
+            supportedMetrics = typeDefaults?.supportedMetrics ?: current.supportedMetrics,
+            minResistance = typeDefaults?.minResistance ?: current.minResistance,
+            // MCU-reported bounds override; otherwise keep current (respects user config)
+            maxIncline = caps.maxGrade ?: current.maxIncline,
+            minIncline = caps.minGrade ?: current.minIncline,
+            maxSpeed = caps.maxKph ?: current.maxSpeed,
+            maxResistance = caps.maxResistance ?: current.maxResistance,
+        )
+        logger.i(TAG, "Merged MCU capabilities into DeviceInfo: type=${detectedType ?: current.type}, name=${_deviceInfo.value?.name}")
     }
 
     override fun setInitialElapsedTime(seconds: Long) {

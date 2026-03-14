@@ -1,4 +1,4 @@
-package com.nettarion.hyperborea.core.fit
+package com.nettarion.hyperborea.core.fitfile
 
 /** A typed FIT field value. Each variant knows its base type and wire size. */
 sealed interface FitValue {

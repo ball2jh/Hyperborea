@@ -55,6 +55,7 @@ class FtmsGattCallback(
         offset: Int,
         characteristic: BluetoothGattCharacteristic,
     ) {
+        logger.d(TAG, "Read request: ${characteristic.uuid}")
         val value = FtmsServiceBuilder.staticValueFor(characteristic.uuid, deviceInfo)
         if (value == null) {
             sendGattResponse(device, requestId, BluetoothGatt.GATT_READ_NOT_PERMITTED, 0, null)
@@ -85,6 +86,9 @@ class FtmsGattCallback(
             return
         }
 
+        val opcode = if (value.isNotEmpty()) "0x%02X".format(value[0]) else "empty"
+        logger.d(TAG, "Control point write: opcode=$opcode len=${value.size}")
+
         // Send GATT write response first (Zwift uses write-with-response)
         if (responseNeeded) {
             sendGattResponse(device, requestId, BluetoothGatt.GATT_SUCCESS, 0, null)
@@ -92,11 +96,15 @@ class FtmsGattCallback(
 
         // Parse the control point command
         val result = ControlPointParser.parseFtmsControlPoint(value)
+        logger.d(TAG, "Control point parsed: $result")
 
         // Send CP indication response
         if (value.isNotEmpty()) {
             val resultCode = when (result) {
-                is ControlPointParser.ControlPointResult.Unsupported -> ControlPointParser.RESULT_NOT_SUPPORTED
+                is ControlPointParser.ControlPointResult.Unsupported -> {
+                    logger.w(TAG, "Unsupported control point opcode: $opcode")
+                    ControlPointParser.RESULT_NOT_SUPPORTED
+                }
                 else -> ControlPointParser.RESULT_SUCCESS
             }
             val cpResp = ControlPointParser.encodeResponse(value[0], resultCode)
@@ -112,6 +120,9 @@ class FtmsGattCallback(
         if (result is ControlPointParser.ControlPointResult.DeviceCmd) {
             onCommand(result.command)
         }
+
+        // Extract fan command from simulation parameters (opcode 0x11)
+        ControlPointParser.extractFanCommand(value)?.let { onCommand(it) }
     }
 
     override fun onDescriptorReadRequest(
@@ -179,7 +190,10 @@ class FtmsGattCallback(
         value: ByteArray?,
     ) {
         if (!hasBluetoothPermission()) return
-        gattServer?.sendResponse(device, requestId, status, offset, value)
+        val success = gattServer?.sendResponse(device, requestId, status, offset, value) ?: false
+        if (!success) {
+            logger.w(TAG, "Failed to send GATT response (status=$status) to ${device.address}")
+        }
     }
 
     @SuppressLint("MissingPermission") // Checked by hasBluetoothPermission() above

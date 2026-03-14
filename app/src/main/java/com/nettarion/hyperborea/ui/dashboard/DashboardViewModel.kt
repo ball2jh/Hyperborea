@@ -2,7 +2,6 @@ package com.nettarion.hyperborea.ui.dashboard
 
 import android.content.Context
 import android.content.Intent
-import android.os.Environment
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.nettarion.hyperborea.HyperboreaService
@@ -11,13 +10,13 @@ import com.nettarion.hyperborea.core.adapter.AdapterState
 import com.nettarion.hyperborea.core.adapter.BroadcastAdapter
 import com.nettarion.hyperborea.core.adapter.BroadcastId
 import com.nettarion.hyperborea.core.adapter.SensorAdapter
-import com.nettarion.hyperborea.core.fit.FitActivityBuilder
-import com.nettarion.hyperborea.core.model.ClientInfo
+import com.nettarion.hyperborea.core.fitfile.FitActivityBuilder
 import com.nettarion.hyperborea.core.adapter.HardwareAdapter
 import com.nettarion.hyperborea.core.orchestration.Orchestrator
 import com.nettarion.hyperborea.core.profile.ProfileRepository
 import com.nettarion.hyperborea.core.system.SystemMonitor
 import com.nettarion.hyperborea.core.profile.UserPreferences
+import com.nettarion.hyperborea.platform.FitExporter
 import com.nettarion.hyperborea.ui.admin.ExportResult
 import dagger.hilt.android.lifecycle.HiltViewModel
 import dagger.hilt.android.qualifiers.ApplicationContext
@@ -32,10 +31,6 @@ import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
-import java.io.File
-import java.text.SimpleDateFormat
-import java.util.Date
-import java.util.Locale
 import javax.inject.Inject
 
 @HiltViewModel
@@ -51,28 +46,24 @@ class DashboardViewModel @Inject constructor(
     @param:ApplicationContext private val context: Context,
 ) : ViewModel() {
 
-    private val broadcastsFlow: Flow<List<BroadcastUiState>> = combine(
-        buildList<Flow<*>> {
-            for (adapter in broadcastAdapters.sortedBy { it.id.ordinal }) {
-                add(adapter.state)
-                add(adapter.connectedClients)
-            }
-            add(userPreferences.enabledBroadcasts)
-        },
-    ) { values ->
-        val enabledIds = values.last() as Set<*>
+    private val fitExporter = FitExporter(context, logger)
+
+    private val broadcastsFlow: Flow<List<BroadcastUiState>> = run {
         val sorted = broadcastAdapters.sortedBy { it.id.ordinal }
-        sorted.mapIndexed { i, adapter ->
-            val state = values[i * 2] as AdapterState
-            @Suppress("UNCHECKED_CAST")
-            val clients = values[i * 2 + 1] as Set<ClientInfo>
-            BroadcastUiState(
-                id = adapter.id,
-                state = state,
-                clientCount = clients.size,
-                enabled = adapter.id in enabledIds,
-            )
+        if (sorted.isEmpty()) {
+            return@run kotlinx.coroutines.flow.flowOf(emptyList())
         }
+        val perAdapterFlows = sorted.map { adapter ->
+            combine(adapter.state, adapter.connectedClients, userPreferences.enabledBroadcasts) { state, clients, enabledIds ->
+                BroadcastUiState(
+                    id = adapter.id,
+                    state = state,
+                    clientCount = clients.size,
+                    enabled = adapter.id in enabledIds,
+                )
+            }
+        }
+        combine(perAdapterFlows) { it.toList() }
     }
 
     val uiState: StateFlow<DashboardUiState> = combine(
@@ -109,6 +100,7 @@ class DashboardViewModel @Inject constructor(
         get() = profileRepository.activeProfile.value?.id
 
     fun startBroadcasting() {
+        logger.i(TAG, "User action: start broadcasting")
         val intent = Intent(context, HyperboreaService::class.java).apply {
             action = HyperboreaService.ACTION_ACTIVATE
         }
@@ -116,6 +108,7 @@ class DashboardViewModel @Inject constructor(
     }
 
     fun stopBroadcasting(save: Boolean = true) {
+        logger.i(TAG, "User action: stop broadcasting (save=$save)")
         val action = if (save) HyperboreaService.ACTION_DEACTIVATE else HyperboreaService.ACTION_DEACTIVATE_DISCARD
         val intent = Intent(context, HyperboreaService::class.java).apply {
             this.action = action
@@ -128,6 +121,7 @@ class DashboardViewModel @Inject constructor(
         get() = uiState.value.exerciseData?.elapsedTime ?: 0
 
     fun pauseBroadcasting() {
+        logger.i(TAG, "User action: pause broadcasting")
         val intent = Intent(context, HyperboreaService::class.java).apply {
             action = HyperboreaService.ACTION_PAUSE
         }
@@ -135,6 +129,7 @@ class DashboardViewModel @Inject constructor(
     }
 
     fun resumeBroadcasting() {
+        logger.i(TAG, "User action: resume broadcasting")
         val intent = Intent(context, HyperboreaService::class.java).apply {
             action = HyperboreaService.ACTION_RESUME
         }
@@ -142,6 +137,7 @@ class DashboardViewModel @Inject constructor(
     }
 
     fun toggleBroadcast(id: BroadcastId, enabled: Boolean) {
+        logger.i(TAG, "User action: ${if (enabled) "enable" else "disable"} broadcast ${id.name}")
         userPreferences.setBroadcastEnabled(id, enabled)
     }
 
@@ -157,14 +153,17 @@ class DashboardViewModel @Inject constructor(
 
     init {
         viewModelScope.launch {
-            orchestrator.probe()
-        }
-        viewModelScope.launch {
             orchestrator.lastSavedRideId.collect { rideId ->
                 if (rideId == null) return@collect
                 when (pendingAction) {
-                    PostSaveAction.View -> _postSaveEvent.value = PostSaveEvent.ViewRide(rideId)
-                    PostSaveAction.Export -> exportFit(rideId)
+                    PostSaveAction.View -> {
+                        logger.d(TAG, "Post-save action: view ride $rideId")
+                        _postSaveEvent.value = PostSaveEvent.ViewRide(rideId)
+                    }
+                    PostSaveAction.Export -> {
+                        logger.d(TAG, "Post-save action: export ride $rideId")
+                        exportFit(rideId)
+                    }
                     PostSaveAction.None -> {}
                 }
                 pendingAction = PostSaveAction.None
@@ -196,31 +195,7 @@ class DashboardViewModel @Inject constructor(
                 val summary = profileRepository.getRideSummary(rideId).first() ?: return@launch
                 val samples = profileRepository.getWorkoutSamples(rideId).first()
                 val fitBytes = FitActivityBuilder.buildActivityFile(summary, samples, profileRepository.activeProfile.value)
-
-                val timestamp = SimpleDateFormat("yyyyMMdd_HHmmss", Locale.US).format(Date(summary.startedAt))
-                val filename = "hyperborea_$timestamp.fit"
-
-                @Suppress("DEPRECATION")
-                val downloadsDir = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS)
-                downloadsDir.mkdirs()
-                val file = File(downloadsDir, filename)
-
-                try {
-                    file.writeBytes(fitBytes)
-                    _exportResult.value = ExportResult(file.absolutePath)
-                    logger.i(TAG, "FIT exported to ${file.absolutePath}")
-                } catch (e: Exception) {
-                    logger.e(TAG, "Failed to write FIT to Downloads", e)
-                    val fallbackDir = context.getExternalFilesDir(Environment.DIRECTORY_DOWNLOADS)
-                    if (fallbackDir != null) {
-                        fallbackDir.mkdirs()
-                        val fallbackFile = File(fallbackDir, filename)
-                        fallbackFile.writeBytes(fitBytes)
-                        _exportResult.value = ExportResult(fallbackFile.absolutePath)
-                    } else {
-                        _exportResult.value = ExportResult(null, error = "Failed to save: ${e.message}")
-                    }
-                }
+                _exportResult.value = fitExporter.exportToFile(fitBytes, summary.startedAt)
             } catch (e: Exception) {
                 logger.e(TAG, "FIT export failed", e)
                 _exportResult.value = ExportResult(null, error = "Export failed: ${e.message}")

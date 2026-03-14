@@ -50,6 +50,7 @@ class HrmAdapter @Inject constructor(
     private var gatt: BluetoothGatt? = null
     private var reconnectJob: Job? = null
     private var connectedAddress: String? = null
+    @Volatile private var hasLoggedFirstReading = false
 
     private val reconnectPolicy = RetryPolicy(maxAttempts = 5, initialDelayMs = 2000, maxDelayMs = 30000)
 
@@ -126,13 +127,19 @@ class HrmAdapter @Inject constructor(
                 } else {
                     _reading.value = null
                     if (connectedAddress != null && _state.value is AdapterState.Active) {
+                        logger.w(TAG, "HR sensor disconnected, starting reconnect")
                         _state.value = AdapterState.Error("Disconnected")
+                        hasLoggedFirstReading = false
                         startReconnect(address)
                     }
                 }
             },
             onHeartRate = { hr ->
                 _reading.value = hr
+                if (!hasLoggedFirstReading) {
+                    hasLoggedFirstReading = true
+                    logger.d(TAG, "Receiving HR data from $address")
+                }
             },
         )
 

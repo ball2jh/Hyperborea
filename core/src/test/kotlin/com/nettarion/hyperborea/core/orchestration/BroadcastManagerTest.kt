@@ -296,6 +296,7 @@ class BroadcastManagerTest {
         override val enabledBroadcasts = MutableStateFlow(enabled)
         override val overlayEnabled = MutableStateFlow(false)
         override val savedSensorAddress = MutableStateFlow<String?>(null)
+        override val fanMode = MutableStateFlow(com.nettarion.hyperborea.core.model.FanMode.OFF)
         override fun setBroadcastEnabled(id: BroadcastId, enabled: Boolean) {
             val current = enabledBroadcasts.value.toMutableSet()
             if (enabled) current.add(id) else current.remove(id)
@@ -306,6 +307,9 @@ class BroadcastManagerTest {
         }
         override fun setSavedSensorAddress(address: String?) {
             savedSensorAddress.value = address
+        }
+        override fun setFanMode(mode: com.nettarion.hyperborea.core.model.FanMode) {
+            fanMode.value = mode
         }
     }
 
