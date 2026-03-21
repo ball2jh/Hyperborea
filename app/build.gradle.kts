@@ -28,6 +28,16 @@ if (serverUrl == "https://example.com") {
     logger.warn("WARNING: server.url not configured — license API will not work")
 }
 
+gradle.taskGraph.whenReady {
+    val isRelease = allTasks.any { it.name.contains("Release", ignoreCase = true) }
+    if (isRelease) {
+        if (serverUrl == "https://example.com")
+            throw GradleException("server.url not configured in local.properties")
+        if (licensePublicKey.isBlank())
+            throw GradleException("license.public.key not configured in local.properties")
+    }
+}
+
 fun signingConfigFingerprint(config: com.android.build.api.dsl.ApkSigningConfig): String {
     val file = config.storeFile ?: return ""
     if (!file.exists()) return ""

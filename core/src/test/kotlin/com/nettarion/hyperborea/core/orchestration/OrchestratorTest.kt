@@ -704,7 +704,7 @@ class OrchestratorTest {
         }
 
         override fun setInitialElapsedTime(seconds: Long) {}
-        override fun refreshDeviceInfo() {}
+        override suspend fun refreshDeviceInfo() {}
     }
 
     private class FakeUserPreferences(

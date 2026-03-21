@@ -81,7 +81,7 @@ class DashboardViewModelTest {
         override suspend fun identify(): DeviceInfo? = null
         override suspend fun sendCommand(command: DeviceCommand) {}
         override fun setInitialElapsedTime(seconds: Long) {}
-        override fun refreshDeviceInfo() {}
+        override suspend fun refreshDeviceInfo() {}
     }
 
     private val fakeSystemMonitor = object : SystemMonitor {

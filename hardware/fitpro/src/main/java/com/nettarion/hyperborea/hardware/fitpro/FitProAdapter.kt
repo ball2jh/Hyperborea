@@ -27,7 +27,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.runBlocking
+
 
 @Singleton
 class FitProAdapter @Inject constructor(
@@ -227,7 +227,7 @@ class FitProAdapter @Inject constructor(
         _state.value = AdapterState.Inactive
     }
 
-    private fun updateIdentity(identity: DeviceIdentity?) {
+    private suspend fun updateIdentity(identity: DeviceIdentity?) {
         _deviceIdentity.value = identity
         _deviceInfo.value = when {
             identity == null -> null
@@ -243,11 +243,11 @@ class FitProAdapter @Inject constructor(
         }
     }
 
-    private fun resolveDeviceInfo(identity: DeviceIdentity): DeviceInfo {
+    private suspend fun resolveDeviceInfo(identity: DeviceIdentity): DeviceInfo {
         val modelNumber = identity.model?.toIntOrNull()
         val partNum = identity.partNumber?.toIntOrNull()
         if (modelNumber != null) {
-            val custom = runBlocking { deviceConfigRepository.getConfig(modelNumber) }
+            val custom = deviceConfigRepository.getConfig(modelNumber)
             if (custom != null) return custom
         }
         return if (modelNumber != null || partNum != null)
@@ -255,7 +255,7 @@ class FitProAdapter @Inject constructor(
         else DeviceDatabase.fallback()
     }
 
-    override fun refreshDeviceInfo() {
+    override suspend fun refreshDeviceInfo() {
         val identity = _deviceIdentity.value ?: return
         _deviceInfo.value = resolveDeviceInfo(identity)
         logger.i(TAG, "Refreshed device info: ${_deviceInfo.value?.name}")

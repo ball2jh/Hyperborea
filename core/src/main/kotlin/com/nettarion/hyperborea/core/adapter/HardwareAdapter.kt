@@ -46,5 +46,5 @@ interface HardwareAdapter : Adapter {
      * Re-resolve device info from the current device identity.
      * Call after saving a custom device config so broadcasts/UI pick up the new values.
      */
-    fun refreshDeviceInfo()
+    suspend fun refreshDeviceInfo()
 }

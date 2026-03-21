@@ -16,6 +16,7 @@ hilt = "2.59.2"
 hilt-navigation-compose = "1.3.0"
 room = "2.8.4"
 bouncycastle = "1.78"
+# No stable 1.1.0 exists; 1.0.0 uses deprecated MasterKeys API. LicenseModule has plaintext fallback.
 security-crypto = "1.1.0-alpha06"
 zxing = "3.5.3"
 

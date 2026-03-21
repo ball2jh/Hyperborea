@@ -35,6 +35,26 @@ echo ""
 echo -e "${BOLD}Building Hyperborea v${VERSION_NAME} (code ${VERSION_CODE})${NC}"
 echo ""
 
+# Step 0: Validate configuration
+LOCAL_PROPS="$ROOT_DIR/local.properties"
+for key in server.url license.public.key r2.base.url release.keystore.password release.key.password; do
+    val=$(grep "^${key}=" "$LOCAL_PROPS" 2>/dev/null | cut -d= -f2-)
+    if [[ -z "$val" ]]; then
+        fail "Required key '$key' not set in local.properties"
+    fi
+done
+ok "Configuration validated"
+
+# Step 0b: Run lint and tests
+info "Running lint..."
+cd "$ROOT_DIR"
+./gradlew clean lint --quiet 2>&1 | tail -5
+ok "Lint passed"
+
+info "Running tests..."
+./gradlew test --quiet 2>&1 | tail -5
+ok "Tests passed"
+
 # Step 1: Build standard release APK
 info "Building standardRelease APK..."
 cd "$ROOT_DIR"

@@ -158,5 +158,5 @@ private class FakeHardwareAdapter : HardwareAdapter {
     override suspend fun identify(): DeviceInfo? = null
     override suspend fun sendCommand(command: DeviceCommand) {}
     override fun setInitialElapsedTime(seconds: Long) {}
-    override fun refreshDeviceInfo() { refreshCalled = true }
+    override suspend fun refreshDeviceInfo() { refreshCalled = true }
 }

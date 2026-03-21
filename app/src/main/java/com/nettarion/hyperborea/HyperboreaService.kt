@@ -186,21 +186,21 @@ class HyperboreaService : Service() {
         val launchIntent = packageManager.getLaunchIntentForPackage(packageName)
             ?: Intent(this, MainActivity::class.java)
         val contentIntent = PendingIntent.getActivity(
-            this, 0, launchIntent, PendingIntent.FLAG_UPDATE_CURRENT,
+            this, 0, launchIntent, PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
         )
 
         val overlayIntent = Intent(this, HyperboreaService::class.java).apply {
             action = ACTION_TOGGLE_OVERLAY
         }
         val overlayPendingIntent = PendingIntent.getService(
-            this, 1, overlayIntent, PendingIntent.FLAG_UPDATE_CURRENT,
+            this, 1, overlayIntent, PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
         )
 
         val stopIntent = Intent(this, HyperboreaService::class.java).apply {
             action = ACTION_SHUTDOWN
         }
         val stopPendingIntent = PendingIntent.getService(
-            this, 2, stopIntent, PendingIntent.FLAG_UPDATE_CURRENT,
+            this, 2, stopIntent, PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
         )
 
         return Notification.Builder(this)
