@@ -21,6 +21,8 @@ local.properties
 *.ap_
 *.dex
 release/*.zip
+# ...except the prebuilt vendor overlay shipped in the release bundle
+!release/Hyperborea/apps/BluetoothPeripheralOverlay.apk
 
 # Signing keys
 release.jks
