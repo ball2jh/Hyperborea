@@ -1,0 +1,23 @@
+# Copy this file to `local.properties` and fill in the values you need.
+# `local.properties` is gitignored — never commit it.
+
+# --- Required ---------------------------------------------------------------
+# Path to your Android SDK.
+sdk.dir=/path/to/Android/Sdk
+
+# --- Optional: release signing ---------------------------------------------
+# Only needed to build a signed release APK (`./gradlew :app:assembleStandardRelease` /
+# `./gradlew prepareRelease`). Put `release.jks` in the repo root (also gitignored) with a key
+# alias of `hyperborea`. Without these, release builds fall back to the debug signing key.
+#release.keystore.password=changeme
+#release.key.password=changeme
+
+# --- Optional: in-app self-update + support diagnostics --------------------
+# Both features are disabled unless `server.url` is set. No authentication is sent; host your own
+# endpoints if you want them.
+#   server.url    — base URL; the update manifest is fetched from `${server.url}/api/device/manifest`
+#                   and diagnostics are POSTed to `${server.url}/api/support/upload`.
+#   r2.base.url   — additional allowed URL prefix for APK downloads referenced by the manifest
+#                   (e.g. an object-storage bucket).
+#server.url=https://updates.example.com
+#r2.base.url=https://files.example.com

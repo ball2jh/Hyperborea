@@ -136,8 +136,6 @@ object V1Codec {
      *   - byte 0: number of sections (each section covers 8 field indices)
      *   - bytes 1..N: one bitmask byte per section, bit = fieldIndex % 8
      *   - remaining bytes: field data values in field index order
-     *
-     * FitPro V1 section-based bitmask layout.
      */
     private fun encodeReadWriteData(message: V1Message.Outgoing.ReadWriteData): List<ByteArray> {
         val writePayload = buildBitFieldPayload(message.writeFields, includeData = true)

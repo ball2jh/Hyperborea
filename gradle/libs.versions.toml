@@ -15,10 +15,6 @@ navigation = "2.9.7"
 hilt = "2.59.2"
 hilt-navigation-compose = "1.2.0"
 room = "2.7.2"
-bouncycastle = "1.83"
-# No stable 1.1.0 exists; 1.0.0 uses deprecated MasterKeys API. LicenseModule has plaintext fallback.
-security-crypto = "1.1.0-alpha06"
-zxing = "3.5.3"
 
 [libraries]
 coroutines-core = { group = "org.jetbrains.kotlinx", name = "kotlinx-coroutines-core", version.ref = "coroutines" }
@@ -51,9 +47,6 @@ javax-inject = { group = "javax.inject", name = "javax.inject", version = "1" }
 room-runtime = { group = "androidx.room", name = "room-runtime", version.ref = "room" }
 room-ktx = { group = "androidx.room", name = "room-ktx", version.ref = "room" }
 room-compiler = { group = "androidx.room", name = "room-compiler", version.ref = "room" }
-bouncycastle = { group = "org.bouncycastle", name = "bcprov-jdk15to18", version.ref = "bouncycastle" }
-security-crypto = { group = "androidx.security", name = "security-crypto", version.ref = "security-crypto" }
-zxing-core = { group = "com.google.zxing", name = "core", version.ref = "zxing" }
 
 [plugins]
 android-application = { id = "com.android.application", version.ref = "agp" }

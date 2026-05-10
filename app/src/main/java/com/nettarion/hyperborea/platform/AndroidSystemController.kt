@@ -103,7 +103,7 @@ class AndroidSystemController @Inject constructor(
                 logger.w(TAG, "No USB device available for permission grant")
                 return false
             }
-            val uid = context.packageManager.getPackageUid(packageName, 0)
+            val uid = context.packageManager.getApplicationInfo(packageName, 0).uid
             val serviceField = UsbManager::class.java.getDeclaredField("mService")
             serviceField.isAccessible = true
             val service = serviceField.get(usbManager)

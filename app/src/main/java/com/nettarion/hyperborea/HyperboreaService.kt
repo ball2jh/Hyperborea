@@ -8,8 +8,6 @@ import android.content.Context
 import android.content.Intent
 import android.os.IBinder
 import com.nettarion.hyperborea.core.AppLogger
-import com.nettarion.hyperborea.core.LicenseChecker
-import com.nettarion.hyperborea.core.LicenseState
 import com.nettarion.hyperborea.core.adapter.HardwareAdapter
 import com.nettarion.hyperborea.core.orchestration.BroadcastManager
 import com.nettarion.hyperborea.core.orchestration.Orchestrator
@@ -34,7 +32,6 @@ class HyperboreaService : Service() {
     @Inject lateinit var userPreferences: UserPreferences
     @Inject lateinit var logger: AppLogger
     @Inject lateinit var scope: CoroutineScope
-    @Inject lateinit var licenseChecker: LicenseChecker
     @Inject lateinit var updateManager: UpdateManager
 
     private var stateObserverJob: Job? = null
@@ -65,9 +62,9 @@ class HyperboreaService : Service() {
         scope.launch {
             orchestrator.probe()
             broadcastManager.start()
+            updateManager.startAutoUpdate()
         }
         startStateObserver()
-        updateManager.startAutoUpdate()
         logger.i(TAG, "Service created")
     }
 
@@ -118,11 +115,6 @@ class HyperboreaService : Service() {
     private fun activate() {
         logger.i(TAG, "Activating orchestrator")
         scope.launch {
-            licenseChecker.check(silent = true)
-            if (licenseChecker.state.value !is LicenseState.Licensed) {
-                logger.w(TAG, "Cannot activate: not licensed")
-                return@launch
-            }
             orchestrator.start()
         }
     }

@@ -1,14 +1,10 @@
 <?xml version="1.0" encoding="utf-8"?>
+<!--
+  Cleartext (HTTP) traffic is disallowed everywhere. The optional self-update and
+  support-diagnostics features (when configured via server.url / r2.base.url) must use HTTPS.
+  No certificate pins are configured because there is no fixed server domain; a fork hosting
+  its own infrastructure can add a <domain-config> with a <pin-set> here.
+-->
 <network-security-config>
     <base-config cleartextTrafficPermitted="false" />
-
-    <domain-config>
-        <domain includeSubdomains="true">hyperborea.example.com</domain>
-        <pin-set expiration="2027-06-01">
-            <!-- Leaf: CN=hyperborea.example.com (Let's Encrypt) -->
-            <pin digest="SHA-256">+yzGXJcyHoi5MFBJ4ynt6ju7Zy69l6Ksj4W0FgThV8s=</pin>
-            <!-- Backup: Let's Encrypt R13 intermediate CA -->
-            <pin digest="SHA-256">AlSQhgtJirc8ahLyekmtX+Iw+v46yPYRLJt9Cq1GlB0=</pin>
-        </pin-set>
-    </domain-config>
 </network-security-config>

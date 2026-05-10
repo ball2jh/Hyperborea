@@ -10,7 +10,6 @@ import org.gradle.api.tasks.PathSensitive
 import org.gradle.api.tasks.PathSensitivity
 import org.gradle.api.tasks.TaskAction
 import java.io.File
-import java.security.KeyStore
 import java.security.MessageDigest
 import java.util.Properties
 
@@ -87,41 +86,15 @@ val localPropertiesFile = rootProject.file("local.properties")
 if (localPropertiesFile.exists()) {
     localPropertiesFile.inputStream().use { stream -> localProperties.load(stream) }
 }
+// Optional server endpoints for the in-app self-update and support-diagnostics features.
+// Both default to empty, in which case those features are disabled. Set them in local.properties
+// (server.url, r2.base.url) or via -P flags to point a fork at its own infrastructure.
 val serverUrl = localProperties.getProperty("server.url")
     ?: findProperty("server.url") as String?
-    ?: "https://example.com"
-val licensePublicKey = localProperties.getProperty("license.public.key")
-    ?: findProperty("license.public.key") as String?
     ?: ""
 val r2BaseUrl = localProperties.getProperty("r2.base.url")
     ?: findProperty("r2.base.url") as String?
     ?: ""
-
-if (serverUrl == "https://example.com") {
-    logger.warn("WARNING: server.url not configured — license API will not work")
-}
-
-gradle.taskGraph.whenReady {
-    val isRelease = allTasks.any { it.name.contains("Release", ignoreCase = true) }
-    if (isRelease) {
-        if (serverUrl == "https://example.com")
-            throw GradleException("server.url not configured in local.properties")
-        if (licensePublicKey.isBlank())
-            throw GradleException("license.public.key not configured in local.properties")
-    }
-}
-
-fun signingConfigFingerprint(config: com.android.build.api.dsl.ApkSigningConfig): String {
-    val file = config.storeFile ?: return ""
-    if (!file.exists()) return ""
-    val ks = KeyStore.getInstance(
-        if (file.extension.equals("p12", ignoreCase = true)) "PKCS12" else "JKS"
-    )
-    file.inputStream().use { ks.load(it, config.storePassword?.toCharArray()) }
-    val cert = ks.getCertificate(config.keyAlias) ?: return ""
-    val digest = MessageDigest.getInstance("SHA-256").digest(cert.encoded)
-    return digest.joinToString("") { "%02X".format(it) }
-}
 
 val versionNameProp = findProperty("appVersionName") as String
 val versionParts = versionNameProp.split(".").map { it.toInt() }
@@ -140,9 +113,7 @@ android {
         versionName = versionNameProp
 
         buildConfigField("String", "SERVER_URL", "\"$serverUrl\"")
-        buildConfigField("String", "LICENSE_PUBLIC_KEY", "\"$licensePublicKey\"")
         buildConfigField("String", "R2_BASE_URL", "\"$r2BaseUrl\"")
-        buildConfigField("String", "SIGNING_CERTIFICATE_SHA256", "\"\"")
 
         val gitHash = providers.exec { commandLine("git", "rev-parse", "--short", "HEAD") }
             .standardOutput.asText.get().trim()
@@ -150,12 +121,6 @@ android {
     }
 
     signingConfigs {
-        create("platform") {
-            storeFile = rootProject.file("iFit/firmware/keys/platform.p12")
-            storePassword = localProperties.getProperty("platform.keystore.password") ?: ""
-            keyAlias = "platform"
-            keyPassword = localProperties.getProperty("platform.key.password") ?: ""
-        }
         create("release") {
             storeFile = rootProject.file("release.jks")
             storePassword = localProperties.getProperty("release.keystore.password") ?: ""
@@ -169,7 +134,13 @@ android {
             isMinifyEnabled = true
             isShrinkResources = true
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
-            signingConfig = signingConfigs.getByName("release")
+            // Use the release keystore when present (release.jks + passwords in local.properties);
+            // otherwise fall back to the debug key so the project builds without those secrets.
+            signingConfig = if (rootProject.file("release.jks").exists()) {
+                signingConfigs.getByName("release")
+            } else {
+                signingConfigs.getByName("debug")
+            }
         }
     }
 
@@ -177,31 +148,7 @@ android {
     productFlavors {
         create("standard") {
             dimension = "target"
-            // Normal build for development (adb install)
-        }
-        create("system") {
-            dimension = "target"
-            // System build for OTA firmware (priv-app with sharedUserId)
-        }
-    }
-
-    // Platform-sign all system flavor variants (overrides debug signingConfig)
-    androidComponents {
-        onVariants(selector().withFlavor("target" to "system")) { variant ->
-            variant.signingConfig.setConfig(signingConfigs.getByName("platform"))
-            val fingerprint = signingConfigFingerprint(signingConfigs.getByName("platform"))
-            variant.buildConfigFields?.put(
-                "SIGNING_CERTIFICATE_SHA256",
-                com.android.build.api.variant.BuildConfigField("String", "\"$fingerprint\"", null)
-            )
-        }
-        onVariants(selector().withFlavor("target" to "standard")) { variant ->
-            val configName = if (variant.buildType == "release") "release" else "debug"
-            val fingerprint = signingConfigFingerprint(signingConfigs.getByName(configName))
-            variant.buildConfigFields?.put(
-                "SIGNING_CERTIFICATE_SHA256",
-                com.android.build.api.variant.BuildConfigField("String", "\"$fingerprint\"", null)
-            )
+            // Standard build for development and release (adb install / direct deploy)
         }
     }
 
@@ -255,8 +202,6 @@ dependencies {
     implementation(libs.room.runtime)
     implementation(libs.room.ktx)
     ksp(libs.room.compiler)
-    implementation(libs.security.crypto)
-    implementation(libs.zxing.core)
 
     testImplementation(testFixtures(project(":core")))
     testImplementation(libs.junit)
@@ -265,7 +210,6 @@ dependencies {
     testImplementation(libs.coroutines.test)
     testImplementation(libs.turbine)
     testImplementation(libs.json)
-    testImplementation(libs.bouncycastle)
 
     debugImplementation(libs.compose.ui.tooling)
     debugImplementation(libs.compose.ui.test.manifest)
@@ -284,9 +228,6 @@ val releaseDir = rootProject.layout.projectDirectory.dir("release/Hyperborea")
 val stagedReleaseApk = releaseDir.file("apps/Hyperborea.apk")
 val packagedReleaseZip = rootProject.layout.projectDirectory.file("release/Hyperborea-v$vn.zip")
 val requiredKeys = listOf(
-    "server.url",
-    "license.public.key",
-    "r2.base.url",
     "release.keystore.password",
     "release.key.password"
 )

@@ -95,8 +95,7 @@ sealed interface V1Message {
 }
 
 /**
- * V1 BitField definitions with correct IDs, sizes, and converter types.
- * FitPro V1 bitfield definitions.
+ * FitPro V1 BitField definitions: field IDs, sizes, and converter types.
  *
  * The fieldIndex determines the section-based bitmask position:
  *   section = fieldIndex / 8
@@ -159,7 +158,7 @@ enum class V1DataField(val fieldIndex: Int, val sizeBytes: Int, val converter: V
         private val byFieldIndex = entries.associateBy { it.fieldIndex }
         fun fromFieldIndex(index: Int): V1DataField? = byFieldIndex[index]
 
-        /** Fields to read during the polling loop — plus KEY_OBJECT. */
+        /** Fields read each iteration of the polling loop, plus KEY_OBJECT. */
         val periodicReadFields: Set<V1DataField> = setOf(
             // Sensor data
             WATTS, RPM, PULSE, ACTUAL_KPH, ACTUAL_INCLINE,

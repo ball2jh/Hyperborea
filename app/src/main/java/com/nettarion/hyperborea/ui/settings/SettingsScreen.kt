@@ -38,7 +38,6 @@ import com.nettarion.hyperborea.ui.util.rememberExportSnackbarState
 @Composable
 fun SettingsScreen(
     onBack: () -> Unit,
-    onUnlinkDevice: () -> Unit,
     onConfigureDevice: (Int?) -> Unit,
     adminViewModel: AdminViewModel = hiltViewModel(),
 ) {
@@ -127,7 +126,6 @@ fun SettingsScreen(
                         SettingsSection.Device -> DeviceSettingsContent(
                             adminViewModel = adminViewModel,
                             onConfigureDevice = onConfigureDevice,
-                            onUnlinkDevice = onUnlinkDevice,
                         )
                         SettingsSection.About -> AboutSettingsContent(
                             adminViewModel = adminViewModel,

@@ -8,8 +8,7 @@ import kotlin.math.roundToInt
 /**
  * Estimates power output from speed and resistance using per-device calibration curves.
  *
- * Uses bilinear interpolation across RPM rows and relative resistance columns,
- * matching the device's power-curve table.
+ * Uses bilinear interpolation across RPM rows and relative-resistance columns.
  */
 object PowerEstimator {
 

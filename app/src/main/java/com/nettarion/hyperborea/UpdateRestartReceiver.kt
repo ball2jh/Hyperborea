@@ -21,6 +21,6 @@ class UpdateRestartReceiver : BroadcastReceiver() {
     }
 
     companion object {
-        private const val TAG = "Hyperborea.UpdateRestart"
+        private const val TAG = "Hyperborea.UpdateR"
     }
 }

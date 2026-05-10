@@ -1,7 +1,6 @@
 package com.nettarion.hyperborea.hardware.fitpro.session
 
-// Auto-generated
-// 32 power calibration curves mapping (RPM, relative resistance%) → watts
+// Auto-generated power-calibration tables: 32 curves mapping (RPM, relative resistance %) → watts.
 
 object PowerCurves {
 

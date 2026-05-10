@@ -1,6 +1,6 @@
 package com.nettarion.hyperborea.platform.support
 
 interface SupportHttpClient {
-    /** POST bundle to server with Bearer auth. Returns response body or null on HTTP error. */
-    fun upload(authToken: String, jsonBody: String): String?
+    /** POST a diagnostics bundle to the configured server. Returns the response body, or null on error. */
+    fun upload(jsonBody: String): String?
 }

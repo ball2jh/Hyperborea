@@ -12,14 +12,15 @@ class HttpUrlConnectionSupportClient @Inject constructor(
     private val logger: AppLogger,
 ) : SupportHttpClient {
 
-    override fun upload(authToken: String, jsonBody: String): String? {
+    override fun upload(jsonBody: String): String? {
+        if (BuildConfig.SERVER_URL.isBlank()) {
+            logger.w(TAG, "Diagnostics upload is not configured in this build")
+            return null
+        }
         val connection = HttpHelper.openConnection(
             url = "${BuildConfig.SERVER_URL}/api/support/upload",
             method = "POST",
-            headers = mapOf(
-                "Content-Type" to "application/json",
-                "Authorization" to "Bearer $authToken",
-            ),
+            headers = mapOf("Content-Type" to "application/json"),
             connectTimeoutMs = TIMEOUT_MS,
             readTimeoutMs = TIMEOUT_MS,
         )

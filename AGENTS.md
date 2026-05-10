@@ -1,32 +1,33 @@
 # AGENTS.md
 
-This file provides guidance to coding agents when working with code in this repository.
+This file provides guidance to coding agents (and human contributors) working with this repository.
 
 ## Project Overview
 
-Hyperborea is an Android app that bridges ICON Fitness equipment (NordicTrack, ProForm, FreeMotion, Schwinn, etc.) to Zwift and other fitness platforms via BLE and WiFi. It reads exercise data through the FitPro protocol over USB serial and rebroadcasts it as standard fitness protocols (BLE FTMS and WiFi TCP).
+Hyperborea is an Android app that bridges ICON Fitness equipment (NordicTrack, ProForm, FreeMotion, Schwinn, etc.) to Zwift and other fitness platforms via BLE and WiFi. It reads exercise data through the FitPro protocol over USB serial and rebroadcasts it as standard fitness protocols (BLE FTMS and WiFi TCP), and forwards resistance/incline targets back to the equipment.
 
-- **Primary development device**: NordicTrack S22i console — Android 7.1.2 (API 25), 1920x1080 landscape, 22"
+It runs on the equipment's own Android console. It is an independent project, not affiliated with ICON Health & Fitness / iFit / Zwift — see [README.md](README.md) for the full disclaimer.
+
+- **Primary target device**: NordicTrack S22i console — Android 7.1.2 (API 25), 1920x1080 landscape, 22"
 - **Hardware compatibility**: Any ICON Fitness device using the FitPro protocol over USB (vendor ID `0x213C`) — bikes, treadmills, ellipticals
-- **Stack**: Kotlin, Jetpack Compose + Material3, Hilt (KSP), Gradle — check `libs.versions.toml` and `build.gradle.kts` for current versions
+- **Stack**: Kotlin, Jetpack Compose + Material3, Hilt (KSP), Gradle — check `gradle/libs.versions.toml` and the `build.gradle.kts` files for current versions
 
 ## Build Commands
 
 ```bash
-./gradlew assembleDebug          # Build debug APK
-./gradlew :app:assembleDebug     # Build only the app module
-./gradlew :core:build            # Build only the core module
-./gradlew lint                   # Run lint checks
-./gradlew test                   # Run all unit tests
-./gradlew :core:test             # Run tests for a single module
-./gradlew prepareRelease         # Full release pipeline: clean, lint, test, build, package
+./gradlew :app:assembleStandardDebug    # Build the debug APK
+./gradlew :core:build                   # Build only the core module
+./gradlew lint                          # Run lint checks
+./gradlew test                          # Run all unit tests
+./gradlew :core:test                    # Run tests for a single module
+./gradlew prepareRelease                # Full release pipeline: clean, lint, test, build, package (needs a release keystore)
 ```
 
-Always use the `standard` flavor. The `system` flavor exists only for legacy firmware-route builds (platform-signed priv-app) and is not used for production releases.
+Always use the `standard` product flavor. Release builds use `release.jks` if present, otherwise fall back to the debug signing key (see `local.properties.example`).
 
 ## Device Commands
 
-The device connects over WiFi (ADB over TCP). After rebooting, use `adb wait-for-device` to block until ADB reconnects, then poll `getprop sys.boot_completed` until it returns `1` (wait-for-device returns before boot finishes).
+The console typically connects over WiFi (ADB over TCP). After rebooting, use `adb wait-for-device` to block until ADB reconnects, then poll `getprop sys.boot_completed` until it returns `1` (wait-for-device returns before boot finishes).
 
 ## Architecture
 
@@ -36,18 +37,22 @@ The device connects over WiFi (ADB over TCP). After rebooting, use `adb wait-for
 :app  →  :core  ←  :hardware:fitpro
   ↓                 :broadcast:ftms
   ↓                 :broadcast:wifi
-  └── all modules
+  ↓                 :ecosystem:ifit
+  ↓                 :sensor:hrm
+  └── wires everything together via Hilt
 ```
 
-All feature modules depend only on `:core`. The `:app` module wires everything together via Hilt.
+All feature modules depend only on `:core`, never on each other. The `:app` module is the only composition root.
 
 ### Module Roles
 
-- **`:core`** — Pure Kotlin module (no Android dependencies). Defines domain interfaces and data types. Uses `kotlinx-coroutines-core` for Flow/StateFlow.
-- **`:hardware:fitpro`** — Android library. Implements the hardware adapter for the ICON Fitness FitPro protocol over USB serial (115200 baud).
-- **`:broadcast:ftms`** — Android library. Implements a broadcast adapter as a BLE GATT server advertising FTMS (UUID 0x1826).
-- **`:broadcast:wifi`** — Android library. Implements a broadcast adapter as a WiFi TCP server for fitness app connectivity.
-- **`:app`** — Application module. Contains Hilt DI wiring, Compose UI, foreground service, and Android platform implementations.
+- **`:core`** — Pure Kotlin module (no Android dependencies). Domain interfaces, data types, orchestration logic. Uses `kotlinx-coroutines-core` for Flow/StateFlow.
+- **`:hardware:fitpro`** — Android library. The hardware adapter for the ICON Fitness FitPro protocol over USB serial (115200 baud).
+- **`:broadcast:ftms`** — Android library. Broadcast adapter: a BLE GATT server advertising FTMS (service UUID `0x1826`).
+- **`:broadcast:wifi`** — Android library. Broadcast adapter: a WiFi TCP server for fitness apps.
+- **`:ecosystem:ifit`** — Android library. Coexistence with the stock iFit apps (stop the standalone app, disable the crash-looping update receiver) while Hyperborea owns the USB device.
+- **`:sensor:hrm`** — Android library. Optional external BLE heart-rate monitor support.
+- **`:app`** — Application module. Hilt DI wiring, Compose UI, foreground service, and the Android platform implementations of the `:core` interfaces.
 
 ### Design Patterns
 
@@ -86,10 +91,10 @@ Target is API 25 (Android 7.1.2). Key restrictions:
 - Use `@Suppress("DEPRECATION")` for deprecated pre-API 26 methods as needed
 - BLE permissions: `BLUETOOTH` + `BLUETOOTH_ADMIN` + `ACCESS_FINE_LOCATION` (pre-API 31 model)
 
-## Security
+## Configuration & Secrets
 
-- **Certificate pinning**: `app/src/main/res/xml/network_security_config.xml` should have real SHA-256 pins once the server domain is finalized. Until then, pinning is not configured. When adding pins, use both a primary and a backup pin to avoid bricking the app on certificate rotation.
-- **Signing passwords**: Keystore passwords for `platform` and `release` signing configs are read from `local.properties` (gitignored). Required properties: `platform.keystore.password`, `platform.key.password`, `release.keystore.password`, `release.key.password`.
+- **`local.properties`** (gitignored) holds `sdk.dir`, the optional release-signing passwords, and the optional `server.url` / `r2.base.url` for the self-update and support-diagnostics features. See `local.properties.example`. None of these are required to build the debug APK or run the tests.
+- **Certificate pinning**: not configured by default — there is no fixed server domain. A fork hosting its own infrastructure can add a `<domain-config>` with primary + backup pins in `app/src/main/res/xml/network_security_config.xml`.
 
 ## Lint
 

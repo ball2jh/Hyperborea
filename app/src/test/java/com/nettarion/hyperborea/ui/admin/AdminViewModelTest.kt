@@ -9,10 +9,6 @@ import com.nettarion.hyperborea.core.LogEntry
 import com.nettarion.hyperborea.core.LogStore
 import com.nettarion.hyperborea.core.adapter.AdapterState
 import com.nettarion.hyperborea.core.adapter.BroadcastId
-import com.nettarion.hyperborea.core.LicenseChecker
-import com.nettarion.hyperborea.core.LicenseState
-import com.nettarion.hyperborea.core.PairingSession
-import com.nettarion.hyperborea.core.PairingStatus
 import com.nettarion.hyperborea.core.adapter.HardwareAdapter
 import com.nettarion.hyperborea.core.model.DeviceCommand
 import com.nettarion.hyperborea.core.model.DeviceIdentity
@@ -26,6 +22,7 @@ import com.nettarion.hyperborea.core.system.SystemController
 import com.nettarion.hyperborea.core.system.SystemMonitor
 import com.nettarion.hyperborea.core.system.SystemSnapshot
 import com.nettarion.hyperborea.core.test.buildSystemSnapshot
+import com.nettarion.hyperborea.platform.InstallId
 import com.nettarion.hyperborea.platform.support.SupportHttpClient
 import com.nettarion.hyperborea.core.test.TestAppLogger
 import com.nettarion.hyperborea.platform.update.FakeUpdateHttpClient
@@ -58,15 +55,6 @@ class AdminViewModelTest {
     private val systemSnapshot = MutableStateFlow(buildSystemSnapshot())
     private val enabledBroadcasts = MutableStateFlow<Set<BroadcastId>>(emptySet())
     private var uploadResponse: String? = """{"code":"ABC123"}"""
-    private val fakeLicenseChecker = object : LicenseChecker {
-        override val state: StateFlow<LicenseState> = MutableStateFlow(LicenseState.Unlicensed)
-        override var authToken: String? = "test-token"
-        override var deviceUuid: String? = "test-uuid"
-        override suspend fun check(silent: Boolean) {}
-        override suspend fun requestPairing(): PairingSession = PairingSession.Error("stub")
-        override suspend fun pollPairing(pairingToken: String): PairingStatus = PairingStatus.Pending
-        override suspend fun unlink() {}
-    }
 
     private val noOpLogger = TestAppLogger()
 
@@ -133,7 +121,7 @@ class AdminViewModelTest {
     }
 
     private val fakeSupportClient = object : SupportHttpClient {
-        override fun upload(authToken: String, jsonBody: String): String? = uploadResponse
+        override fun upload(jsonBody: String): String? = uploadResponse
     }
 
     private lateinit var viewModel: AdminViewModel
@@ -146,7 +134,6 @@ class AdminViewModelTest {
             appInstaller = FakeUpdateInstaller(),
             logger = noOpLogger,
             scope = scope,
-            licenseChecker = fakeLicenseChecker,
             versionProvider = VersionProvider { 1 },
             downloadDir = downloadDir,
             orchestratorState = kotlinx.coroutines.flow.MutableStateFlow(com.nettarion.hyperborea.core.orchestration.OrchestratorState.Idle),
@@ -162,7 +149,7 @@ class AdminViewModelTest {
             userPreferences = fakeUserPreferences,
             systemController = fakeSystemController,
             supportHttpClient = fakeSupportClient,
-            licenseChecker = fakeLicenseChecker,
+            installId = InstallId(ContextWrapper(null)),
             logger = noOpLogger,
             context = ContextWrapper(null),
         )
@@ -209,20 +196,6 @@ class AdminViewModelTest {
             viewModel.uploadSupport()
             assertThat(awaitItem()).isEqualTo(SupportUploadState.Uploading)
             assertThat(awaitItem()).isEqualTo(SupportUploadState.Error("Upload failed"))
-        }
-    }
-
-    @Test
-    fun `uploadSupport errors when no auth token`() = runViewModelTest {
-        fakeLicenseChecker.authToken = null
-        createViewModel()
-
-        viewModel.supportUploadState.test {
-            assertThat(awaitItem()).isEqualTo(SupportUploadState.Idle)
-
-            viewModel.uploadSupport()
-            assertThat(awaitItem()).isEqualTo(SupportUploadState.Uploading)
-            assertThat(awaitItem()).isEqualTo(SupportUploadState.Error("Device not linked"))
         }
     }
 

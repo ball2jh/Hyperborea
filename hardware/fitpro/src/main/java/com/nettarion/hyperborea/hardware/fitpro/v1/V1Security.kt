@@ -1,8 +1,7 @@
 package com.nettarion.hyperborea.hardware.fitpro.v1
 
 /**
- * Security hash calculation for FitPro V1 protocol.
- * Implements the FitPro V1 handshake hash.
+ * Security-hash calculation for the FitPro V1 handshake.
  */
 object V1Security {
 

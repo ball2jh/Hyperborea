@@ -2,7 +2,6 @@ package com.nettarion.hyperborea.ui.admin
 
 import android.content.Context
 import android.content.Intent
-import com.nettarion.hyperborea.core.LicenseChecker
 import android.os.Environment
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
@@ -24,6 +23,7 @@ import com.nettarion.hyperborea.core.system.SystemController
 import com.nettarion.hyperborea.core.system.SystemMonitor
 import com.nettarion.hyperborea.core.system.SystemSnapshot
 import com.nettarion.hyperborea.core.profile.UserPreferences
+import com.nettarion.hyperborea.platform.InstallId
 import com.nettarion.hyperborea.platform.support.SupportDiagnosticsBuilder
 import com.nettarion.hyperborea.platform.support.SupportHttpClient
 import com.nettarion.hyperborea.platform.update.TrackState
@@ -56,7 +56,7 @@ class AdminViewModel @Inject constructor(
     private val userPreferences: UserPreferences,
     private val systemController: SystemController,
     private val supportHttpClient: SupportHttpClient,
-    private val licenseChecker: LicenseChecker,
+    private val installId: InstallId,
     private val logger: AppLogger,
     @param:ApplicationContext private val context: Context,
 ) : ViewModel() {
@@ -201,17 +201,9 @@ class AdminViewModel @Inject constructor(
 
         viewModelScope.launch(Dispatchers.IO) {
             try {
-                val deviceUuid = licenseChecker.deviceUuid
-                val authToken = licenseChecker.authToken
+                val json = diagnosticsBuilder.build(installId.value)
 
-                if (authToken.isNullOrEmpty()) {
-                    _supportUploadState.value = SupportUploadState.Error("Device not linked")
-                    return@launch
-                }
-
-                val json = diagnosticsBuilder.build(deviceUuid)
-
-                val response = supportHttpClient.upload(authToken, json.toString())
+                val response = supportHttpClient.upload(json.toString())
                 if (response == null) {
                     _supportUploadState.value = SupportUploadState.Error("Upload failed")
                     return@launch

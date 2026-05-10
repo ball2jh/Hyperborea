@@ -34,14 +34,12 @@ import com.nettarion.hyperborea.ui.theme.LocalHyperboreaColors
 fun DeviceSettingsContent(
     adminViewModel: AdminViewModel,
     onConfigureDevice: (Int?) -> Unit,
-    onUnlinkDevice: () -> Unit,
 ) {
     val colors = LocalHyperboreaColors.current
     val identity by adminViewModel.deviceIdentity.collectAsStateWithLifecycle()
     val calibrationState by adminViewModel.calibrationState.collectAsStateWithLifecycle()
     var showCalibrateDialog by remember { mutableStateOf(false) }
     var showCalibrationResult by remember { mutableStateOf(false) }
-    var showUnlinkDialog by remember { mutableStateOf(false) }
 
     LaunchedEffect(calibrationState) {
         when (calibrationState) {
@@ -248,50 +246,6 @@ fun DeviceSettingsContent(
         }
     }
 
-    Spacer(Modifier.height(16.dp))
-    HorizontalDivider(color = colors.divider)
-    Spacer(Modifier.height(16.dp))
-
-    // Unlink Device
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(vertical = 8.dp),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        Column(modifier = Modifier.weight(1f)) {
-            Text(
-                text = "Unlink Device",
-                style = MaterialTheme.typography.bodyLarge,
-                color = colors.textHigh,
-            )
-            Text(
-                text = "Remove this device from your account",
-                style = MaterialTheme.typography.bodyMedium,
-                color = colors.textMedium,
-            )
-        }
-        OutlinedButton(onClick = { showUnlinkDialog = true }) {
-            Text("Unlink")
-        }
-    }
-
-    if (showUnlinkDialog) {
-        AlertDialog(
-            onDismissRequest = { showUnlinkDialog = false },
-            title = { Text("Unlink device?") },
-            text = { Text("This will disconnect this device from your account. You can link it again later.") },
-            confirmButton = {
-                TextButton(onClick = {
-                    showUnlinkDialog = false
-                    onUnlinkDevice()
-                }) { Text("Unlink") }
-            },
-            dismissButton = {
-                TextButton(onClick = { showUnlinkDialog = false }) { Text("Cancel") }
-            },
-        )
-    }
 }
 
 @Composable

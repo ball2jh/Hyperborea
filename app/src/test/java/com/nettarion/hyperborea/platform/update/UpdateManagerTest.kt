@@ -3,14 +3,9 @@ package com.nettarion.hyperborea.platform.update
 import com.google.common.truth.Truth.assertThat
 import com.nettarion.hyperborea.BuildConfig
 import com.nettarion.hyperborea.core.test.TestAppLogger
-import com.nettarion.hyperborea.core.LicenseChecker
-import com.nettarion.hyperborea.core.LicenseState
-import com.nettarion.hyperborea.core.PairingSession
-import com.nettarion.hyperborea.core.PairingStatus
 import com.nettarion.hyperborea.core.orchestration.OrchestratorState
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.MutableStateFlow
-import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.test.UnconfinedTestDispatcher
 import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertThrows
@@ -26,15 +21,6 @@ class UpdateManagerTest {
     private lateinit var installer: FakeUpdateInstaller
     private lateinit var logger: TestAppLogger
     private val orchestratorState = MutableStateFlow<OrchestratorState>(OrchestratorState.Idle)
-    private val fakeLicenseChecker = object : LicenseChecker {
-        override val state: StateFlow<LicenseState> = MutableStateFlow(LicenseState.Unlicensed)
-        override var authToken: String? = null
-        override var deviceUuid: String? = null
-        override suspend fun check(silent: Boolean) {}
-        override suspend fun requestPairing(): PairingSession = PairingSession.Error("stub")
-        override suspend fun pollPairing(pairingToken: String): PairingStatus = PairingStatus.Pending
-        override suspend fun unlink() {}
-    }
 
     @Before
     fun setUp() {
@@ -54,7 +40,6 @@ class UpdateManagerTest {
             appInstaller = installer,
             logger = logger,
             scope = scope,
-            licenseChecker = fakeLicenseChecker,
             versionProvider = VersionProvider { currentVersionCode },
             downloadDir = downloadDir,
             orchestratorState = orchestratorState,
@@ -191,19 +176,6 @@ class UpdateManagerTest {
         assertThat(manager.checking.value).isFalse()
     }
 
-    @Test
-    fun `checkForUpdates includes auth header when token present`() = runTest {
-        fakeLicenseChecker.authToken = "my-token"
-        // Use manifestException to stop the flow early — the key thing is it makes the call
-        httpClient.manifestException = java.io.IOException("Expected")
-
-        val manager = createManager()
-        manager.checkForUpdates()
-
-        // No crash means the auth token was read and headers were constructed
-        assertThat(manager.appTrack.state.value).isEqualTo(TrackState.Idle)
-    }
-
     // --- applyUpdate ---
 
     @Test
@@ -267,31 +239,6 @@ class UpdateManagerTest {
 
         assertThat(installer.installCalled).isTrue()
         assertThat(installer.finalizeCalled).isTrue()
-    }
-
-    @Test
-    fun `auto-update cycle skips when no auth token`() = runTest {
-        fakeLicenseChecker.authToken = null
-        httpClient.manifestResponse = """
-            {
-                "app": {
-                    "versionCode": 10,
-                    "versionName": "2.0",
-                    "url": "${BuildConfig.SERVER_URL}/app.apk",
-                    "sha256": "deadbeef",
-                    "releaseNotes": "New features."
-                }
-            }
-        """.trimIndent()
-
-        val manager = createManager(currentVersionCode = 1)
-        // Manually trigger the check — startAutoUpdate would require delay mocking
-        manager.checkForUpdatesInternal()
-
-        // The check itself works (it's checkForUpdatesInternal, not auto-update cycle)
-        // But the auto-update cycle would skip due to no auth token.
-        // Verify the internal guard by checking that without auth, no download happens.
-        assertThat(manager.appTrack.state.value).isInstanceOf(TrackState.Available::class.java)
     }
 
     @Test

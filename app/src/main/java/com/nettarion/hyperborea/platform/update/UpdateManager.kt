@@ -2,7 +2,6 @@ package com.nettarion.hyperborea.platform.update
 
 import com.nettarion.hyperborea.BuildConfig
 import com.nettarion.hyperborea.core.AppLogger
-import com.nettarion.hyperborea.core.LicenseChecker
 import com.nettarion.hyperborea.core.orchestration.OrchestratorState
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
@@ -24,7 +23,6 @@ class UpdateManager @Inject constructor(
     private val appInstaller: UpdateInstaller,
     private val logger: AppLogger,
     private val scope: CoroutineScope,
-    private val licenseChecker: LicenseChecker,
     private val versionProvider: VersionProvider,
     @param:Named("updateDir") private val downloadDir: String,
     @param:Named("orchestratorState") private val orchestratorState: StateFlow<@JvmSuppressWildcards OrchestratorState>,
@@ -54,6 +52,10 @@ class UpdateManager @Inject constructor(
     }
 
     fun startAutoUpdate() {
+        if (BuildConfig.SERVER_URL.isBlank()) {
+            logger.i(TAG, "Self-update is not configured in this build — auto-update disabled")
+            return
+        }
         if (autoUpdateJob != null) {
             logger.d(TAG, "Auto-update already running, skipping")
             return
@@ -101,14 +103,8 @@ class UpdateManager @Inject constructor(
         _checking.value = true
         try {
             val manifestUrl = "${BuildConfig.SERVER_URL}/api/device/manifest"
-            val authToken = licenseChecker.authToken
-            val headers = if (authToken != null) {
-                mapOf("Authorization" to "Bearer $authToken")
-            } else {
-                emptyMap()
-            }
             logger.i(TAG, "Checking for updates at $manifestUrl")
-            val json = httpClient.fetchManifest(manifestUrl, headers)
+            val json = httpClient.fetchManifest(manifestUrl, emptyMap())
             val manifest = UpdateManifest.parse(json)
 
             val app = manifest.app
@@ -140,10 +136,6 @@ class UpdateManager @Inject constructor(
     }
 
     private suspend fun runAutoUpdateCycle() {
-        if (licenseChecker.authToken == null) {
-            logger.d(TAG, "Auto-update: skipping, no auth token")
-            return
-        }
         val trackState = appTrack.state.value
         if (trackState !is TrackState.Idle && trackState !is TrackState.Error) {
             logger.d(TAG, "Auto-update: skipping, track is ${trackState::class.simpleName}")
@@ -181,14 +173,9 @@ class UpdateManager @Inject constructor(
     }
 
     private suspend fun resolveUrl(info: UpdateInfo): String {
-        val authToken = licenseChecker.authToken
-        val headers = if (authToken != null) {
-            mapOf("Authorization" to "Bearer $authToken")
-        } else {
-            emptyMap()
-        }
+        if (BuildConfig.SERVER_URL.isBlank()) return info.url
         val manifestUrl = "${BuildConfig.SERVER_URL}/api/device/manifest"
-        val json = httpClient.fetchManifest(manifestUrl, headers)
+        val json = httpClient.fetchManifest(manifestUrl, emptyMap())
         val manifest = UpdateManifest.parse(json)
         val freshUrl = manifest.app?.url
         if (freshUrl == null) {

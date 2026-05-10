@@ -1,9 +1,7 @@
 package com.nettarion.hyperborea.hardware.fitpro.session
 
-// Auto-generated
-// Maps part numbers to power-curve table indices.
-// Sorted parallel arrays for part number lookup via binary search.
-// Do not edit by hand.
+// Auto-generated catalog of ICON Fitness part numbers and their power-curve table indices.
+// Sorted parallel arrays for part-number lookup via binary search.
 
 internal object IfitDeviceCatalog {
 

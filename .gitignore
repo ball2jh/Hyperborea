@@ -25,11 +25,12 @@ release/*.zip
 # Signing keys
 release.jks
 
-# Non-app directories (firmware tools, iFit data, docs, scripts)
+# Local-only directories (not part of the repository)
 iFit/
 docs/
 tools/
 MyWoosh/
+extra-apps/
 
 # Python
 __pycache__/
