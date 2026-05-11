@@ -1,9 +1,16 @@
 #!/bin/bash
 #
-# deploy.sh — Install Hyperborea as a privileged system app on a rooted NordicTrack console.
+# deploy.sh — Install Hyperborea on a NordicTrack/iFit console over ADB. No root required.
+#
+# Hyperborea is installed as a regular APK via `adb install`; iFit's competing
+# apps are silenced with `adb shell pm disable-user --user 0 …`, which works as
+# the unprivileged `shell` user on any console with ADB enabled.
 #
 # Place Hyperborea*.apk (and any additional APKs) in apps/, then run:
 #   ./deploy.sh
+#
+# Privileged install to /system/priv-app/ (the old flow) lives on the
+# `archive/priv-app-deployment` branch if you need to revive it.
 #
 
 set -euo pipefail
@@ -267,9 +274,10 @@ is_ip_connection() {
     [[ "${ANDROID_SERIAL:-}" == *:* ]]
 }
 
-# Escalate to root and wait for ADB to reconnect (handles both USB and IP).
-adb_root_wait() {
-    adb root >/dev/null 2>&1 || true
+# Wait for ADB to reconnect (handles both USB and IP). No root escalation —
+# `adb root` was the original behaviour but is unsupported on production-build
+# firmware, which is exactly the case this script targets.
+adb_reconnect_wait() {
     if is_ip_connection; then
         sleep 2
         adb connect "$ANDROID_SERIAL" >/dev/null 2>&1 || true
@@ -313,7 +321,7 @@ discover_device() {
             export ANDROID_SERIAL="${SERIALS[$CHOSEN]}"
             echo ""
             info "Connecting..."
-            adb_root_wait
+            adb_reconnect_wait
             ok "Connected to ${SERIALS[$CHOSEN]}"
             return
         fi
@@ -330,7 +338,7 @@ discover_device() {
         sleep 2
         if adb -s "$DEVICE_IP" shell true 2>/dev/null; then
             export ANDROID_SERIAL="$DEVICE_IP"
-            adb_root_wait
+            adb_reconnect_wait
             ok "Connected to $DEVICE_IP"
             return
         fi
@@ -368,7 +376,7 @@ wait_for_reboot() {
         fi
 
         if adb shell "getprop sys.boot_completed" 2>/dev/null | grep -q "1"; then
-            adb_root_wait
+            adb_reconnect_wait
             break
         fi
 
@@ -376,14 +384,7 @@ wait_for_reboot() {
     done
 }
 
-TOTAL_STEPS=7
-
-# =========================================================================
-# Configuration options
-# =========================================================================
-apply_config() {
-    info "Device settings managed by Hyperborea at startup"
-}
+TOTAL_STEPS=5
 
 # =========================================================================
 # Step 1: Pre-flight
@@ -400,13 +401,13 @@ for f in "$APPS_DIR"/Hyperborea*.apk; do
 done
 [ -n "$HYPERBOREA_APK" ] || die "No Hyperborea*.apk found in apps/. Place the APK there and try again."
 
-# BLE overlay is pushed to /vendor/overlay/ separately
-OVERLAY_APK="$APPS_DIR/BluetoothPeripheralOverlay.apk"
-# iFit packages to disable after deployment
+# iFit packages to disable after deployment.
+# `com.ifit.launcher` is kept enabled so the device's home button still has
+# something to land on; the launcher can't open the workout apps once those
+# are disabled, but it remains as a benign navigation anchor.
 IFIT_PACKAGES=(
     com.ifit.eru
     com.ifit.standalone
-    com.ifit.launcher
     com.ifit.arda
     com.ifit.glassos_service
     com.ifit.gandalf
@@ -419,24 +420,18 @@ OTHER_APKS=()
 for f in "$APPS_DIR"/*.apk; do
     [ -f "$f" ] || continue
     [ "$f" = "$HYPERBOREA_APK" ] && continue
-    [ "$f" = "$OVERLAY_APK" ] && continue
     OTHER_APKS+=("$f")
 done
 
 ok "Found $(basename "$HYPERBOREA_APK")"
 
-# Build wizard sections
-WIZ_SECTIONS=("Device settings")
+# Build wizard sections — only the additional-apps picker remains, gated
+# on the apps/ directory containing anything beyond Hyperborea.
+WIZ_SECTIONS=()
 WIZ_LABELS=()
 WIZ_STATES=()
-WIZ_SEC_START=(0)
-WIZ_SEC_COUNT=(0)
-
-if [ -f "$OVERLAY_APK" ]; then
-    WIZ_LABELS+=("Enable Bluetooth advertising")
-    WIZ_STATES+=(1)
-    WIZ_SEC_COUNT[0]=$((WIZ_SEC_COUNT[0] + 1))
-fi
+WIZ_SEC_START=()
+WIZ_SEC_COUNT=()
 
 if [ ${#OTHER_APKS[@]} -gt 0 ]; then
     WIZ_SECTIONS+=("Additional apps")
@@ -448,127 +443,79 @@ if [ ${#OTHER_APKS[@]} -gt 0 ]; then
         APP_COUNT=$((APP_COUNT + 1))
     done
     WIZ_SEC_COUNT+=($APP_COUNT)
+
+    WIZ_SECTIONS+=("Done")
+    WIZ_SEC_START+=(${#WIZ_LABELS[@]})
+    WIZ_SEC_COUNT+=(0)
 fi
 
-WIZ_SECTIONS+=("Done")
-WIZ_SEC_START+=(${#WIZ_LABELS[@]})
-WIZ_SEC_COUNT+=(0)
-
 # =========================================================================
-# Step 2: Connect to device
+# Step 1: Connect to device
 # =========================================================================
+step 1 "Connect to device"
 discover_device
 
+# Quick sanity check that we have a working ADB shell. Running as the
+# unprivileged `shell` user is expected and fine — the rest of the script
+# never reaches for root.
+if ! adb shell true >/dev/null 2>&1; then
+    die "ADB shell unavailable. Make sure the console allows ADB connections."
+fi
 WHOAMI=$(adb shell "whoami" 2>/dev/null | tr -d '\r')
-[ "$WHOAMI" = "root" ] || die "Failed to get root (got: $WHOAMI)"
-ok "Root access confirmed"
+DEVICE_SDK=$(adb shell "getprop ro.build.version.sdk" 2>/dev/null | tr -d '\r')
+DEVICE_RELEASE=$(adb shell "getprop ro.build.version.release" 2>/dev/null | tr -d '\r')
+ok "ADB connected (user: ${WHOAMI:-shell}, Android ${DEVICE_RELEASE:-?} / API ${DEVICE_SDK:-?})"
+
+# `adb install -g` (auto-grant runtime permissions) was introduced with the
+# runtime-permission model in API 23. On API 22 the device's `pm` rejects -g
+# and the install fails entirely. Runtime permissions don't exist on API 22
+# anyway (everything is install-time auto-granted), so dropping -g is safe.
+INSTALL_FLAGS="-r"
+if [ -n "$DEVICE_SDK" ] && [ "$DEVICE_SDK" -ge 23 ]; then
+    INSTALL_FLAGS="-r -g"
+fi
 
 # =========================================================================
 # Step 2: Configure
 # =========================================================================
 step 2 "Configure"
 
-echo ""
-run_wizard
-printf "\033[J"
-ok "Configuration saved"
-
-# Extract results
-_next=0
-CFG_OVERLAY=0
-if [ -f "$OVERLAY_APK" ]; then
-    CFG_OVERLAY=${WIZ_STATES[$_next]}
-    _next=$((_next + 1))
-fi
-APPS_STATE_START=$_next
 APP_INSTALL_STATES=()
-for ((i=0; i<${#OTHER_APKS[@]}; i++)); do
-    APP_INSTALL_STATES+=("${WIZ_STATES[$((APPS_STATE_START + i))]}")
-done
+if [ ${#WIZ_SECTIONS[@]} -gt 0 ]; then
+    echo ""
+    run_wizard
+    printf "\033[J"
+    ok "Configuration saved"
+    for ((i=0; i<${#OTHER_APKS[@]}; i++)); do
+        APP_INSTALL_STATES+=("${WIZ_STATES[$i]}")
+    done
+else
+    info "No optional configuration; continuing"
+fi
 
 # =========================================================================
-# Step 3: Install Hyperborea as priv-app
+# Step 3: Install Hyperborea (and any selected additional APKs)
 # =========================================================================
 step 3 "Install Hyperborea"
 
-info "Preparing device..."
-adb shell "mount -o rw,remount /system" >/dev/null 2>&1 || true
-ok "Device ready"
-
-info "Installing..."
-adb shell "mkdir -p /system/priv-app/Hyperborea" >/dev/null 2>&1
-adb push "$HYPERBOREA_APK" /system/priv-app/Hyperborea/Hyperborea.apk >/dev/null 2>&1
-adb shell "chmod 755 /system/priv-app/Hyperborea && chmod 644 /system/priv-app/Hyperborea/Hyperborea.apk" >/dev/null 2>&1
-ok "Installed"
-
-if [ -f "$OVERLAY_APK" ] && [ "${CFG_OVERLAY}" -eq 1 ]; then
-    info "Applying Bluetooth configuration..."
-    adb shell "mkdir -p /vendor/overlay" >/dev/null 2>&1
-    adb push "$OVERLAY_APK" /vendor/overlay/BluetoothPeripheralOverlay.apk >/dev/null 2>&1
-    adb shell "chmod 644 /vendor/overlay/BluetoothPeripheralOverlay.apk" >/dev/null 2>&1
-    ok "Bluetooth advertising enabled"
-fi
-
-info "Finalizing..."
-adb shell "mount -o ro,remount /system" >/dev/null 2>&1 || true
-if adb shell "[ -f /data/update.zip ] || touch /data/update.zip; toybox chattr +i /data/update.zip" >/dev/null 2>&1; then
-    true
+info "Installing $(basename "$HYPERBOREA_APK")..."
+# $INSTALL_FLAGS = "-r" or "-r -g"; -g is added when the device is API 23+.
+if adb install $INSTALL_FLAGS "$HYPERBOREA_APK" 2>&1 | tail -1 | grep -q "Success"; then
+    ok "Hyperborea installed"
 else
-    warn "Some protections could not be applied"
+    die "adb install of Hyperborea failed. Re-run with -v for the full output."
 fi
-adb shell "touch /sdcard/.wolfDev" >/dev/null 2>&1
-ok "Done"
-
-# =========================================================================
-# Step 4: Reboot and wait
-# =========================================================================
-step 4 "Reboot device"
-
-info "Rebooting..."
-REBOOT_START=$(date +%s)
-start_timer "Waiting for device..." "$REBOOT_START"
-adb reboot >/dev/null 2>&1
-wait_for_reboot 300
-stop_timer
-ok "Device ready ($(fmt_time $(( $(date +%s) - REBOOT_START ))))"
-
-# =========================================================================
-# Step 5: Disable iFit
-# =========================================================================
-step 5 "Disable iFit"
-
-DISABLED=0
-for pkg in "${IFIT_PACKAGES[@]}"; do
-    if adb shell "pm list packages" 2>/dev/null | grep -q "$pkg"; then
-        adb shell "pm disable-user --user 0 $pkg" >/dev/null 2>&1 && \
-            ok "Disabled $pkg" && DISABLED=$((DISABLED + 1)) || \
-            warn "Could not disable $pkg"
-    fi
-done
-
-if [ "$DISABLED" -eq 0 ]; then
-    info "No iFit packages found to disable"
-else
-    ok "$DISABLED iFit package(s) disabled"
-fi
-
-# =========================================================================
-# Step 6: Install other APKs
-# =========================================================================
-step 6 "Install additional apps"
 
 INSTALLED=0
 FAILED=0
-SKIPPED=0
 for ((i=0; i<${#OTHER_APKS[@]}; i++)); do
-    if [ "${APP_INSTALL_STATES[$i]}" -ne 1 ]; then
-        SKIPPED=$((SKIPPED + 1))
+    if [ "${APP_INSTALL_STATES[$i]:-0}" -ne 1 ]; then
         continue
     fi
     APK="${OTHER_APKS[$i]}"
     NAME=$(basename "$APK" .apk)
     info "Installing $NAME..."
-    if adb install -r "$APK" 2>&1 | grep -q "Success"; then
+    if adb install $INSTALL_FLAGS "$APK" 2>&1 | tail -1 | grep -q "Success"; then
         ok "$NAME"
         INSTALLED=$((INSTALLED + 1))
     else
@@ -576,67 +523,72 @@ for ((i=0; i<${#OTHER_APKS[@]}; i++)); do
         FAILED=$((FAILED + 1))
     fi
 done
-
-if [ "$INSTALLED" -eq 0 ] && [ "$FAILED" -eq 0 ]; then
-    info "No additional apps to install"
-elif [ "$FAILED" -eq 0 ]; then
+if [ "$INSTALLED" -gt 0 ] || [ "$FAILED" -gt 0 ]; then
     echo ""
-    ok "All $INSTALLED app(s) installed"
-else
-    echo ""
-    warn "$INSTALLED installed, $FAILED failed"
+    if [ "$FAILED" -eq 0 ]; then
+        ok "$INSTALLED additional app(s) installed"
+    else
+        warn "$INSTALLED installed, $FAILED failed"
+    fi
 fi
 
 # =========================================================================
-# Step 7: Configure and verify
+# Step 4: Disable iFit packages
 # =========================================================================
-step 7 "Configure and verify"
+step 4 "Disable iFit"
 
-apply_config
-echo ""
-
-VERIFY=$(adb shell "
-    echo PATH=\$(pm path com.nettarion.hyperborea 2>/dev/null)
-    echo FLAGS=\$(dumpsys package com.nettarion.hyperborea 2>/dev/null | grep 'pkgFlags=' | head -1)
-    echo PRIVFLAGS=\$(dumpsys package com.nettarion.hyperborea 2>/dev/null | grep 'privateFlags=' | head -1)
-" 2>/dev/null | tr -d '\r')
-
-get() { echo "$VERIFY" | grep "^$1=" | cut -d= -f2-; }
-
-PASS=0; TOTAL=0
-
-# Check priv-app path
-PKG_PATH=$(get PATH)
-TOTAL=$((TOTAL + 1))
-if echo "$PKG_PATH" | grep -q "/system/priv-app/"; then
-    ok "Install location OK"
-    PASS=$((PASS + 1))
-else
-    fail "Install location incorrect"
-fi
-
-# Check PRIVILEGED flag
-PKG_PRIVFLAGS=$(get PRIVFLAGS)
-TOTAL=$((TOTAL + 1))
-if echo "$PKG_PRIVFLAGS" | grep -q "PRIVILEGED"; then
-    ok "Permissions OK"
-    PASS=$((PASS + 1))
-else
-    fail "Permissions not granted"
-fi
+# `pm disable-user --user 0` works as the unprivileged shell user; it
+# doesn't kill running processes (the reboot in step 5 handles that), but
+# it stops them from launching again.
+DISABLED=0
+ALREADY=0
+ABSENT=0
+for pkg in "${IFIT_PACKAGES[@]}"; do
+    if ! adb shell "pm list packages" 2>/dev/null | grep -q "^package:$pkg$"; then
+        ABSENT=$((ABSENT + 1))
+        continue
+    fi
+    if adb shell "pm list packages -d" 2>/dev/null | grep -q "^package:$pkg$"; then
+        ok "$pkg already disabled"
+        ALREADY=$((ALREADY + 1))
+        continue
+    fi
+    # PackageManagerShellCommand prints "Package $pkg new state: disabled-user".
+    # Match the exact suffix to avoid colliding with `disable-until-used`.
+    if adb shell "pm disable-user --user 0 $pkg" 2>&1 | grep -q "new state: disabled-user"; then
+        ok "Disabled $pkg"
+        DISABLED=$((DISABLED + 1))
+    else
+        warn "Could not disable $pkg"
+    fi
+done
 
 echo ""
-if [ "$PASS" -eq "$TOTAL" ]; then
-    echo -e "  ${GREEN}${BOLD}$PASS/$TOTAL checks passed${NC}"
-else
-    echo -e "  ${YELLOW}$PASS/$TOTAL checks passed${NC}"
+info "$DISABLED newly disabled, $ALREADY already disabled, $ABSENT not present"
+
+# =========================================================================
+# Step 5: Reboot, verify, and launch
+# =========================================================================
+step 5 "Reboot and launch"
+
+info "Rebooting..."
+REBOOT_START=$(date +%s)
+start_timer "Waiting for device..." "$REBOOT_START"
+adb reboot >/dev/null 2>&1 || true
+wait_for_reboot 300
+stop_timer
+ok "Device back online ($(fmt_time $(( $(date +%s) - REBOOT_START ))))"
+
+PKG_PATH=$(adb shell "pm path com.nettarion.hyperborea" 2>/dev/null | tr -d '\r')
+if [ -z "$PKG_PATH" ]; then
+    die "Hyperborea is not installed after reboot — something went wrong."
 fi
+ok "Install verified: $PKG_PATH"
+
+info "Launching Hyperborea..."
+adb shell am start -n com.nettarion.hyperborea/.MainActivity >/dev/null 2>&1 || true
+ok "Hyperborea started"
 
 echo ""
 echo -e "  ${GREEN}${BOLD}Deployment complete!${NC}"
 echo ""
-
-# Launch Hyperborea
-info "Launching Hyperborea..."
-adb shell am start -n com.nettarion.hyperborea/.MainActivity >/dev/null 2>&1
-ok "Hyperborea started"

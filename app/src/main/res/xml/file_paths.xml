@@ -1,4 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <paths>
     <cache-path name="logs" path="logs/" />
+    <!-- Downloaded APKs for self-update; the system installer activity reads
+         the URI handed off by AppInstaller via FileProvider. -->
+    <files-path name="update" path="update/" />
 </paths>

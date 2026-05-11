@@ -18,7 +18,6 @@ import com.nettarion.hyperborea.core.orchestration.Prerequisite
 import com.nettarion.hyperborea.core.profile.UserPreferences
 import com.nettarion.hyperborea.core.system.SystemLogEntry
 import com.nettarion.hyperborea.core.system.SystemLogStore
-import com.nettarion.hyperborea.core.system.SystemController
 import com.nettarion.hyperborea.core.system.SystemMonitor
 import com.nettarion.hyperborea.core.system.SystemSnapshot
 import com.nettarion.hyperborea.core.test.buildSystemSnapshot
@@ -105,21 +104,6 @@ class AdminViewModelTest {
         override fun setImmersiveModeEnabled(enabled: Boolean) {}
     }
 
-    private val fakeSystemController = object : SystemController {
-        override suspend fun stopService(packageName: String, className: String) = true
-        override suspend fun forceStopPackage(packageName: String) = true
-        override suspend fun disablePackage(packageName: String) = true
-        override suspend fun enablePackage(packageName: String) = true
-        override suspend fun uninstallPackage(packageName: String) = true
-        override suspend fun disableComponent(packageName: String, className: String) = true
-        override suspend fun enableComponent(packageName: String, className: String) = true
-        override suspend fun grantUsbPermission(packageName: String) = true
-        override suspend fun revokeUsbPermissions(packageName: String) = true
-        override suspend fun setImmersiveMode(enabled: Boolean) = true
-        override suspend fun setAdbEnabled(enabled: Boolean) = true
-        override suspend fun setUserSetupComplete(complete: Boolean) = true
-    }
-
     private val fakeSupportClient = object : SupportHttpClient {
         override fun upload(jsonBody: String): String? = uploadResponse
     }
@@ -147,7 +131,6 @@ class AdminViewModelTest {
             broadcastAdapters = emptySet(),
             updateManager = updateManager,
             userPreferences = fakeUserPreferences,
-            systemController = fakeSystemController,
             supportHttpClient = fakeSupportClient,
             installId = InstallId(ContextWrapper(null)),
             logger = noOpLogger,

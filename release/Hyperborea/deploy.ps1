@@ -1,4 +1,11 @@
-# deploy.ps1 - Install Hyperborea as a privileged system app on a rooted NordicTrack console.
+# deploy.ps1 - Install Hyperborea on a NordicTrack/iFit console over ADB. No root required.
+#
+# Hyperborea is installed as a regular APK via `adb install`; iFit's competing
+# apps are silenced with `adb shell pm disable-user --user 0 ...`, which works as
+# the unprivileged `shell` user on any console with ADB enabled.
+#
+# Privileged install to /system/priv-app/ (the old flow) lives on the
+# `archive/priv-app-deployment` branch if you need to revive it.
 #
 # Place Hyperborea*.apk (and any additional APKs) in apps\, then run:
 #   powershell -ExecutionPolicy Bypass -File deploy.ps1
@@ -9,7 +16,7 @@ $ErrorActionPreference = "Stop"
 $ScriptDir = Split-Path -Parent $MyInvocation.MyCommand.Definition
 $AppsDir = Join-Path $ScriptDir "apps"
 
-$TotalSteps = 7
+$TotalSteps = 5
 
 function Write-Ok($msg)      { Write-Host "  " -NoNewline; Write-Host "+" -ForegroundColor Green -NoNewline; Write-Host " $msg" }
 function Write-Fail($msg)    { Write-Host "  " -NoNewline; Write-Host "x" -ForegroundColor Red -NoNewline; Write-Host " $msg" }
@@ -312,8 +319,9 @@ function Test-IpConnection {
     return $env:ANDROID_SERIAL -and $env:ANDROID_SERIAL -match ':'
 }
 
-function Invoke-AdbRootWait {
-    Invoke-Adb root 2>$null | Out-Null
+function Invoke-AdbReconnectWait {
+    # No `adb root` — production-build firmware (the case this script targets)
+    # rejects it. Just reconnect (if IP) and wait for the device.
     if (Test-IpConnection) {
         Start-Sleep -Seconds 2
         Invoke-Adb connect $env:ANDROID_SERIAL 2>$null | Out-Null
@@ -350,7 +358,7 @@ function Find-Device {
             $env:ANDROID_SERIAL = $serials[$idx]
             Write-Host ""
             Write-Info "Connecting..."
-            Invoke-AdbRootWait
+            Invoke-AdbReconnectWait
             Write-Ok "Connected to $($serials[$idx])"
             return
         }
@@ -369,7 +377,7 @@ function Find-Device {
         Invoke-Adb -s $ip shell true 2>$null | Out-Null
         if ($LASTEXITCODE -eq 0) {
             $env:ANDROID_SERIAL = $ip
-            Invoke-AdbRootWait
+            Invoke-AdbReconnectWait
             Write-Ok "Connected to $ip"
             return
         }
@@ -410,7 +418,7 @@ function Wait-ForReboot {
 
         $bootComplete = Invoke-Adb shell "getprop sys.boot_completed" 2>$null
         if ($bootComplete -match "1") {
-            Invoke-AdbRootWait
+            Invoke-AdbReconnectWait
             break
         }
 
@@ -421,29 +429,18 @@ function Wait-ForReboot {
 # =========================================================================
 # Configuration
 # =========================================================================
+# `com.ifit.launcher` is intentionally absent: leaving it enabled gives the
+# device's home button somewhere to land. The launcher can't open the workout
+# apps once those are disabled, but it remains as a benign navigation anchor.
 $IfitPackages = @(
     "com.ifit.eru"
     "com.ifit.standalone"
-    "com.ifit.launcher"
     "com.ifit.arda"
     "com.ifit.glassos_service"
     "com.ifit.gandalf"
     "com.ifit.rivendell"
     "com.ifit.mithlond"
 )
-
-function Apply-Config {
-    $applied = 0
-
-    if ($script:CfgImmersive -eq 1) {
-        Invoke-Adb shell "settings put global policy_control null" 2>$null | Out-Null
-        Assert-LastExitCode "Failed to update immersive mode settings."
-        Write-Ok "Immersive mode disabled"
-        $applied++
-    }
-
-    if ($applied -eq 0) { Write-Info "No configuration changes to apply" }
-}
 
 # =========================================================================
 # Step 1: Pre-flight
@@ -461,31 +458,23 @@ if (-not $hyperboreaApk) {
     Stop-WithError "No Hyperborea*.apk found in apps\. Place the APK there and try again."
 }
 
-# BLE overlay is pushed to /vendor/overlay/ separately
-$overlayApk = Join-Path $AppsDir "BluetoothPeripheralOverlay.apk"
-
-# Collect other APKs (excluding Hyperborea and overlay)
+# Collect other APKs (excluding Hyperborea)
 $otherApks = @(Get-ChildItem -Path $AppsDir -Filter "*.apk" -ErrorAction SilentlyContinue |
-    Where-Object { $_.FullName -ne $hyperboreaApk.FullName -and $_.FullName -ne $overlayApk })
+    Where-Object { $_.FullName -ne $hyperboreaApk.FullName })
 
 Write-Ok "Found $($hyperboreaApk.Name)"
 
-# Build wizard sections
-$script:WizSections = @("Device settings")
-$script:WizLabels = @("Disable immersive mode")
-$script:WizStates = @(1)
-$script:WizSecStart = @(0)
-$script:WizSecCount = @(1)
-
-if (Test-Path $overlayApk) {
-    $script:WizLabels += "Enable Bluetooth advertising"
-    $script:WizStates += 1
-    $script:WizSecCount[0]++
-}
+# Build wizard sections — only the additional-apps picker remains, gated
+# on the apps\ directory containing anything beyond Hyperborea.
+$script:WizSections = @()
+$script:WizLabels = @()
+$script:WizStates = @()
+$script:WizSecStart = @()
+$script:WizSecCount = @()
 
 if ($otherApks.Count -gt 0) {
     $script:WizSections += "Additional apps"
-    $script:WizSecStart += $script:WizLabels.Count
+    $script:WizSecStart += 0
     $appCount = 0
     foreach ($apk in $otherApks) {
         $script:WizLabels += [System.IO.Path]::GetFileNameWithoutExtension($apk.Name)
@@ -493,139 +482,80 @@ if ($otherApks.Count -gt 0) {
         $appCount++
     }
     $script:WizSecCount += $appCount
-}
 
-$script:WizSections += "Done"
-$script:WizSecStart += $script:WizLabels.Count
-$script:WizSecCount += 0
+    $script:WizSections += "Done"
+    $script:WizSecStart += $script:WizLabels.Count
+    $script:WizSecCount += 0
+}
 
 # =========================================================================
 # Step 1: Connect to device
 # =========================================================================
 Find-Device
 
+# Sanity check that we have a working ADB shell. Running as the unprivileged
+# `shell` user is expected and fine — the rest of the script never reaches
+# for root.
+Invoke-Adb shell true 2>$null | Out-Null
+if ($LASTEXITCODE -ne 0) {
+    Stop-WithError "ADB shell unavailable. Make sure the console allows ADB connections."
+}
 $whoami = (Invoke-Adb shell "whoami" 2>$null) -replace "`r",""
-if ($whoami -ne "root") { Stop-WithError "Failed to get root (got: $whoami)" }
-Write-Ok "Root access confirmed"
+$deviceSdk = (Invoke-Adb shell "getprop ro.build.version.sdk" 2>$null) -replace "`r",""
+$deviceRelease = (Invoke-Adb shell "getprop ro.build.version.release" 2>$null) -replace "`r",""
+Write-Ok ("ADB connected (user: {0}, Android {1} / API {2})" -f
+    (if ($whoami) { $whoami } else { 'shell' }),
+    (if ($deviceRelease) { $deviceRelease } else { '?' }),
+    (if ($deviceSdk) { $deviceSdk } else { '?' }))
+
+# `adb install -g` (auto-grant runtime permissions) was introduced with the
+# runtime-permission model in API 23. On API 22 the device's `pm` rejects -g
+# and the install fails entirely. Runtime permissions don't exist on API 22
+# anyway (everything is install-time auto-granted), so dropping -g is safe.
+$installFlags = @("-r")
+if ([int]::TryParse($deviceSdk, [ref]$null) -and ([int]$deviceSdk -ge 23)) {
+    $installFlags = @("-r", "-g")
+}
 
 # =========================================================================
 # Step 2: Configure
 # =========================================================================
 Write-Step 2 "Configure"
 
-Write-Host ""
-Select-WizardConfig
-Clear-Host
-Write-Ok "Configuration saved"
-
-# Extract results
-$script:CfgImmersive = $script:WizStates[0]
-$next = 1
-$script:CfgOverlay = 0
-if (Test-Path $overlayApk) {
-    $script:CfgOverlay = $script:WizStates[$next]
-    $next++
-}
-$appsStateStart = $next
 $appInstallStates = @()
-for ($i = 0; $i -lt $otherApks.Count; $i++) {
-    $appInstallStates += $script:WizStates[$appsStateStart + $i]
+if ($script:WizSections.Count -gt 0) {
+    Write-Host ""
+    Select-WizardConfig
+    Clear-Host
+    Write-Ok "Configuration saved"
+    for ($i = 0; $i -lt $otherApks.Count; $i++) {
+        $appInstallStates += $script:WizStates[$i]
+    }
+} else {
+    Write-Info "No optional configuration; continuing"
 }
 
 # =========================================================================
-# Step 3: Install Hyperborea as priv-app
+# Step 3: Install Hyperborea (and any selected additional APKs)
 # =========================================================================
 Write-Step 3 "Install Hyperborea"
 
-Write-Info "Preparing device..."
-Invoke-Adb shell "mount -o rw,remount /system" 2>$null | Out-Null
-Assert-LastExitCode "Failed to remount /system read-write."
-Write-Ok "Device ready"
-
-Write-Info "Installing..."
-Invoke-Adb shell "mkdir -p /system/priv-app/Hyperborea" 2>$null | Out-Null
-Assert-LastExitCode "Failed to create /system/priv-app/Hyperborea."
-Invoke-Adb push $hyperboreaApk.FullName /system/priv-app/Hyperborea/Hyperborea.apk 2>$null | Out-Null
-Assert-LastExitCode "Failed to push Hyperborea.apk."
-Invoke-Adb shell "chmod 755 /system/priv-app/Hyperborea; chmod 644 /system/priv-app/Hyperborea/Hyperborea.apk" 2>$null | Out-Null
-Assert-LastExitCode "Failed to set Hyperborea.apk permissions."
-Write-Ok "Installed"
-
-if ((Test-Path $overlayApk) -and $script:CfgOverlay -eq 1) {
-    Write-Info "Applying Bluetooth configuration..."
-    Invoke-Adb shell "mkdir -p /vendor/overlay" 2>$null | Out-Null
-    Assert-LastExitCode "Failed to create /vendor/overlay."
-    Invoke-Adb push $overlayApk /vendor/overlay/BluetoothPeripheralOverlay.apk 2>$null | Out-Null
-    Assert-LastExitCode "Failed to push BluetoothPeripheralOverlay.apk."
-    Invoke-Adb shell "chmod 644 /vendor/overlay/BluetoothPeripheralOverlay.apk" 2>$null | Out-Null
-    Assert-LastExitCode "Failed to set BluetoothPeripheralOverlay.apk permissions."
-    Write-Ok "Bluetooth advertising enabled"
-}
-
-Write-Info "Finalizing..."
-Invoke-Adb shell "mount -o ro,remount /system" 2>$null | Out-Null
-Assert-LastExitCode "Failed to remount /system read-only."
-$null = Invoke-Adb shell "if [ ! -f /data/update.zip ]; then touch /data/update.zip; fi; toybox chattr +i /data/update.zip" 2>$null
-if ($LASTEXITCODE -ne 0) {
-    Write-Warn "Some protections could not be applied"
-}
-Invoke-Adb shell "touch /sdcard/.wolfDev" 2>$null | Out-Null
-Write-Ok "Done"
-
-# =========================================================================
-# Step 4: Reboot and wait
-# =========================================================================
-Write-Step 4 "Reboot device"
-
-Write-Info "Rebooting..."
-$rebootStart = Get-Date
-Start-Timer "Waiting for device..."
-Invoke-Adb reboot 2>$null | Out-Null
-Assert-LastExitCode "Failed to reboot the device."
-Wait-ForReboot -MaxWait 300
-Stop-Timer
-Write-Ok "Device ready ($(Format-Elapsed ([int]((Get-Date) - $rebootStart).TotalSeconds)))"
-
-# =========================================================================
-# Step 5: Disable iFit
-# =========================================================================
-Write-Step 5 "Disable iFit"
-
-$disabled = 0
-$installedPkgs = Invoke-Adb shell "pm list packages" 2>$null
-foreach ($pkg in $IfitPackages) {
-    if ($installedPkgs -match [regex]::Escape($pkg)) {
-        $null = Invoke-Adb shell "pm disable-user --user 0 $pkg" 2>$null
-        if ($LASTEXITCODE -eq 0) {
-            Write-Ok "Disabled $pkg"
-            $disabled++
-        } else {
-            Write-Warn "Could not disable $pkg"
-        }
-    }
-}
-
-if ($disabled -eq 0) {
-    Write-Info "No iFit packages found to disable"
+Write-Info "Installing $($hyperboreaApk.Name)..."
+# $installFlags is "-r" or "-r -g"; -g is added when the device is API 23+.
+$result = Invoke-Adb install @installFlags $hyperboreaApk.FullName 2>&1
+if ($result -match "Success") {
+    Write-Ok "Hyperborea installed"
 } else {
-    Write-Ok "$disabled iFit package(s) disabled"
+    Stop-WithError "adb install of Hyperborea failed: $($result | Select-Object -Last 1)"
 }
 
-# =========================================================================
-# Step 6: Install additional apps
-# =========================================================================
-Write-Step 6 "Install additional apps"
-
-$installed = 0; $failed = 0; $skipped = 0
+$installed = 0; $failed = 0
 for ($i = 0; $i -lt $otherApks.Count; $i++) {
-    if ($appInstallStates[$i] -ne 1) {
-        $skipped++
-        continue
-    }
+    if ($appInstallStates[$i] -ne 1) { continue }
     $apk = $otherApks[$i]
     $name = [System.IO.Path]::GetFileNameWithoutExtension($apk.Name)
     Write-Info "Installing $name..."
-    $result = Invoke-Adb install -r $apk.FullName 2>&1
+    $result = Invoke-Adb install @installFlags $apk.FullName 2>&1
     if ($result -match "Success") {
         Write-Ok $name
         $installed++
@@ -634,67 +564,72 @@ for ($i = 0; $i -lt $otherApks.Count; $i++) {
         $failed++
     }
 }
-
-if ($installed -eq 0 -and $failed -eq 0) {
-    Write-Info "No additional apps to install"
-} elseif ($failed -eq 0) {
+if ($installed -gt 0 -or $failed -gt 0) {
     Write-Host ""
-    Write-Ok "All $installed app(s) installed"
-} else {
-    Write-Host ""
-    Write-Warn "$installed installed, $failed failed"
+    if ($failed -eq 0) {
+        Write-Ok "$installed additional app(s) installed"
+    } else {
+        Write-Warn "$installed installed, $failed failed"
+    }
 }
 
 # =========================================================================
-# Step 7: Configure and verify
+# Step 4: Disable iFit packages
 # =========================================================================
-Write-Step 7 "Configure and verify"
+Write-Step 4 "Disable iFit"
 
-Apply-Config
+# `pm disable-user --user 0` works as the unprivileged shell user; it
+# doesn't kill running processes (the reboot in step 5 handles that), but
+# it stops them from launching again.
+$disabled = 0; $already = 0; $absent = 0
+$installedPkgs = Invoke-Adb shell "pm list packages" 2>$null
+$disabledPkgs = Invoke-Adb shell "pm list packages -d" 2>$null
+foreach ($pkg in $IfitPackages) {
+    $needle = "package:$pkg"
+    if (-not ($installedPkgs -match [regex]::Escape($needle))) {
+        $absent++
+        continue
+    }
+    if ($disabledPkgs -match [regex]::Escape($needle)) {
+        Write-Ok "$pkg already disabled"
+        $already++
+        continue
+    }
+    $result = Invoke-Adb shell "pm disable-user --user 0 $pkg" 2>&1
+    # PackageManagerShellCommand prints "Package $pkg new state: disabled-user".
+    # Match the exact suffix to avoid colliding with `disable-until-used`.
+    if ($result -match "new state: disabled-user") {
+        Write-Ok "Disabled $pkg"
+        $disabled++
+    } else {
+        Write-Warn "Could not disable $pkg"
+    }
+}
 Write-Host ""
+Write-Info "$disabled newly disabled, $already already disabled, $absent not present"
 
-$verifyScript = @"
-echo PATH=`$(pm path com.nettarion.hyperborea 2>/dev/null)
-echo FLAGS=`$(dumpsys package com.nettarion.hyperborea 2>/dev/null | grep 'pkgFlags=' | head -1)
-echo PRIVFLAGS=`$(dumpsys package com.nettarion.hyperborea 2>/dev/null | grep 'privateFlags=' | head -1)
-"@
+# =========================================================================
+# Step 5: Reboot, verify, and launch
+# =========================================================================
+Write-Step 5 "Reboot and launch"
 
-$verify = (Invoke-Adb shell $verifyScript 2>$null) -replace "`r",""
+Write-Info "Rebooting..."
+$rebootStart = Get-Date
+Start-Timer "Waiting for device..."
+Invoke-Adb reboot 2>$null | Out-Null
+Wait-ForReboot -MaxWait 300
+Stop-Timer
+Write-Ok "Device back online ($(Format-Elapsed ([int]((Get-Date) - $rebootStart).TotalSeconds)))"
 
-function Get-Val($key) {
-    $line = ($verify -split "`n") | Where-Object { $_ -match "^$key=" } | Select-Object -First 1
-    if ($line) { return ($line -replace "^$key=","") }
-    return ""
+$pkgPath = (Invoke-Adb shell "pm path com.nettarion.hyperborea" 2>$null) -replace "`r",""
+if (-not $pkgPath) {
+    Stop-WithError "Hyperborea is not installed after reboot — something went wrong."
 }
+Write-Ok "Install verified: $pkgPath"
 
-$pass = 0; $total = 0
-
-# Check priv-app path
-$pkgPath = Get-Val "PATH"
-$total++
-if ($pkgPath -match "/system/priv-app/") {
-    Write-Ok "Install location OK"
-    $pass++
-} else {
-    Write-Fail "Install location incorrect"
-}
-
-# Check PRIVILEGED flag
-$pkgPrivFlags = Get-Val "PRIVFLAGS"
-$total++
-if ($pkgPrivFlags -match "PRIVILEGED") {
-    Write-Ok "Permissions OK"
-    $pass++
-} else {
-    Write-Fail "Permissions not granted"
-}
-
-Write-Host ""
-if ($pass -eq $total) {
-    Write-Host "  $pass/$total checks passed" -ForegroundColor Green
-} else {
-    Write-Host "  $pass/$total checks passed" -ForegroundColor Yellow
-}
+Write-Info "Launching Hyperborea..."
+Invoke-Adb shell "am start -n com.nettarion.hyperborea/.MainActivity" 2>$null | Out-Null
+Write-Ok "Hyperborea started"
 
 Write-Host ""
 Write-Host "  Deployment complete!" -ForegroundColor Green

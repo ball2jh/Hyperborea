@@ -109,35 +109,35 @@ class FitProAdapterTest {
     }
 
     @Test
-    fun `prerequisite fulfill calls grantUsbPermission`() = runTest {
+    fun `prerequisite fulfill calls requestUsbPermission`() = runTest {
         val adapter = createAdapter(this)
-        var capturedPackage: String? = null
+        var called = false
         val controller = stubController(
-            onGrantUsbPermission = { pkg ->
-                capturedPackage = pkg
+            onRequestUsbPermission = {
+                called = true
                 true
             },
         )
         val prereq = adapter.prerequisites.single()
         prereq.fulfill!!.invoke(controller)
-        assertThat(capturedPackage).isEqualTo("com.nettarion.hyperborea")
+        assertThat(called).isTrue()
     }
 
     @Test
-    fun `prerequisite fulfill returns Success when grantUsbPermission succeeds`() = runTest {
+    fun `prerequisite fulfill returns Success when requestUsbPermission succeeds`() = runTest {
         val adapter = createAdapter(this)
-        val controller = stubController(onGrantUsbPermission = { true })
+        val controller = stubController(onRequestUsbPermission = { true })
         val result = adapter.prerequisites.single().fulfill!!.invoke(controller)
         assertThat(result).isEqualTo(FulfillResult.Success)
     }
 
     @Test
-    fun `prerequisite fulfill returns Failed when grantUsbPermission fails`() = runTest {
+    fun `prerequisite fulfill returns Failed when requestUsbPermission fails to dispatch`() = runTest {
         val adapter = createAdapter(this)
-        val controller = stubController(onGrantUsbPermission = { false })
+        val controller = stubController(onRequestUsbPermission = { false })
         val result = adapter.prerequisites.single().fulfill!!.invoke(controller)
         assertThat(result).isInstanceOf(FulfillResult.Failed::class.java)
-        assertThat((result as FulfillResult.Failed).reason).contains("USB permission not granted")
+        assertThat((result as FulfillResult.Failed).reason).contains("could not be dispatched")
     }
 
     @Test
@@ -433,20 +433,9 @@ class FitProAdapterTest {
     )
 
     private fun stubController(
-        onGrantUsbPermission: suspend (String) -> Boolean = { false },
+        onRequestUsbPermission: suspend () -> Boolean = { false },
     ) = object : SystemController {
-        override suspend fun stopService(packageName: String, className: String) = false
-        override suspend fun forceStopPackage(packageName: String) = false
-        override suspend fun disablePackage(packageName: String) = false
-        override suspend fun enablePackage(packageName: String) = false
-        override suspend fun uninstallPackage(packageName: String) = false
-        override suspend fun disableComponent(packageName: String, className: String) = false
-        override suspend fun enableComponent(packageName: String, className: String) = false
-        override suspend fun grantUsbPermission(packageName: String) = onGrantUsbPermission(packageName)
-        override suspend fun revokeUsbPermissions(packageName: String) = false
-        override suspend fun setImmersiveMode(enabled: Boolean) = false
-        override suspend fun setAdbEnabled(enabled: Boolean) = false
-        override suspend fun setUserSetupComplete(complete: Boolean) = false
+        override suspend fun requestUsbPermission() = onRequestUsbPermission()
     }
 
     // --- V1 handshake packet builders ---

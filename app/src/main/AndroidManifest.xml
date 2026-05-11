@@ -1,6 +1,20 @@
 <?xml version="1.0" encoding="utf-8"?>
-<manifest xmlns:android="http://schemas.android.com/apk/res/android"
-    xmlns:tools="http://schemas.android.com/tools">
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <!-- Package visibility (API 30+, enforced when targetSdk >= 30).
+         Without this, getInstalledPackages() returns only our own package and
+         doesn't see the iFit apps the IfitEcosystemManager checks against.
+         https://developer.android.com/training/package-visibility -->
+    <queries>
+        <package android:name="com.ifit.eru" />
+        <package android:name="com.ifit.standalone" />
+        <package android:name="com.ifit.arda" />
+        <package android:name="com.ifit.glassos_service" />
+        <package android:name="com.ifit.gandalf" />
+        <package android:name="com.ifit.rivendell" />
+        <package android:name="com.ifit.mithlond" />
+        <package android:name="com.ifit.launcher" />
+    </queries>
 
     <!-- BLE peripheral mode (pre-API 31 permission model) -->
     <uses-permission android:name="android.permission.BLUETOOTH" />
@@ -19,7 +33,8 @@
     <!-- USB host -->
     <uses-feature android:name="android.hardware.usb.host" android:required="true" />
 
-    <!-- Overlay window (auto-granted as platform-signed priv-app) -->
+    <!-- Overlay window — requires explicit user grant via Settings.canDrawOverlays() on API 23+;
+         OverlayManager degrades gracefully when not granted. -->
     <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />
 
     <!-- Foreground service -->
@@ -28,27 +43,9 @@
     <!-- Auto-start on boot -->
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
 
-    <!-- USB and ecosystem management (granted as privileged app in /system/priv-app/) -->
-    <uses-permission
-        android:name="android.permission.MANAGE_USB"
-        tools:ignore="ProtectedPermissions" />
-    <uses-permission
-        android:name="android.permission.FORCE_STOP_PACKAGES"
-        tools:ignore="ProtectedPermissions" />
-    <uses-permission
-        android:name="android.permission.CHANGE_COMPONENT_ENABLED_STATE"
-        tools:ignore="ProtectedPermissions" />
-    <uses-permission
-        android:name="android.permission.WRITE_SETTINGS"
-        tools:ignore="ProtectedPermissions" />
-    <uses-permission
-        android:name="android.permission.WRITE_SECURE_SETTINGS"
-        tools:ignore="ProtectedPermissions" />
-
-    <!-- App self-update (granted automatically as privileged app in /system/priv-app/) -->
-    <uses-permission
-        android:name="android.permission.INSTALL_PACKAGES"
-        tools:ignore="ProtectedPermissions" />
+    <!-- App self-update — fires the system installer dialog via ACTION_VIEW.
+         Normal-protection permission, auto-granted at install. -->
+    <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
 
     <application
         android:name=".HyperboreaApp"
@@ -61,6 +58,7 @@
         android:theme="@style/Theme.Hyperborea">
         <activity
             android:name=".MainActivity"
+            android:directBootAware="true"
             android:exported="true"
             android:screenOrientation="landscape"
             android:theme="@style/Theme.Hyperborea">
@@ -68,6 +66,14 @@
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
+            <!-- Auto-launch on FitPro USB attach so Android offers the "always" checkbox.
+                 Once accepted, USB permission persists across the device's ~20s connect cycle. -->
+            <intent-filter>
+                <action android:name="android.hardware.usb.action.USB_DEVICE_ATTACHED" />
+            </intent-filter>
+            <meta-data
+                android:name="android.hardware.usb.action.USB_DEVICE_ATTACHED"
+                android:resource="@xml/usb_device_filter" />
         </activity>
 
         <service

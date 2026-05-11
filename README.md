@@ -53,11 +53,26 @@ clean → lint → test → build → package pipeline and requires a release ke
 
 ## Installing
 
-Hyperborea needs to run as a privileged system app on the equipment's console (for USB device
-management, overlay windows, and stopping the stock iFit foreground app while it owns the USB
-port). The `release/Hyperborea/` directory contains deploy scripts (`deploy.sh`, `deploy.ps1`,
-`deploy.cmd`) that install it via rooted ADB into `/system/priv-app/`. This requires a console
-with root ADB access; consoles on newer iFit firmware are not rootable out of the box.
+Hyperborea installs as a regular Android APK over ADB — no root required. The `release/Hyperborea/`
+directory contains deploy scripts (`deploy.sh`, `deploy.ps1`, `deploy.cmd`) that:
+
+1. `adb install -r -g` Hyperborea onto the console.
+2. `adb shell pm disable-user --user 0 …` the iFit apps that compete for the FitPro USB device
+   (standalone, ERU, GlassOS service, and friends — `com.ifit.launcher` is left enabled so the home
+   button still works).
+3. `adb reboot` to make sure no iFit processes survive.
+
+All of step 2 works as the unprivileged `shell` user; the only prerequisite is an ADB connection
+to the console. On consoles where ADB isn't enabled out of the box, community tools like atvTools
+can enable it without rooting the device.
+
+**BLE caveat.** On consoles whose BSP ships with `config_bluetooth_le_peripheral_mode_supported=false`
+in `framework-res.apk`, `getBluetoothLeAdvertiser()` returns null and FTMS broadcast over BLE won't
+work without a `/vendor/overlay/` fix — and that overlay push *does* require root. WiFi broadcast
+(TCP, port 36866) works on every device. The previous deployment flow installed Hyperborea as a
+privileged system app at `/system/priv-app/Hyperborea/` and pushed the BLE-peripheral overlay
+along with it; that path lives on the [`archive/priv-app-deployment`](https://github.com/ball2jh/Hyperborea/tree/archive/priv-app-deployment)
+branch if you need to revive it for a rootable console.
 
 ## Architecture
 

@@ -152,18 +152,7 @@ class DashboardViewModelTest {
         val noOpLogger = TestAppLogger()
 
         val fakeSystemController = object : SystemController {
-            override suspend fun stopService(packageName: String, className: String) = true
-            override suspend fun forceStopPackage(packageName: String) = true
-            override suspend fun disablePackage(packageName: String) = true
-            override suspend fun enablePackage(packageName: String) = true
-            override suspend fun uninstallPackage(packageName: String) = true
-            override suspend fun disableComponent(packageName: String, className: String) = true
-            override suspend fun enableComponent(packageName: String, className: String) = true
-            override suspend fun grantUsbPermission(packageName: String) = true
-            override suspend fun revokeUsbPermissions(packageName: String) = true
-            override suspend fun setImmersiveMode(enabled: Boolean) = true
-            override suspend fun setAdbEnabled(enabled: Boolean) = true
-            override suspend fun setUserSetupComplete(complete: Boolean) = true
+            override suspend fun requestUsbPermission() = true
         }
 
         val fakeEcosystemManager = object : EcosystemManager {

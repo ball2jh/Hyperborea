@@ -19,7 +19,6 @@ import com.nettarion.hyperborea.core.LogEntry
 import com.nettarion.hyperborea.core.LogStore
 import com.nettarion.hyperborea.core.system.SystemLogEntry
 import com.nettarion.hyperborea.core.system.SystemLogStore
-import com.nettarion.hyperborea.core.system.SystemController
 import com.nettarion.hyperborea.core.system.SystemMonitor
 import com.nettarion.hyperborea.core.system.SystemSnapshot
 import com.nettarion.hyperborea.core.profile.UserPreferences
@@ -54,7 +53,6 @@ class AdminViewModel @Inject constructor(
     private val broadcastAdapters: Set<@JvmSuppressWildcards BroadcastAdapter>,
     private val updateManager: UpdateManager,
     private val userPreferences: UserPreferences,
-    private val systemController: SystemController,
     private val supportHttpClient: SupportHttpClient,
     private val installId: InstallId,
     private val logger: AppLogger,
@@ -92,10 +90,14 @@ class AdminViewModel @Inject constructor(
     val immersiveModeEnabled: StateFlow<Boolean> = userPreferences.immersiveModeEnabled
 
     fun toggleImmersiveMode(enabled: Boolean) {
+        // Persists the user's preference. System-level enforcement of
+        // `policy_control = immersive.full=*` was removed with the priv-app
+        // path: it requires WRITE_SECURE_SETTINGS, which is only granted to
+        // privileged apps. To actually apply it device-wide, the user can run
+        //   adb shell settings put global policy_control immersive.full=*
+        // (see docs). The preference stays so future in-app fullscreen
+        // controls can read it.
         userPreferences.setImmersiveModeEnabled(enabled)
-        viewModelScope.launch {
-            systemController.setImmersiveMode(enabled)
-        }
     }
 
     private val _exportResult = MutableStateFlow<ExportResult?>(null)

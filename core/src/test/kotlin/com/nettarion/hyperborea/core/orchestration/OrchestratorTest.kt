@@ -644,24 +644,9 @@ class OrchestratorTest {
     private class FakeSystemController : SystemController {
         val calls = mutableListOf<String>()
 
-        override suspend fun stopService(packageName: String, className: String): Boolean {
-            calls.add("stopService:$packageName/$className"); return true
+        override suspend fun requestUsbPermission(): Boolean {
+            calls.add("requestUsbPermission"); return true
         }
-
-        override suspend fun forceStopPackage(packageName: String): Boolean {
-            calls.add("forceStop:$packageName"); return true
-        }
-
-        override suspend fun disablePackage(packageName: String) = false
-        override suspend fun enablePackage(packageName: String) = false
-        override suspend fun uninstallPackage(packageName: String) = false
-        override suspend fun disableComponent(packageName: String, className: String) = false
-        override suspend fun enableComponent(packageName: String, className: String) = false
-        override suspend fun grantUsbPermission(packageName: String) = false
-        override suspend fun revokeUsbPermissions(packageName: String) = false
-        override suspend fun setImmersiveMode(enabled: Boolean) = false
-        override suspend fun setAdbEnabled(enabled: Boolean) = false
-        override suspend fun setUserSetupComplete(complete: Boolean) = false
     }
 
     private class FakeEcosystemManager(

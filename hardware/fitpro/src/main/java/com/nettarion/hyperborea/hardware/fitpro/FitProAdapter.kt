@@ -47,8 +47,13 @@ class FitProAdapter @Inject constructor(
                 }
             },
             fulfill = { controller ->
-                if (controller.grantUsbPermission(HYPERBOREA_PACKAGE)) FulfillResult.Success
-                else FulfillResult.Failed("USB permission not granted")
+                // Fires the system USB-permission dialog. The user grants once
+                // (with the "always" checkbox) and the manifest intent-filter
+                // makes future attaches dispatch silently. The next snapshot
+                // poll picks up hasPermission=true; if the user cancels, this
+                // prereq stays unmet on the next pass.
+                if (controller.requestUsbPermission()) FulfillResult.Success
+                else FulfillResult.Failed("USB permission request could not be dispatched")
             },
         ),
     )
@@ -327,6 +332,5 @@ class FitProAdapter @Inject constructor(
         const val FITPRO_PRODUCT_ID_V2 = 3
         const val FITPRO_PRODUCT_ID_V2_FTDI = 4
         val FITPRO_PRODUCT_IDS = setOf(FITPRO_PRODUCT_ID_V1, FITPRO_PRODUCT_ID_V2, FITPRO_PRODUCT_ID_V2_FTDI)
-        const val HYPERBOREA_PACKAGE = "com.nettarion.hyperborea"
     }
 }

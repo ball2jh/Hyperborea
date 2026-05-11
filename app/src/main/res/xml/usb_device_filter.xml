@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+    FitPro USB device filter.
+    Vendor 8508 (0x213C) is ICON Health & Fitness; product IDs cover the
+    V1 and V2 transports used by NordicTrack/ProForm/FreeMotion/Schwinn
+    consoles. Decimal values are required by the platform parser.
+-->
+<resources>
+    <usb-device vendor-id="8508" product-id="2" />
+    <usb-device vendor-id="8508" product-id="3" />
+    <usb-device vendor-id="8508" product-id="4" />
+</resources>

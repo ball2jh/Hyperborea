@@ -101,17 +101,6 @@ class PrerequisiteTest {
     }
 
     private fun stubController(defaultReturn: Boolean = false) = object : SystemController {
-        override suspend fun stopService(packageName: String, className: String) = defaultReturn
-        override suspend fun forceStopPackage(packageName: String) = defaultReturn
-        override suspend fun disablePackage(packageName: String) = defaultReturn
-        override suspend fun enablePackage(packageName: String) = defaultReturn
-        override suspend fun uninstallPackage(packageName: String) = defaultReturn
-        override suspend fun disableComponent(packageName: String, className: String) = defaultReturn
-        override suspend fun enableComponent(packageName: String, className: String) = defaultReturn
-        override suspend fun grantUsbPermission(packageName: String) = defaultReturn
-        override suspend fun revokeUsbPermissions(packageName: String) = defaultReturn
-        override suspend fun setImmersiveMode(enabled: Boolean) = defaultReturn
-        override suspend fun setAdbEnabled(enabled: Boolean) = defaultReturn
-        override suspend fun setUserSetupComplete(complete: Boolean) = defaultReturn
+        override suspend fun requestUsbPermission() = defaultReturn
     }
 }
