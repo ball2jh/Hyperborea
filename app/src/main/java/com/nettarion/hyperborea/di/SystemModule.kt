@@ -33,7 +33,8 @@ object SystemModule {
     fun provideSystemController(
         @ApplicationContext context: Context,
         logger: AppLogger,
-    ): SystemController = AndroidSystemController(context, logger)
+        monitor: SystemMonitor,
+    ): SystemController = AndroidSystemController(context, logger, monitor)
 
     @Provides
     @Singleton

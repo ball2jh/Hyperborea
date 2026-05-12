@@ -5,10 +5,13 @@ import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
+import android.hardware.usb.UsbDevice
 import android.hardware.usb.UsbManager
 import android.os.Build
 import com.nettarion.hyperborea.core.AppLogger
 import com.nettarion.hyperborea.core.system.SystemController
+import com.nettarion.hyperborea.core.system.SystemMonitor
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.suspendCancellableCoroutine
 import javax.inject.Inject
 import javax.inject.Singleton
@@ -18,6 +21,7 @@ import kotlin.coroutines.resume
 class AndroidSystemController @Inject constructor(
     private val context: Context,
     private val logger: AppLogger,
+    private val systemMonitor: SystemMonitor,
 ) : SystemController {
 
     override suspend fun requestUsbPermission(): Boolean {
@@ -26,11 +30,7 @@ class AndroidSystemController @Inject constructor(
             logger.w(TAG, "UsbManager unavailable")
             return false
         }
-        val device = usbManager.deviceList.values.firstOrNull { it.vendorId == FITPRO_VENDOR_ID }
-        if (device == null) {
-            logger.w(TAG, "No FitPro USB device attached; nothing to request permission for")
-            return false
-        }
+        val device = awaitFitProDevice(usbManager)
         if (usbManager.hasPermission(device)) {
             logger.d(TAG, "USB permission already granted for vid=${device.vendorId} pid=${device.productId}")
             return true
@@ -84,9 +84,34 @@ class AndroidSystemController @Inject constructor(
         }
     }
 
+    /**
+     * Returns the currently-attached FitPro [UsbDevice], waiting for one to show up if none is
+     * present right now. The hardware power-cycles its USB link roughly every 20 s, so a START
+     * tapped during an "off" window shouldn't dead-end — it should just wait for the next attach.
+     * Cancellable: the orchestrator wraps the prerequisite's [requestUsbPermission] call in a
+     * [kotlinx.coroutines.withTimeoutOrNull] (10 min for this prereq), so a never-arriving device
+     * cancels this coroutine and the prerequisite times out instead of hanging forever.
+     */
+    private suspend fun awaitFitProDevice(usbManager: UsbManager): UsbDevice {
+        while (true) {
+            usbManager.deviceList.values.firstOrNull {
+                it.vendorId == FITPRO_VENDOR_ID && it.productId in FITPRO_PRODUCT_IDS
+            }?.let { return it }
+            logger.i(TAG, "No FitPro USB device attached — waiting for one to appear…")
+            // SystemMonitor observes USB_DEVICE_ATTACHED/DETACHED and republishes its snapshot;
+            // suspend until it reports a matching device, then loop to grab the real UsbDevice
+            // (the snapshot carries UsbDeviceInfo, not the UsbDevice itself).
+            systemMonitor.snapshot.first { snap ->
+                snap.usbDevices.any { it.vendorId == FITPRO_VENDOR_ID && it.productId in FITPRO_PRODUCT_IDS }
+            }
+        }
+    }
+
     private companion object {
         const val TAG = "SystemController"
         const val FITPRO_VENDOR_ID = 0x213C
+        // Mirrors FitProAdapter.FITPRO_PRODUCT_IDS (V1=2, V2=3, V2_FTDI=4).
+        val FITPRO_PRODUCT_IDS = setOf(2, 3, 4)
         const val ACTION_USB_PERMISSION = "com.nettarion.hyperborea.USB_PERMISSION"
     }
 }
