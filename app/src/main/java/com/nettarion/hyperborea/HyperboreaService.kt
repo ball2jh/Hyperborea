@@ -41,7 +41,15 @@ class HyperboreaService : Service() {
     override fun onCreate() {
         super.onCreate()
         @Suppress("DEPRECATION")
-        startForeground(NOTIFICATION_ID, buildNotification("Starting…"))
+        try {
+            startForeground(NOTIFICATION_ID, buildNotification("Starting…"))
+        } catch (e: RuntimeException) {
+            // Some OEM firmware (e.g. stock iFit consoles) can reject the foreground
+            // notification and would otherwise kill the process. Degrade to a plain
+            // service rather than crash — on a dedicated console there is no memory
+            // pressure to worry about.
+            logger.e(TAG, "startForeground rejected by system; running without it", e)
+        }
         overlayManager = OverlayManager(
             context = this,
             orchestrator = orchestrator,
@@ -195,20 +203,23 @@ class HyperboreaService : Service() {
             this, 2, stopIntent, PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
         )
 
+        // Icons must be app-owned, not android.R.drawable.*: stripped OEM firmware may
+        // not ship the framework drawables, and a small icon that fails to resolve makes
+        // the system reject the whole notification ("Bad notification for startForeground").
         return Notification.Builder(this)
-            .setSmallIcon(android.R.drawable.ic_media_play)
+            .setSmallIcon(R.drawable.ic_stat_hyperborea)
             .setContentTitle("Hyperborea")
             .setContentText(contentText)
             .setContentIntent(contentIntent)
             .setOngoing(true)
             .addAction(
                 Notification.Action.Builder(
-                    android.R.drawable.ic_menu_view, "Overlay", overlayPendingIntent,
+                    R.drawable.ic_action_overlay, "Overlay", overlayPendingIntent,
                 ).build(),
             )
             .addAction(
                 Notification.Action.Builder(
-                    android.R.drawable.ic_menu_close_clear_cancel, "Stop", stopPendingIntent,
+                    R.drawable.ic_action_stop, "Stop", stopPendingIntent,
                 ).build(),
             )
             .build()
