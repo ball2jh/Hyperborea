@@ -18,6 +18,20 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 APPS_DIR="$SCRIPT_DIR/apps"
 
+VERBOSE=0
+for arg in "$@"; do
+    case "$arg" in
+        -v|--verbose) VERBOSE=1 ;;
+        -h|--help)
+            echo "Usage: $(basename "$0") [-v|--verbose]"
+            echo "  Place Hyperborea*.apk (and any extra APKs) in apps/, then run this script."
+            echo "  -v, --verbose   echo full adb output for each install"
+            exit 0
+            ;;
+        *) echo "Unknown option: $arg (try -h)" >&2; exit 2 ;;
+    esac
+done
+
 GREEN='\033[0;32m'; RED='\033[0;31m'; YELLOW='\033[1;33m'; CYAN='\033[0;36m'; BOLD='\033[1m'; DIM='\033[2m'; NC='\033[0m'
 ok()      { echo -e "  ${GREEN}✓${NC} $*"; }
 fail()    { echo -e "  ${RED}✗${NC} $*"; }
@@ -25,6 +39,7 @@ info()    { echo -e "  ${CYAN}→${NC} $*"; }
 warn()    { echo -e "  ${YELLOW}!${NC} $*"; }
 die()     { fail "$@"; exit 1; }
 step()    { echo -e "\n${CYAN}[$1/$TOTAL_STEPS]${NC} ${BOLD}$2${NC}"; }
+indent()  { sed 's/^/      /'; }
 
 fmt_time() { printf "%d:%02d" $(($1 / 60)) $(($1 % 60)); }
 
@@ -286,6 +301,45 @@ adb_reconnect_wait() {
     adb wait-for-device 2>/dev/null
 }
 
+# Install one APK via `adb install`, surfacing the real failure reason.
+# Returns 0 on success. $INSTALL_FLAGS is set after device discovery.
+install_apk() {
+    local apk="$1" name out
+    name=$(basename "$apk" .apk)
+    # `adb install` returns non-zero on failure on recent platform-tools, but
+    # older builds print "Failure [...]" with exit 0 — check both.
+    if out=$(adb install $INSTALL_FLAGS "$apk" 2>&1) && printf '%s\n' "$out" | grep -q "Success"; then
+        [ "$VERBOSE" -eq 1 ] && printf '%s\n' "$out" | indent
+        return 0
+    fi
+    # Always echo what adb actually said — the failure is otherwise opaque.
+    printf '%s\n' "$out" | indent
+    case "$out" in
+        *INSTALL_FAILED_UPDATE_INCOMPATIBLE*|*"signatures do not match"*)
+            warn "A different build of $name is already installed (signed with another key)."
+            if [ "$name" = "Hyperborea" ] || [[ "$name" == Hyperborea* ]]; then
+                warn "If it's the old /system/priv-app build (the pre-1.2 OTA flow), remove it with root ADB:"
+                echo -e "      ${DIM}adb root && adb remount${NC}"
+                echo -e "      ${DIM}adb shell rm -rf /system/priv-app/Hyperborea${NC}"
+                echo -e "      ${DIM}adb reboot${NC}   ${DIM}# wait for boot, then re-run this script${NC}"
+                warn "Or, if it's a normal install, uninstall it first: ${DIM}adb uninstall com.nettarion.hyperborea${NC}"
+            else
+                warn "Uninstall the existing copy first, then re-run this script."
+            fi
+            ;;
+        *INSTALL_FAILED_VERSION_DOWNGRADE*)
+            warn "A newer version of $name is already installed — uninstall it first to downgrade."
+            ;;
+        *INSTALL_FAILED_INSUFFICIENT_STORAGE*)
+            warn "Not enough free space on the device for $name."
+            ;;
+        *INSTALL_FAILED_NO_MATCHING_ABIS*)
+            warn "$name has no native libraries for this device's CPU architecture."
+            ;;
+    esac
+    return 1
+}
+
 # =========================================================================
 # Device Discovery
 # =========================================================================
@@ -500,10 +554,10 @@ step 3 "Install Hyperborea"
 
 info "Installing $(basename "$HYPERBOREA_APK")..."
 # $INSTALL_FLAGS = "-r" or "-r -g"; -g is added when the device is API 23+.
-if adb install $INSTALL_FLAGS "$HYPERBOREA_APK" 2>&1 | tail -1 | grep -q "Success"; then
+if install_apk "$HYPERBOREA_APK"; then
     ok "Hyperborea installed"
 else
-    die "adb install of Hyperborea failed. Re-run with -v for the full output."
+    die "adb install of Hyperborea failed — see the adb output above."
 fi
 
 INSTALLED=0
@@ -515,7 +569,7 @@ for ((i=0; i<${#OTHER_APKS[@]}; i++)); do
     APK="${OTHER_APKS[$i]}"
     NAME=$(basename "$APK" .apk)
     info "Installing $NAME..."
-    if adb install $INSTALL_FLAGS "$APK" 2>&1 | tail -1 | grep -q "Success"; then
+    if install_apk "$APK"; then
         ok "$NAME"
         INSTALLED=$((INSTALLED + 1))
     else
