@@ -301,7 +301,7 @@ class Orchestrator(
                 return false
             }
             logger.i(TAG, "Fulfilling $label prerequisite: ${prereq.id}")
-            val result = withTimeoutOrNull(PREREQUISITE_TIMEOUT_MS) {
+            val result = withTimeoutOrNull(prereq.fulfillTimeoutMs ?: PREREQUISITE_TIMEOUT_MS) {
                 fulfill(systemController)
             }
             if (result == null) {

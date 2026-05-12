@@ -16,6 +16,15 @@
   around `startForeground()` — `RemoteServiceException` for a bad notification
   is delivered asynchronously on the main-thread Handler, not thrown out of the
   `startForeground()` call, so that catch never ran.
+- The first launch after install no longer fails with "Failed to identify
+  hardware" while the USB-permission dialog is still on screen. The
+  `usb-device-accessible` prerequisite now suspends until the user actually
+  answers the dialog (it was fire-and-forget, reporting success the instant the
+  dialog was *shown*). Because the app auto-launches on the console as soon as
+  the deploy finishes — when the user may still be at their computer — the
+  dialog gets a 10-minute budget (vs. the 10 s the orchestrator gives the
+  pm/am-call prerequisites); a denied dialog now surfaces "USB device permission
+  was not granted" instead of a misleading hardware-probe error.
 
 ## [1.2.1] - 2026-05-11
 - Fix a crash on launch on stock iFit console firmware (observed on the

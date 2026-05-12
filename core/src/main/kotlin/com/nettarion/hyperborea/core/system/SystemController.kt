@@ -12,11 +12,15 @@ package com.nettarion.hyperborea.core.system
  */
 interface SystemController {
     /**
-     * Fire the standard Android USB-permission dialog for the currently-attached FitPro
-     * device. Returns true if the request was dispatched to the system; the user may
-     * still cancel. With the manifest USB intent-filter in place, the user only sees
-     * this dialog the first time the device is attached after install — subsequent
-     * attaches dispatch silently.
+     * Ensure Hyperborea has permission to talk to the currently-attached FitPro USB device.
+     *
+     * If permission is already granted, returns `true` immediately. Otherwise it fires the
+     * standard Android USB-permission dialog and **suspends until the user responds**,
+     * returning `true` if they grant it and `false` if they deny it (or if there is no
+     * device attached / the request can't be dispatched). Callers are expected to bound
+     * this with a timeout. With the manifest USB intent-filter in place the user only sees
+     * this dialog the first time the device is attached after install — subsequent attaches
+     * are granted silently and this returns `true` without prompting.
      */
     suspend fun requestUsbPermission(): Boolean
 }

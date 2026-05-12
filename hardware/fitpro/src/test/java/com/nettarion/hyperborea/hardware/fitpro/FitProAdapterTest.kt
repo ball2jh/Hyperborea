@@ -132,12 +132,22 @@ class FitProAdapterTest {
     }
 
     @Test
-    fun `prerequisite fulfill returns Failed when requestUsbPermission fails to dispatch`() = runTest {
+    fun `prerequisite fulfill returns Failed when USB permission is not granted`() = runTest {
         val adapter = createAdapter(this)
         val controller = stubController(onRequestUsbPermission = { false })
         val result = adapter.prerequisites.single().fulfill!!.invoke(controller)
         assertThat(result).isInstanceOf(FulfillResult.Failed::class.java)
-        assertThat((result as FulfillResult.Failed).reason).contains("could not be dispatched")
+        assertThat((result as FulfillResult.Failed).reason).contains("not granted")
+    }
+
+    @Test
+    fun `prerequisite allows extra time for the USB permission dialog`() {
+        val adapter = createAdapter(TestScope())
+        val timeout = adapter.prerequisites.single().fulfillTimeoutMs
+        assertThat(timeout).isNotNull()
+        // Has to outlast a user wandering back to the bike — well past the
+        // 10 s the orchestrator gives the pm/am-call prerequisites.
+        assertThat(timeout!!).isAtLeast(60_000L)
     }
 
     @Test

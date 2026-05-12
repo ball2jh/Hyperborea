@@ -47,14 +47,17 @@ class FitProAdapter @Inject constructor(
                 }
             },
             fulfill = { controller ->
-                // Fires the system USB-permission dialog. The user grants once
-                // (with the "always" checkbox) and the manifest intent-filter
-                // makes future attaches dispatch silently. The next snapshot
-                // poll picks up hasPermission=true; if the user cancels, this
-                // prereq stays unmet on the next pass.
+                // Fires the system USB-permission dialog and suspends until the user answers.
+                // They grant once (with the "always" checkbox) and the manifest intent-filter
+                // makes future attaches grant silently; on the next pass requestUsbPermission()
+                // returns true without prompting. If they deny it, fail with a clear reason
+                // instead of letting the adapter trip over a permission-denied openDevice().
                 if (controller.requestUsbPermission()) FulfillResult.Success
-                else FulfillResult.Failed("USB permission request could not be dispatched")
+                else FulfillResult.Failed("USB device permission was not granted")
             },
+            // The dialog waits on a human — give it far more headroom than the
+            // pm/am-call prerequisites.
+            fulfillTimeoutMs = USB_PERMISSION_TIMEOUT_MS,
         ),
     )
 
@@ -327,6 +330,12 @@ class FitProAdapter @Inject constructor(
 
     private companion object {
         const val TAG = "FitProAdapter"
+
+        // The first launch after install auto-starts the app on the console while the
+        // user may still be at their computer; give them time to walk over and answer
+        // the USB-permission dialog before the orchestrator gives up.
+        const val USB_PERMISSION_TIMEOUT_MS = 10 * 60 * 1000L
+
         const val FITPRO_VENDOR_ID = 0x213C
         const val FITPRO_PRODUCT_ID_V1 = 2
         const val FITPRO_PRODUCT_ID_V2 = 3
