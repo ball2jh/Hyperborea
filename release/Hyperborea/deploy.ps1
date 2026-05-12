@@ -30,13 +30,16 @@ function Assert-LastExitCode($msg) {
 function Invoke-Adb {
     param([Parameter(ValueFromRemainingArguments = $true)][object[]]$Arguments)
 
-    $previousPreference = $global:ErrorActionPreference
-    try {
-        $global:ErrorActionPreference = "Continue"
-        & adb @Arguments
-    } finally {
-        $global:ErrorActionPreference = $previousPreference
-    }
+    # adb routinely writes diagnostics to stderr ("daemon not running; starting it
+    # now...", "su: not found", a stale-transport message after a reboot, ...). With
+    # the script-level $ErrorActionPreference = 'Stop' that would promote the first
+    # such line to a *terminating* error -- which `2>$null` at the call sites can't
+    # swallow (it only redirects non-terminating errors). A *function-local*
+    # $ErrorActionPreference is the only thing that actually shadows the script-scoped
+    # one here (assigning $global: doesn't -- the script scope wins the lookup).
+    # Every caller already routes adb's stderr (2>$null or 2>&1) where it wants it.
+    $ErrorActionPreference = 'Continue'
+    & adb @Arguments
 }
 
 function Format-Elapsed([int]$seconds) {
