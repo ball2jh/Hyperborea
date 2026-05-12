@@ -467,11 +467,19 @@ for f in "$APPS_DIR"/Hyperborea*.apk; do
 done
 [ -n "$HYPERBOREA_APK" ] || die "No Hyperborea*.apk found in apps/. Place the APK there and try again."
 
+# The BLE-peripheral overlay is handled separately (step 3): on these consoles
+# it only takes effect when pushed to /vendor/overlay/ with root — adb-installing
+# it to /data/app/ does nothing (no OverlayManagerService until API 26). So keep
+# it out of the regular "additional apps" picker.
+OVERLAY_APK="$APPS_DIR/BluetoothPeripheralOverlay.apk"
+SKIP_OVERLAY=${HYPERBOREA_SKIP_OVERLAY:-0}
+
 # Collect other APKs
 OTHER_APKS=()
 for f in "$APPS_DIR"/*.apk; do
     [ -f "$f" ] || continue
     [ "$f" = "$HYPERBOREA_APK" ] && continue
+    [ "$f" = "$OVERLAY_APK" ] && continue
     OTHER_APKS+=("$f")
 done
 
@@ -528,6 +536,29 @@ if [ -n "$DEVICE_SDK" ] && [ "$DEVICE_SDK" -ge 23 ]; then
     INSTALL_FLAGS="-r -g"
 fi
 
+# Detect whether the console exposes root — needed only to install the
+# BLE-peripheral overlay (step 3). Factory S22i firmware has root ADB; MGA1 and
+# newer firmware does not (ro.debuggable=0). Try a `su` binary first, then a
+# root adbd; record which so step 3 knows whether to wrap commands in `su -c`.
+HAS_ROOT=0
+ROOT_VIA_SU=0
+if adb shell 'su -c id' 2>/dev/null | grep -q 'uid=0'; then
+    HAS_ROOT=1; ROOT_VIA_SU=1
+elif [ "$WHOAMI" = "root" ]; then
+    HAS_ROOT=1
+else
+    adb root >/dev/null 2>&1 || true
+    adb_reconnect_wait
+    [ "$(adb shell whoami 2>/dev/null | tr -d '\r')" = "root" ] && HAS_ROOT=1
+fi
+
+# Run a shell command on the device with root (via `su -c` if root came from a
+# su binary; plain otherwise, since the adbd itself is root). Only call when
+# $HAS_ROOT -eq 1.
+root_sh() {
+    if [ "$ROOT_VIA_SU" -eq 1 ]; then adb shell "su -c '$*'"; else adb shell "$*"; fi
+}
+
 # =========================================================================
 # Step 2: Configure
 # =========================================================================
@@ -582,6 +613,36 @@ if [ "$INSTALLED" -gt 0 ] || [ "$FAILED" -gt 0 ]; then
         ok "$INSTALLED additional app(s) installed"
     else
         warn "$INSTALLED installed, $FAILED failed"
+    fi
+fi
+
+# BLE FTMS needs config_bluetooth_le_peripheral_mode_supported=true, which the
+# stock framework-res sets to false. Push the RRO overlay to /vendor/overlay/
+# (a static overlay; idmap'd at boot — the reboot in step 5 activates it). This
+# needs root: factory S22i firmware has it, MGA1 firmware doesn't. Without root
+# BLE FTMS just isn't available — the WiFi broadcast still works.
+if [ -f "$OVERLAY_APK" ] && [ "$SKIP_OVERLAY" -ne 1 ]; then
+    if [ "$HAS_ROOT" -eq 1 ]; then
+        echo ""
+        info "Enabling BLE peripheral mode (vendor overlay)..."
+        root_sh "mount -o rw,remount /system" >/dev/null 2>&1 || adb remount >/dev/null 2>&1 || true
+        root_sh "mkdir -p /vendor/overlay" >/dev/null 2>&1 || true
+        if adb push "$OVERLAY_APK" /vendor/overlay/BluetoothPeripheralOverlay.apk >/dev/null 2>&1 \
+            && adb shell "ls /vendor/overlay/BluetoothPeripheralOverlay.apk" 2>/dev/null | grep -q "BluetoothPeripheralOverlay.apk"; then
+            root_sh "chmod 644 /vendor/overlay/BluetoothPeripheralOverlay.apk" >/dev/null 2>&1 || true
+            ok "BLE peripheral overlay installed (takes effect after the reboot in step 5)"
+        else
+            warn "Couldn't write the overlay to /vendor/overlay/ — BLE FTMS won't be available (WiFi broadcast still works)."
+        fi
+        root_sh "mount -o ro,remount /system" >/dev/null 2>&1 || true
+        # Clear a dead /data/app/ copy left by an older deploy that adb-installed it.
+        if adb shell "pm list packages com.nettarion.hyperborea.overlay.bluetooth" 2>/dev/null | grep -q "com.nettarion.hyperborea.overlay.bluetooth"; then
+            adb uninstall com.nettarion.hyperborea.overlay.bluetooth >/dev/null 2>&1 || true
+        fi
+    else
+        echo ""
+        warn "No root ADB on this console — BLE FTMS won't be available (WiFi broadcast still works)."
+        info "Enabling BLE FTMS needs root or a firmware mod; see overlay/README.md."
     fi
 fi
 

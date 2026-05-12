@@ -23,6 +23,8 @@ local.properties
 release/*.zip
 # ...except the prebuilt vendor overlay shipped in the release bundle
 !release/Hyperborea/apps/BluetoothPeripheralOverlay.apk
+# Stray crash log occasionally left by on-device debugging
+release/Hyperborea/crash.txt
 
 # Signing keys
 release.jks

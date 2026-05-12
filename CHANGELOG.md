@@ -2,6 +2,16 @@
 
 ## [Unreleased]
 
+## [1.2.3] - 2026-05-12
+- **Fix the foreground-service crash-loop on consoles running Android 8.0+ (ICON consoles ship anything from Android 5.1 to 9+, not just the 7.1.2 the older code assumed):** the service notification now creates a `NotificationChannel` on API 26+ (a channel-less notification is rejected → `RemoteServiceException: Bad notification for startForeground` → crash every ~6 s), declares `android:foregroundServiceType="connectedDevice"` (mandatory on API 34+), `POST_NOTIFICATIONS` (API 33+), and is started via `startForegroundService()` from background contexts (boot receiver / `Application.onCreate()`) so it doesn't `IllegalStateException` on API 26+.
+- **Fix the first-boot crash on file-based-encryption devices:** `MainActivity` is no longer `directBootAware`, so the OS doesn't launch it (and the Hilt graph → `SharedPreferences`) before the user is unlocked — that was throwing `IllegalStateException: credential encrypted storage are not available until after user is unlocked`.
+- Bluetooth permissions now use the Android-12 dual model (`BLUETOOTH_SCAN`/`ADVERTISE`/`CONNECT` requested at runtime in `MainActivity`; legacy `BLUETOOTH`/`BLUETOOTH_ADMIN`/`ACCESS_FINE_LOCATION` capped at API 30; `BLUETOOTH_SCAN` flagged `neverForLocation`), so BLE FTMS and HRM scanning work on API 31+ instead of silently failing. Capability/scan code degrades gracefully if a permission is denied.
+- Log / FIT exports write to the app-specific external dir (`getExternalFilesDir`) instead of the public `Downloads` folder — the latter is unwritable under scoped storage (API 29+) and `WRITE_EXTERNAL_STORAGE` is ignored for `targetSdk ≥ 30`. Retrieve with `adb pull /sdcard/Android/data/<pkg>/files/Download/<file>`.
+- `usb-device-accessible`: when no FitPro USB device is attached, wait for one (within the existing 10-minute budget) instead of failing instantly — handles the console's ~20 s USB power-cycle.
+- `deploy.{sh,ps1}`: on consoles with root ADB, push the BLE-peripheral overlay to `/vendor/overlay/` so it takes effect after the reboot; on firmware without root, skip it and note that only WiFi broadcasting is available (no more pointless `adb install` to `/data/app/`). Set `HYPERBOREA_SKIP_OVERLAY=1` to skip it.
+- Settings and the broadcast picker now explain why BLE FTMS is unavailable (needs root or a firmware mod) and grey out the toggle, instead of a bare ✗.
+- Release zip no longer bundles stray top-level files.
+
 ## [1.2.2] - 2026-05-12
 - Fix the foreground-service notification crash-loop on stock iFit firmware: the
   notification small/action icons are now raster PNGs (the system process can't

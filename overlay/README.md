@@ -24,6 +24,13 @@ so you only need to run `build.sh` if you change the sources here.
 
 ## Deployment
 
-`release/Hyperborea/deploy.sh` pushes the APK to `/vendor/overlay/BluetoothPeripheralOverlay.apk`
-(via rooted ADB) and `chmod 644`s it; the Overlay Management Service picks it up on the next boot.
-Only needed on devices whose BSP disables BLE peripheral mode.
+`release/Hyperborea/deploy.{sh,ps1}` pushes the APK to
+`/vendor/overlay/BluetoothPeripheralOverlay.apk` and `chmod 644`s it — but only on consoles that
+expose **root ADB** (factory S22i firmware does; MGA1 and newer firmware doesn't —
+`ro.debuggable=0`). It's installed as a *static* RRO: `idmap`/`installd` picks it up at boot, so it
+takes effect after the reboot the deploy already performs. (`adb install`ing it to `/data/app/`
+does nothing on Android 7.1 — there's no `OverlayManagerService` until API 26 — so the deploy no
+longer does that.)
+
+On firmware without root, BLE FTMS isn't available; use the WiFi broadcast instead. Set
+`HYPERBOREA_SKIP_OVERLAY=1` to skip the overlay push entirely.

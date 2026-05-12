@@ -32,6 +32,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.nettarion.hyperborea.core.LogLevel
 import com.nettarion.hyperborea.core.adapter.AdapterState
 import com.nettarion.hyperborea.ui.admin.AdminViewModel
+import com.nettarion.hyperborea.ui.admin.BLE_NOT_SUPPORTED_REASON
 import com.nettarion.hyperborea.ui.admin.GetHelpButton
 import com.nettarion.hyperborea.ui.admin.LogLevelFilterChips
 import com.nettarion.hyperborea.ui.admin.LogList
@@ -64,6 +65,14 @@ fun ColumnScope.SystemSettingsContent(
         StatusRow("USB Host", status.isUsbHostAvailable)
         StatusRow("ADB", status.isAdbEnabled)
         StatusRow("Root", status.isRootAvailable)
+    }
+    if (!status.isBluetoothLeAdvertisingSupported) {
+        Spacer(Modifier.height(4.dp))
+        Text(
+            text = "BLE Advertising — $BLE_NOT_SUPPORTED_REASON",
+            style = MaterialTheme.typography.bodySmall,
+            color = colors.textLow,
+        )
     }
 
     // USB Devices & Broadcast Clients side-by-side

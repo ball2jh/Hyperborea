@@ -50,6 +50,13 @@ import com.nettarion.hyperborea.core.adapter.BroadcastId
 import com.nettarion.hyperborea.core.model.FanMode
 import com.nettarion.hyperborea.ui.theme.LocalHyperboreaColors
 
+/**
+ * Why BLE FTMS can't operate on stock ICON-console firmware: `framework-res` ships
+ * `config_bluetooth_le_peripheral_mode_supported=false`, so `getBluetoothLeAdvertiser()` is null.
+ * Fixing it needs the `/vendor/overlay/` RRO (root) or a firmware mod — see `overlay/README.md`.
+ */
+internal const val BLE_NOT_SUPPORTED_REASON = "Not supported on this firmware (requires root or a firmware mod)"
+
 @Composable
 fun AdminDrawer(
     isOpen: Boolean,
@@ -137,8 +144,14 @@ private fun BroadcastsSection(viewModel: AdminViewModel, onOpenSettings: () -> U
 
     BroadcastId.entries.forEach { id ->
         val enabled = id in enabledBroadcasts
+        // FTMS can't operate when the framework reports no BLE-advertiser support; the WiFi
+        // broadcast is always selectable (it just won't run until WiFi is on, which is recoverable).
+        val operable = when (id) {
+            BroadcastId.FTMS -> snapshot.status.isBluetoothLeAdvertisingSupported
+            BroadcastId.WIFI -> true
+        }
         val readiness = when (id) {
-            BroadcastId.FTMS -> if (snapshot.status.isBluetoothLeAdvertisingSupported) "BLE available" else "BLE unavailable"
+            BroadcastId.FTMS -> if (operable) "BLE available" else BLE_NOT_SUPPORTED_REASON
             BroadcastId.WIFI -> if (snapshot.status.isWifiEnabled) "WiFi available" else "WiFi off"
         }
 
@@ -157,11 +170,12 @@ private fun BroadcastsSection(viewModel: AdminViewModel, onOpenSettings: () -> U
                 Text(
                     text = readiness,
                     style = MaterialTheme.typography.bodyMedium,
-                    color = colors.textMedium,
+                    color = if (operable) colors.textMedium else colors.textLow,
                 )
             }
             Switch(
-                checked = enabled,
+                checked = enabled && operable,
+                enabled = operable,
                 onCheckedChange = { viewModel.toggleBroadcast(id, it) },
                 colors = SwitchDefaults.colors(
                     checkedThumbColor = MaterialTheme.colorScheme.primary,

@@ -249,7 +249,11 @@ val packageReleaseZip = tasks.register<Zip>("packageReleaseZip") {
     dirPermissions { unix("755") }
 
     from(releaseDir) {
-        exclude(".DS_Store", "**/.DS_Store")
+        // Allowlist — only the deploy scripts and the apps/ payload (Hyperborea.apk staged by
+        // stageReleaseBundle + the prebuilt BluetoothPeripheralOverlay.apk, plus any extra APK
+        // dropped in for the deploy wizard). Stray files in release/Hyperborea/ (e.g. a leftover
+        // crash.txt) must not leak into the published zip.
+        include("deploy.sh", "deploy.ps1", "deploy.cmd", "apps/**")
 
         eachFile {
             permissions {

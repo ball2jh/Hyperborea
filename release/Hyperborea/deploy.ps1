@@ -455,9 +455,16 @@ if (-not $hyperboreaApk) {
     Stop-WithError "No Hyperborea*.apk found in apps\. Place the APK there and try again."
 }
 
-# Collect other APKs (excluding Hyperborea)
+# The BLE-peripheral overlay is handled separately (step 3): on these consoles
+# it only takes effect when pushed to /vendor/overlay/ with root -- adb-installing
+# it to /data/app/ does nothing (no OverlayManagerService until API 26). So keep
+# it out of the regular "additional apps" picker.
+$overlayApk = Join-Path $AppsDir "BluetoothPeripheralOverlay.apk"
+$skipOverlay = ($env:HYPERBOREA_SKIP_OVERLAY -eq '1')
+
+# Collect other APKs (excluding Hyperborea and the overlay)
 $otherApks = @(Get-ChildItem -Path $AppsDir -Filter "*.apk" -ErrorAction SilentlyContinue |
-    Where-Object { $_.FullName -ne $hyperboreaApk.FullName })
+    Where-Object { $_.FullName -ne $hyperboreaApk.FullName -and $_.FullName -ne $overlayApk })
 
 Write-Ok "Found $($hyperboreaApk.Name)"
 
@@ -514,6 +521,30 @@ if ([int]::TryParse($deviceSdk, [ref]$null) -and ([int]$deviceSdk -ge 23)) {
     $installFlags = @("-r", "-g")
 }
 
+# Detect whether the console exposes root -- needed only to install the
+# BLE-peripheral overlay (step 3). Factory S22i firmware has root ADB; MGA1 and
+# newer firmware does not (ro.debuggable=0). Try a `su` binary first, then a
+# root adbd; record which so step 3 knows whether to wrap commands in `su -c`.
+$hasRoot = $false
+$script:rootViaSu = $false
+$idOut = (Invoke-Adb shell "su -c id" 2>$null) -replace "`r",""
+if ($idOut -match 'uid=0') {
+    $hasRoot = $true; $script:rootViaSu = $true
+} elseif ($whoami -eq 'root') {
+    $hasRoot = $true
+} else {
+    Invoke-Adb root 2>$null | Out-Null
+    Invoke-AdbReconnectWait
+    if (((Invoke-Adb shell "whoami" 2>$null) -replace "`r","") -eq 'root') { $hasRoot = $true }
+}
+
+# Run a shell command on the device with root (via `su -c` if root came from a
+# su binary; plain otherwise, since the adbd itself is root). Only call when
+# $hasRoot is $true.
+function Invoke-RootShell([string]$cmd) {
+    if ($script:rootViaSu) { Invoke-Adb shell "su -c '$cmd'" } else { Invoke-Adb shell $cmd }
+}
+
 # =========================================================================
 # Step 2: Configure
 # =========================================================================
@@ -567,6 +598,38 @@ if ($installed -gt 0 -or $failed -gt 0) {
         Write-Ok "$installed additional app(s) installed"
     } else {
         Write-Warn "$installed installed, $failed failed"
+    }
+}
+
+# BLE FTMS needs config_bluetooth_le_peripheral_mode_supported=true, which the
+# stock framework-res sets to false. Push the RRO overlay to /vendor/overlay/
+# (a static overlay; idmap'd at boot -- the reboot in step 5 activates it). This
+# needs root: factory S22i firmware has it, MGA1 firmware doesn't. Without root
+# BLE FTMS just isn't available -- the WiFi broadcast still works.
+if ((Test-Path $overlayApk) -and -not $skipOverlay) {
+    if ($hasRoot) {
+        Write-Host ""
+        Write-Info "Enabling BLE peripheral mode (vendor overlay)..."
+        Invoke-RootShell "mount -o rw,remount /system" 2>$null | Out-Null
+        if ($LASTEXITCODE -ne 0) { Invoke-Adb remount 2>$null | Out-Null }
+        Invoke-RootShell "mkdir -p /vendor/overlay" 2>$null | Out-Null
+        Invoke-Adb push $overlayApk /vendor/overlay/BluetoothPeripheralOverlay.apk 2>$null | Out-Null
+        $lsOut = (Invoke-Adb shell "ls /vendor/overlay/BluetoothPeripheralOverlay.apk" 2>$null) -replace "`r",""
+        if ($lsOut -match "BluetoothPeripheralOverlay.apk") {
+            Invoke-RootShell "chmod 644 /vendor/overlay/BluetoothPeripheralOverlay.apk" 2>$null | Out-Null
+            Write-Ok "BLE peripheral overlay installed (takes effect after the reboot in step 5)"
+        } else {
+            Write-Warn "Couldn't write the overlay to /vendor/overlay/ -- BLE FTMS won't be available (WiFi broadcast still works)."
+        }
+        Invoke-RootShell "mount -o ro,remount /system" 2>$null | Out-Null
+        $pkgOut = (Invoke-Adb shell "pm list packages com.nettarion.hyperborea.overlay.bluetooth" 2>$null) -replace "`r",""
+        if ($pkgOut -match "com.nettarion.hyperborea.overlay.bluetooth") {
+            Invoke-Adb uninstall com.nettarion.hyperborea.overlay.bluetooth 2>$null | Out-Null
+        }
+    } else {
+        Write-Host ""
+        Write-Warn "No root ADB on this console -- BLE FTMS won't be available (WiFi broadcast still works)."
+        Write-Info "Enabling BLE FTMS needs root or a firmware mod; see overlay/README.md."
     }
 }
 
