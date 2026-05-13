@@ -55,7 +55,18 @@ object V1Codec {
         )
     }
 
-    fun decode(packets: List<ByteArray>): V1Message.Incoming? {
+    /**
+     * Decodes a (possibly multi-packet) response. For [CMD_READ_WRITE_DATA] responses the
+     * [dataResponseFields] override tells the decoder which field set the request actually
+     * asked for — important when the session has filtered out fields the device doesn't
+     * support, because the decoder reads the payload positionally by field-index order and
+     * uses the requested set to know how many bytes each field occupies. When null, the
+     * legacy default ([V1DataField.periodicReadFields]) is used.
+     */
+    fun decode(
+        packets: List<ByteArray>,
+        dataResponseFields: Set<V1DataField>? = null,
+    ): V1Message.Incoming? {
         if (packets.isEmpty()) return null
 
         val data = reassemble(packets) ?: return null
@@ -69,7 +80,11 @@ object V1Codec {
         return when (commandId.toByte()) {
             CMD_CONNECT -> V1Message.Incoming.ConnectAck(deviceId)
             CMD_DISCONNECT -> V1Message.Incoming.DisconnectAck(deviceId)
-            CMD_READ_WRITE_DATA -> decodeDataResponse(status, payload)
+            CMD_READ_WRITE_DATA -> if (dataResponseFields != null) {
+                decodeDataResponse(status, payload, dataResponseFields)
+            } else {
+                decodeDataResponse(status, payload)
+            }
             CMD_SUPPORTED_DEVICES -> decodeSupportedDevicesResponse(data)
             CMD_DEVICE_INFO -> decodeDeviceInfoResponse(deviceId, data)
             CMD_SYSTEM_INFO -> decodeSystemInfoResponse(data)
@@ -82,7 +97,10 @@ object V1Codec {
         }
     }
 
-    fun decodeSingle(packet: ByteArray): V1Message.Incoming? = decode(listOf(trimToDeclaredLength(packet)))
+    fun decodeSingle(
+        packet: ByteArray,
+        dataResponseFields: Set<V1DataField>? = null,
+    ): V1Message.Incoming? = decode(listOf(trimToDeclaredLength(packet)), dataResponseFields)
 
     /**
      * Decodes a single-packet ReadWriteData response using an explicit field set — the default
@@ -459,7 +477,13 @@ object V1Codec {
             offset += field.sizeBytes
         }
 
-        return V1Message.Incoming.DataResponse(status, fields, keyObject)
+        // payload.size != expectedSize means the MCU either omitted fields we
+        // asked for (short payload) or padded the response (long payload).
+        // Either way, every field offset after the first divergence point is
+        // unreliable. The caller should treat `fields` as suspect and ideally
+        // shrink the request to what the device actually supports.
+        val isTruncated = payload.size != expectedSize
+        return V1Message.Incoming.DataResponse(status, fields, keyObject, isTruncated)
     }
 
     /** 14-byte KEY_OBJECT payload: code(2 LE), rawKey(8), timePressed(2 LE), timeHeld(2 LE). */

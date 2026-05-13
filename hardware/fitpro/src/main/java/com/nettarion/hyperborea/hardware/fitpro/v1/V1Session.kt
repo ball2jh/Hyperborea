@@ -85,6 +85,18 @@ class V1Session(
     /** Bitfield indices ([V1DataField.fieldIndex]) the device declared it supports; empty if it couldn't be read. */
     private var supportedBitFields: Set<Int> = emptySet()
 
+    /**
+     * The actual set we poll for each loop iteration, narrowed to what the device claims to support.
+     * Filtering matters because [V1Codec.decodeDataResponseForFields] decodes the response as a flat
+     * blob in field-index order with no per-field presence check, so asking for a field the MCU
+     * doesn't supply causes every subsequent field to land on the wrong offset (the bug behind the
+     * NordicTrack 2950 Argon-firmware -10595 kcal / 139 km screenshot).
+     */
+    private var pollFields: Set<V1DataField> = V1DataField.periodicReadFields
+
+    /** Tracks whether the previous poll's response was flagged truncated, so we log only on the edge. */
+    private var lastTruncatedSeen: Boolean = false
+
     override suspend fun start() {
         if (_sessionState.value is SessionState.Streaming || _sessionState.value is SessionState.Connecting) return
 
@@ -261,6 +273,7 @@ class V1Session(
                 "Device info: sw=$softwareVersion, hw=$hardwareVersion, serial=$serialNumber, " +
                     "equipmentDeviceId=$equipmentDeviceId, supportedBitFields=${supportedBitFields.size}",
             )
+            pollFields = computePollFields(supportedBitFields)
         } else {
             logger.w(TAG, "Expected DeviceInfoResponse, got: $deviceInfo — defaulting equipment to FITNESS_BIKE")
             equipmentDeviceId = V1Message.DEVICE_FITNESS_BIKE
@@ -402,6 +415,37 @@ class V1Session(
     }
 
     /**
+     * Builds the per-loop read set from [V1DataField.periodicReadFields] intersected with the
+     * device's self-declared [supportedBitFields]. We trust the device's declaration: if it didn't
+     * claim a field, the MCU won't include bytes for it in the response, and asking anyway would
+     * misalign every later field's offset (the bug that produced -10595 kcal / 139 km on the
+     * NordicTrack 2950 Argon screenshot).
+     *
+     * Falls back to the full periodicReadFields set if [supportedBitFields] is empty (handshake
+     * couldn't parse the device's bitmask) — that preserves the pre-fix behavior for devices
+     * we've always worked with, and the warning makes the fallback visible.
+     */
+    private fun computePollFields(supportedBitFields: Set<Int>): Set<V1DataField> {
+        if (supportedBitFields.isEmpty()) {
+            logger.w(
+                TAG,
+                "Device declared no supportedBitFields; polling the full periodicReadFields set. " +
+                    "If the MCU omits any of these fields the decoder will misalign — watch for isTruncated.",
+            )
+            return V1DataField.periodicReadFields
+        }
+        val filtered = V1DataField.periodicReadFields.filterTo(mutableSetOf()) { it.fieldIndex in supportedBitFields }
+        val omitted = V1DataField.periodicReadFields - filtered
+        if (omitted.isNotEmpty()) {
+            logger.i(
+                TAG,
+                "Filtering ${omitted.size} unsupported field(s) from poll: ${omitted.joinToString { it.name }}",
+            )
+        }
+        return filtered
+    }
+
+    /**
      * Brings the console up to the running WORKOUT state the way the firmware expects:
      * `IDLE → WARM_UP(10) → RUNNING(2)`, confirming each step by reading [V1DataField.WORKOUT_MODE]
      * back. If the MCU never confirms a step, we log a warning and proceed anyway (a degraded
@@ -497,10 +541,12 @@ class V1Session(
             pendingWriteFields = emptyMap()
         }
 
-        // ReadWriteData targets DEVICE_MAIN (0x02) — FITNESS_BIKE (0x07) returns DEV_NOT_SUPPORTED
+        // ReadWriteData targets DEVICE_MAIN (0x02) — FITNESS_BIKE (0x07) returns DEV_NOT_SUPPORTED.
+        // pollFields is periodicReadFields ∩ supportedBitFields so the response payload size matches
+        // the decoder's positional read; see V1Codec.decodeDataResponseForFields.
         writeMessage(V1Message.Outgoing.ReadWriteData(
             writeFields = writeFields,
-            readFields = V1DataField.periodicReadFields,
+            readFields = pollFields,
         ))
 
         delay(READ_DELAY_MS)
@@ -517,7 +563,7 @@ class V1Session(
         }
 
         val decoded = try {
-            readResponse(firstPacket)
+            readResponse(firstPacket, pollFields)
         } catch (e: Exception) {
             logger.w(TAG, "Malformed response (${firstPacket.size} bytes): ${e.message}")
             // Re-queue write fields so commands aren't lost
@@ -547,6 +593,20 @@ class V1Session(
                 logger.w(TAG, "DataResponse OK but empty fields (payload size mismatch)")
                 return
             }
+
+            // Edge-triggered: log once when the response shape stops matching the request shape,
+            // not every 100ms. Means the MCU is supplying a different field set than its DeviceInfo
+            // bitmask declared — keep going (lenient decode produced what it could) but surface it.
+            if (decoded.isTruncated && !lastTruncatedSeen) {
+                logger.w(
+                    TAG,
+                    "DataResponse payload size doesn't match the requested ${pollFields.size}-field shape " +
+                        "(decoded ${decoded.fields.size} field(s)) — later field offsets may be unreliable.",
+                )
+            } else if (!decoded.isTruncated && lastTruncatedSeen) {
+                logger.i(TAG, "DataResponse payload size now matches the requested field shape again.")
+            }
+            lastTruncatedSeen = decoded.isTruncated
 
             applyDataResponse(decoded.fields)
             handleKeyObject(decoded.keyObject)
@@ -730,7 +790,10 @@ class V1Session(
     private suspend fun readPacketOrNull(): ByteArray? =
         withTimeoutOrNull(RESPONSE_TIMEOUT_MS) { transport.readPacket() }
 
-    private suspend fun readResponse(firstPacket: ByteArray): V1Message.Incoming? {
+    private suspend fun readResponse(
+        firstPacket: ByteArray,
+        dataResponseFields: Set<V1DataField>? = null,
+    ): V1Message.Incoming? {
         if (V1Codec.isMultiPacketHeader(firstPacket)) {
             val expected = V1Codec.expectedPacketCount(firstPacket)
             val packets = mutableListOf(firstPacket)
@@ -738,9 +801,9 @@ class V1Session(
                 val dataPacket = transport.readPacket() ?: return null
                 packets.add(dataPacket)
             }
-            return V1Codec.decode(packets)
+            return V1Codec.decode(packets, dataResponseFields)
         }
-        return V1Codec.decodeSingle(firstPacket)
+        return V1Codec.decodeSingle(firstPacket, dataResponseFields)
     }
 
     private fun roundToStep(value: Float, step: Float): Float =

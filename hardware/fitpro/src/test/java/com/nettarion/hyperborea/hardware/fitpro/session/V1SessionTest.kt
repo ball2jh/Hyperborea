@@ -303,7 +303,12 @@ class V1SessionTest {
     private fun buildDeviceInfoResponse(
         deviceId: Int = V1Message.DEVICE_FITNESS_BIKE,
         sw: Int = 80, // >75 → triggers security
-        supportedBitFields: Set<Int> = setOf(V1DataField.REQUIRE_START_REQUESTED.fieldIndex),
+        // Default: a fully-featured device that supports everything we'd ever poll for, plus
+        // REQUIRE_START_REQUESTED for prepareConsole. Tests that want to simulate older firmware
+        // (e.g., Argon treadmill that omits some fields) override this.
+        supportedBitFields: Set<Int> =
+            V1DataField.periodicReadFields.map { it.fieldIndex }.toSet() +
+                V1DataField.REQUIRE_START_REQUESTED.fieldIndex,
     ): ByteArray {
         // byte0 = the device's own equipment type (the MCU echoes it here); hw=3; serial=0x01020304;
         // then [sectionCount, sectionCount mask bytes] declaring which bitfields the device supports.
@@ -1185,5 +1190,177 @@ class V1SessionTest {
         val session = createUnstartedSession()
         val fields = session.commandToFields(DeviceCommand.SetErgMode(false))
         assertThat(fields).containsExactly(V1DataField.IS_CONSTANT_WATTS_MODE, 0f)
+    }
+
+    // --- Poll-field filtering by supportedBitFields ---
+
+    /**
+     * Extracts the set of fieldIndex values encoded in the read bitmask of a poll-loop
+     * ReadWriteData packet (one with no pending write fields). Returns null if the packet
+     * isn't a write-empty ReadWriteData. Packet layout:
+     *   [deviceId, len, cmd=0x02, writeNumSections=0, readNumSections, ...readMasks..., checksum]
+     *
+     * Note: both the startup capability read and the poll loop produce write-empty
+     * ReadWriteData packets. Callers that want the poll loop specifically should pick
+     * the last such packet (poll runs after handshake/capability/console-startup).
+     */
+    private fun ByteArray.decodePollReadIndices(): Set<Int>? {
+        if (size < 5 || this[2] != 0x02.toByte()) return null
+        val writeNumSections = this[3].toInt() and 0xFF
+        if (writeNumSections != 0) return null
+        val readNumSections = this[4].toInt() and 0xFF
+        if (5 + readNumSections > size) return null
+        val result = mutableSetOf<Int>()
+        for (section in 0 until readNumSections) {
+            val mask = this[5 + section].toInt() and 0xFF
+            for (bit in 0..7) if (mask and (1 shl bit) != 0) result.add(section * 8 + bit)
+        }
+        return result
+    }
+
+    @Test
+    fun `handshake filters periodicReadFields by supportedBitFields`() = runTest {
+        // Argon-treadmill-shaped declaration: supports most of periodicReadFields except
+        // the bike-specific session aggregates and the rower-only fields.
+        val omittedFields = setOf(
+            V1DataField.AVERAGE_WATTS,
+            V1DataField.AVERAGE_GRADE,
+            V1DataField.STROKES,
+            V1DataField.STROKES_PER_MINUTE,
+            V1DataField.FIVE_HUNDRED_SPLIT,
+            V1DataField.AVG_FIVE_HUNDRED_SPLIT,
+        )
+        val declaredFields = V1DataField.periodicReadFields - omittedFields
+        val supported = declaredFields.map { it.fieldIndex }.toSet() +
+            V1DataField.REQUIRE_START_REQUESTED.fieldIndex
+
+        val session = createSession(this)
+        backgroundScope.launch {
+            transport.emitIncoming(buildDeviceInfoResponse(supportedBitFields = supported))
+            transport.emitIncoming(buildConnectAck())
+            transport.emitIncoming(buildSupportedDevicesResponse())
+            transport.emitIncoming(buildSystemInfoResponse())
+            transport.emitIncoming(buildVersionInfoResponse())
+            transport.emitIncoming(buildSecurityUnlockedResponse())
+            transport.emitIncoming(buildCapabilityResponse())
+            respondToConsoleStartup()
+        }
+        session.start()
+        advanceUntilIdle()
+        // Nudge the poll loop forward — startPollLoop launches into backgroundScope which
+        // advanceUntilIdle doesn't necessarily drain to its first write.
+        advanceTimeBy(200)
+
+        // Take the LAST write-empty ReadWriteData — the startup capability read is also write-empty
+        // (it asks for MAX_GRADE, MIN_GRADE, …, TOTAL_TIME) and arrives first.
+        val pollIndices = transport.writtenPackets.mapNotNull { it.decodePollReadIndices() }.lastOrNull()
+        assertThat(pollIndices).isNotNull()
+
+        // The poll should request exactly the declared fields, with the omitted ones gone.
+        assertThat(pollIndices!!).containsExactlyElementsIn(declaredFields.map { it.fieldIndex })
+        for (omitted in omittedFields) {
+            assertThat(pollIndices).doesNotContain(omitted.fieldIndex)
+        }
+    }
+
+    @Test
+    fun `handshake with empty supportedBitFields falls back to full periodicReadFields`() = runTest {
+        val session = createSession(this)
+        backgroundScope.launch {
+            transport.emitIncoming(buildDeviceInfoResponse(supportedBitFields = emptySet()))
+            transport.emitIncoming(buildConnectAck())
+            transport.emitIncoming(buildSupportedDevicesResponse())
+            transport.emitIncoming(buildSystemInfoResponse())
+            transport.emitIncoming(buildVersionInfoResponse())
+            transport.emitIncoming(buildSecurityUnlockedResponse())
+            transport.emitIncoming(buildCapabilityResponse())
+            // prepareConsole writes BOTH fields when supportedBitFields is empty.
+            transport.emitIncoming(buildReadWriteAck())     // REQUIRE_START_REQUESTED write
+            transport.emitIncoming(buildReadWriteAck())     // IDLE_MODE_LOCKOUT write
+            transport.emitIncoming(buildWorkoutModeAck(10)) // WARM_UP
+            transport.emitIncoming(buildWorkoutModeAck(2))  // RUNNING
+        }
+        session.start()
+        advanceUntilIdle()
+        advanceTimeBy(200)
+
+        val pollIndices = transport.writtenPackets.mapNotNull { it.decodePollReadIndices() }.lastOrNull()
+        assertThat(pollIndices).isNotNull()
+        assertThat(pollIndices!!).containsExactlyElementsIn(
+            V1DataField.periodicReadFields.map { it.fieldIndex },
+        )
+    }
+
+    @Test
+    fun `treadmill poll round-trip decodes calories and distance correctly`() = runTest {
+        // Drop the rower-only fields plus AVERAGE_WATTS — a plausible treadmill declaration.
+        val omittedFields = setOf(
+            V1DataField.AVERAGE_WATTS,
+            V1DataField.AVERAGE_GRADE,
+            V1DataField.STROKES,
+            V1DataField.STROKES_PER_MINUTE,
+            V1DataField.FIVE_HUNDRED_SPLIT,
+            V1DataField.AVG_FIVE_HUNDRED_SPLIT,
+        )
+        val pollFields = (V1DataField.periodicReadFields - omittedFields).sortedBy { it.fieldIndex }
+        val supported = pollFields.map { it.fieldIndex }.toSet() +
+            V1DataField.REQUIRE_START_REQUESTED.fieldIndex
+
+        // Build a DataResponse payload sized to the FILTERED set, with known CALORIES + DISTANCE.
+        // CaloriesConverter encoding: encoded = calories * 100_000_000 / 1024.
+        // The formula is 100_000_000 = 2^8 · 5^8 and 1024 = 2^10, so calories must be a multiple
+        // of 4 to round-trip cleanly through the integer-division encode/decode pair.
+        val targetCalories = 48
+        val targetDistanceRaw = 1234 // V1Converter.INT — raw int passed through to accumulator
+        val encodedCalories = (targetCalories.toLong() * 100_000_000L / 1024L).toInt()
+
+        val payloadSize = pollFields.sumOf { it.sizeBytes }
+        val payload = ByteArray(payloadSize)
+        var offset = 0
+        for (field in pollFields) {
+            when (field) {
+                V1DataField.CURRENT_CALORIES -> {
+                    payload[offset]     = (encodedCalories and 0xFF).toByte()
+                    payload[offset + 1] = ((encodedCalories shr 8) and 0xFF).toByte()
+                    payload[offset + 2] = ((encodedCalories shr 16) and 0xFF).toByte()
+                    payload[offset + 3] = ((encodedCalories shr 24) and 0xFF).toByte()
+                }
+                V1DataField.CURRENT_DISTANCE -> {
+                    payload[offset]     = (targetDistanceRaw and 0xFF).toByte()
+                    payload[offset + 1] = ((targetDistanceRaw shr 8) and 0xFF).toByte()
+                    payload[offset + 2] = ((targetDistanceRaw shr 16) and 0xFF).toByte()
+                    payload[offset + 3] = ((targetDistanceRaw shr 24) and 0xFF).toByte()
+                }
+                else -> { /* leave zero */ }
+            }
+            offset += field.sizeBytes
+        }
+        val totalLen = 4 + payload.size + 1
+        val header = byteArrayOf(0x07, totalLen.toByte(), 0x02, 0x02)
+        val withoutChecksum = header + payload
+        val responsePacket = withoutChecksum + V1Codec.checksum(withoutChecksum)
+
+        val session = createSession(this)
+        backgroundScope.launch {
+            transport.emitIncoming(buildDeviceInfoResponse(supportedBitFields = supported))
+            transport.emitIncoming(buildConnectAck())
+            transport.emitIncoming(buildSupportedDevicesResponse())
+            transport.emitIncoming(buildSystemInfoResponse())
+            transport.emitIncoming(buildVersionInfoResponse())
+            transport.emitIncoming(buildSecurityUnlockedResponse())
+            transport.emitIncoming(buildCapabilityResponse())
+            respondToConsoleStartup()
+            transport.emitIncoming(responsePacket)
+        }
+        session.start()
+        advanceUntilIdle()
+        advanceTimeBy(200)
+
+        val data = session.exerciseData.value
+        assertThat(data).isNotNull()
+        assertThat(data!!.calories).isEqualTo(targetCalories)
+        // The bug we're guarding against produced negative calories, so additionally guard the sign.
+        assertThat(data.calories!!).isAtLeast(0)
+        assertThat(data.distance).isEqualTo(targetDistanceRaw.toFloat())
     }
 }

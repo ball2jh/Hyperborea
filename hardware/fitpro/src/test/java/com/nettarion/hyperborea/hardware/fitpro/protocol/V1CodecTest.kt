@@ -443,4 +443,52 @@ class V1CodecTest {
         val decoded = V1Codec.decodeSingle(packet) as V1Message.Incoming.DataResponse
         assertThat(decoded.fields[V1DataField.CURRENT_CALORIES]).isEqualTo(100f)
     }
+
+    @Test
+    fun `decodeDataResponse flags isTruncated when payload shorter than expected`() {
+        // Same short payload as the lenient-decode test, but assert the truncation flag.
+        // expected = sum of periodicReadFields sizes (~95 bytes), payload = 10 bytes.
+        val shortPayload = ByteArray(10)
+        val totalLen = 4 + shortPayload.size + 1
+        val header = byteArrayOf(0x07, totalLen.toByte(), 0x02, 0x02)
+        val withoutChecksum = header + shortPayload
+        val packet = withoutChecksum + V1Codec.checksum(withoutChecksum)
+
+        val decoded = V1Codec.decodeSingle(packet) as V1Message.Incoming.DataResponse
+        assertThat(decoded.isTruncated).isTrue()
+        // Partial fields still populated — lenient decode is unchanged.
+        assertThat(decoded.fields).isNotEmpty()
+    }
+
+    @Test
+    fun `decodeDataResponse does not flag isTruncated on exact-size payload`() {
+        val readFields = V1DataField.periodicReadFields.sortedBy { it.fieldIndex }
+        val exactSize = readFields.sumOf { it.sizeBytes }
+        val payload = ByteArray(exactSize)
+        val totalLen = 4 + payload.size + 1
+        val header = byteArrayOf(0x07, totalLen.toByte(), 0x02, 0x02)
+        val withoutChecksum = header + payload
+        val packet = withoutChecksum + V1Codec.checksum(withoutChecksum)
+
+        val decoded = V1Codec.decodeSingle(packet) as V1Message.Incoming.DataResponse
+        assertThat(decoded.isTruncated).isFalse()
+        assertThat(decoded.fields).hasSize(readFields.count { it != V1DataField.KEY_OBJECT })
+    }
+
+    @Test
+    fun `decodeDataResponse with explicit field set sizes expectedSize from that set`() {
+        // When the session has filtered pollFields down to a smaller set, expectedSize should
+        // shrink accordingly — a payload sized for the filtered set should NOT be flagged truncated.
+        val filtered = setOf(V1DataField.WATTS, V1DataField.RPM, V1DataField.ACTUAL_KPH)
+        val payloadSize = filtered.sumOf { it.sizeBytes }
+        val payload = ByteArray(payloadSize)
+        val totalLen = 4 + payload.size + 1
+        val header = byteArrayOf(0x07, totalLen.toByte(), 0x02, 0x02)
+        val withoutChecksum = header + payload
+        val packet = withoutChecksum + V1Codec.checksum(withoutChecksum)
+
+        val decoded = V1Codec.decodeSingle(packet, filtered) as V1Message.Incoming.DataResponse
+        assertThat(decoded.isTruncated).isFalse()
+        assertThat(decoded.fields.keys).containsExactlyElementsIn(filtered)
+    }
 }

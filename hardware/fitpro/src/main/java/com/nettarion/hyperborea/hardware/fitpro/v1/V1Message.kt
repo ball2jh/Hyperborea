@@ -70,6 +70,15 @@ sealed interface V1Message {
             val status: Int,
             val fields: Map<V1DataField, Float>,
             val keyObject: KeyObject? = null,
+            /**
+             * True when the response payload's byte count didn't match what
+             * the requested field set demanded — typically the MCU returned
+             * fewer fields than we asked for. The lenient decoder will still
+             * have produced what it could, but offsets after the first
+             * missing field are unreliable, so the caller should treat
+             * later fields as suspect.
+             */
+            val isTruncated: Boolean = false,
         ) : Incoming
         data class GenericResponse(val commandId: Int, val status: Int, val payload: ByteArray) : Incoming {
             override fun equals(other: Any?) = other is GenericResponse &&
