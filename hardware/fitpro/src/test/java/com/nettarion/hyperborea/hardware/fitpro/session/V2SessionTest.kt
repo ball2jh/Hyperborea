@@ -1,8 +1,9 @@
 package com.nettarion.hyperborea.hardware.fitpro.session
 
 import com.google.common.truth.Truth.assertThat
-import com.nettarion.hyperborea.core.test.TestAppLogger
 import com.nettarion.hyperborea.core.model.DeviceCommand
+import com.nettarion.hyperborea.core.model.DeviceType
+import com.nettarion.hyperborea.core.test.TestAppLogger
 import com.nettarion.hyperborea.core.test.buildDeviceInfo
 import com.nettarion.hyperborea.hardware.fitpro.v2.V2Codec
 import com.nettarion.hyperborea.hardware.fitpro.v2.V2FeatureId
@@ -438,6 +439,109 @@ class V2SessionTest {
         advanceUntilIdle()
 
         assertThat(session.sessionState.value).isInstanceOf(SessionState.Error::class.java)
+    }
+
+    // --- Device type detection + treadmill path ---
+
+    @Test
+    fun `treadmill features write WARM_UP but never RUNNING and clear degraded`() = runTest {
+        // Treadmill profile: belt speed + grade, no flywheel resistance.
+        val session = createSession(this)
+        transport.emitIncoming(buildSupportedFeaturesPacket(
+            V2FeatureId.TARGET_KPH, V2FeatureId.CURRENT_KPH,
+            V2FeatureId.TARGET_GRADE, V2FeatureId.CURRENT_GRADE,
+            V2FeatureId.WORKOUT_STATE,
+        ))
+        // Only WARM_UP confirmation arrives — the MCU is waiting on the physical Start key, no
+        // RUNNING event ever comes.
+        transport.emitIncoming(buildEventPacket(V2FeatureId.WORKOUT_STATE, V2WorkoutMode.WARM_UP.raw))
+
+        session.start()
+        advanceUntilIdle()
+
+        assertThat(session.sessionState.value).isEqualTo(SessionState.Streaming)
+        assertThat(session.detectedDeviceType).isEqualTo(DeviceType.TREADMILL)
+        // Critical: WARM_UP was written, RUNNING was not — the user finishes the start handshake.
+        val workoutStateWrites = transport.writtenPackets.mapNotNull { it.workoutStateWriteValue() }
+        assertThat(workoutStateWrites).contains(V2WorkoutMode.WARM_UP.raw)
+        assertThat(workoutStateWrites).doesNotContain(V2WorkoutMode.RUNNING.raw)
+        // And no spurious "degraded" — this is the expected armed state.
+        assertThat(session.degradedReason.value).isNull()
+    }
+
+    @Test
+    fun `bike features still drive the full WARM_UP then RUNNING transition`() = runTest {
+        // Bike profile: resistance features present.
+        val session = createSession(this)
+        transport.emitIncoming(buildSupportedFeaturesPacket(
+            V2FeatureId.TARGET_RESISTANCE, V2FeatureId.MAX_RESISTANCE,
+            V2FeatureId.RPM, V2FeatureId.WATTS, V2FeatureId.WORKOUT_STATE,
+        ))
+        transport.emitIncoming(buildEventPacket(V2FeatureId.WORKOUT_STATE, V2WorkoutMode.WARM_UP.raw))
+        transport.emitIncoming(buildEventPacket(V2FeatureId.WORKOUT_STATE, V2WorkoutMode.RUNNING.raw))
+
+        session.start()
+        advanceUntilIdle()
+
+        assertThat(session.sessionState.value).isEqualTo(SessionState.Streaming)
+        assertThat(session.detectedDeviceType).isEqualTo(DeviceType.BIKE)
+        val workoutStateWrites = transport.writtenPackets.mapNotNull { it.workoutStateWriteValue() }
+        assertThat(workoutStateWrites).containsAtLeast(V2WorkoutMode.WARM_UP.raw, V2WorkoutMode.RUNNING.raw).inOrder()
+        assertThat(session.degradedReason.value).isNull()
+    }
+
+    @Test
+    fun `WORKOUT_STATE events update exerciseData workoutMode using V1 numbering`() = runTest {
+        // The orchestrator's workout-mode monitor uses V1 codes; V2 must translate so the same
+        // monitor reacts uniformly to both protocols.
+        val session = createSession(this)
+        transport.emitIncoming(buildSupportedFeaturesPacket(
+            V2FeatureId.TARGET_RESISTANCE, V2FeatureId.WORKOUT_STATE,
+        ))
+        transport.emitIncoming(buildEventPacket(V2FeatureId.WORKOUT_STATE, V2WorkoutMode.WARM_UP.raw))
+        transport.emitIncoming(buildEventPacket(V2FeatureId.WORKOUT_STATE, V2WorkoutMode.RUNNING.raw))
+
+        session.start()
+        advanceUntilIdle()
+
+        // V2 RUNNING (3) must be reported to the accumulator as V1 RUNNING (2).
+        assertThat(session.exerciseData.value?.workoutMode).isEqualTo(2)
+
+        // Now a PAUSED event should translate to V1 PAUSE (3).
+        transport.emitIncoming(buildEventPacket(V2FeatureId.WORKOUT_STATE, V2WorkoutMode.PAUSED.raw))
+        runCurrent()
+        assertThat(session.exerciseData.value?.workoutMode).isEqualTo(3)
+
+        // OFF_MACHINE → V1 DMK (8): the orchestrator's safety-pause path keys off this.
+        transport.emitIncoming(buildEventPacket(V2FeatureId.WORKOUT_STATE, V2WorkoutMode.OFF_MACHINE.raw))
+        runCurrent()
+        assertThat(session.exerciseData.value?.workoutMode).isEqualTo(8)
+    }
+
+    /**
+     * Returns the raw [V2WorkoutMode] float carried by this outgoing packet if it's a
+     * WriteFeature targeting [V2FeatureId.WORKOUT_STATE]; otherwise null. Packet layout:
+     * `[0x02, sourceType, len, featureLo, featureHi, f32 LE]`.
+     */
+    private fun ByteArray.workoutStateWriteValue(): Float? {
+        if (size < 9 || this[0] != 0x02.toByte()) return null
+        val type = this[1].toInt() and 0x0F
+        if (type != 0x02) return null // CMD_WRITE
+        if (this[3] != V2FeatureId.WORKOUT_STATE.wireLo || this[4] != V2FeatureId.WORKOUT_STATE.wireHi) return null
+        return ByteBuffer.wrap(this, 5, 4).order(ByteOrder.LITTLE_ENDIAN).float
+    }
+
+    /**
+     * Build a SupportedFeatures response packet. Source = device (0x02), type nibble = RSP_FEATURES
+     * (0x01), so sourceType byte = 0x21. Payload = list of (lo, hi) pairs.
+     */
+    private fun buildSupportedFeaturesPacket(vararg features: V2FeatureId): ByteArray {
+        val payload = ByteArray(features.size * 2)
+        features.forEachIndexed { i, feature ->
+            payload[i * 2] = feature.wireLo
+            payload[i * 2 + 1] = feature.wireHi
+        }
+        return byteArrayOf(0x02, 0x21, payload.size.toByte(), *payload)
     }
 
     private fun buildEventPacket(feature: V2FeatureId, value: Float): ByteArray {

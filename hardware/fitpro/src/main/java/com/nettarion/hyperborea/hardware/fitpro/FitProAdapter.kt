@@ -144,9 +144,12 @@ class FitProAdapter @Inject constructor(
             updateIdentity(newSession.deviceIdentity.value)
             _degradedReason.value = newSession.degradedReason.value
 
-            // Merge MCU-reported capabilities into DeviceInfo (V1 only)
-            if (newSession is V1Session) {
-                mergeCapabilities(newSession)
+            // Merge MCU-reported capabilities into DeviceInfo. V1 reports detailed equipment
+            // bounds (min/max grade, speed, resistance) on top of the device type; V2 only refines
+            // the type (the bounds come from the model/partNumber catalog lookup later).
+            when (newSession) {
+                is V1Session -> mergeCapabilities(newSession)
+                is V2Session -> applyDetectedDeviceType(newSession.detectedDeviceType)
             }
 
             // Forward exercise data from session
@@ -358,6 +361,23 @@ class FitProAdapter @Inject constructor(
             maxResistance = caps.maxResistance ?: current.maxResistance,
         )
         logger.i(TAG, "Merged MCU capabilities into DeviceInfo: type=${detectedType ?: current.type}, name=${_deviceInfo.value?.name}")
+    }
+
+    /**
+     * V2 has no MCU-reported equipment bounds (those come from the model/partNumber catalog
+     * lookup in [updateIdentity]), so we only need to overlay the session-detected type and the
+     * matching type-default metric set / minResistance onto the existing [_deviceInfo].
+     */
+    private fun applyDetectedDeviceType(type: com.nettarion.hyperborea.core.model.DeviceType) {
+        val current = _deviceInfo.value ?: return
+        if (current.type == type) return
+        val typeDefaults = DeviceDatabase.defaultsForType(type)
+        _deviceInfo.value = current.copy(
+            type = type,
+            supportedMetrics = typeDefaults.supportedMetrics,
+            minResistance = typeDefaults.minResistance,
+        )
+        logger.i(TAG, "Detected device type: $type — updated DeviceInfo")
     }
 
     override fun setInitialElapsedTime(seconds: Long) {

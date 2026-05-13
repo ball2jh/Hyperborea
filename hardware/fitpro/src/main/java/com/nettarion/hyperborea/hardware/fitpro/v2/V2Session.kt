@@ -54,12 +54,17 @@ class V2Session(
     /** Latest [V2FeatureId.WORKOUT_STATE] value reported by the console (raw [V2WorkoutMode] ordinal); null until first event. */
     private val _workoutMode = MutableStateFlow<Float?>(null)
 
+    /** Features the console declared it supports, captured from the [V2Message.Incoming.SupportedFeatures] response. */
+    private val _supportedFeatures = MutableStateFlow<Set<V2FeatureId>?>(null)
+
     /**
-     * Default-bike stub for the interface contract. V2 has no equipment-id in its protocol, so a
-     * real device-type derivation comes in a follow-up that wires it up to the supported-features
-     * heuristic. V1 already populates this from its `Connect` device-id response.
+     * Equipment type derived from the supported-features set after the QueryFeatures handshake. The
+     * V2 protocol has no explicit equipment-id field (V1's [DEVICE_TREADMILL]/[DEVICE_FITNESS_BIKE]
+     * branch is absent), so we infer it: a belt-driven machine reports speed/grade features but no
+     * flywheel-resistance features. Defaults to [DeviceType.BIKE] before [awaitDeviceType] resolves.
      */
-    override val detectedDeviceType: DeviceType = DeviceType.BIKE
+    override var detectedDeviceType: DeviceType = DeviceType.BIKE
+        private set
 
     private var heartbeatJob: Job? = null
     private var receiveJob: Job? = null
@@ -78,8 +83,11 @@ class V2Session(
             startReceiveLoop()   // WORKOUT_STATE (and other) events flow now
             startHeartbeat()     // keeps the console alive during the workout-mode transition below
 
-            // Bring the console up to the running WORKOUT state the way the firmware expects:
-            // NONE → WARM_UP → RUNNING, confirming each step via the WORKOUT_STATE events.
+            // Wait briefly for the console to declare its supported features, then derive the
+            // equipment type from them. transitionToWorkout() branches on this.
+            awaitDeviceType()
+
+            // Bring the console up to the workout-active state the way the firmware expects.
             transitionToWorkout()
 
             accumulator.start()
@@ -264,8 +272,10 @@ class V2Session(
                     }
                 }
             }
-            is V2Message.Incoming.SupportedFeatures ->
+            is V2Message.Incoming.SupportedFeatures -> {
+                _supportedFeatures.value = message.features.toSet()
                 logger.d(TAG, "Supported features: ${message.features.map { it.name }}")
+            }
             is V2Message.Incoming.Acknowledge ->
                 logger.d(TAG, "ACK: ${message.type}")
             is V2Message.Incoming.Error ->
@@ -290,9 +300,13 @@ class V2Session(
             V2FeatureId.TARGET_GRADE -> accumulator.updateTargetIncline(value)
             V2FeatureId.HEART_BEAT_INTERVAL -> { /* Protocol keepalive echo */ }
             V2FeatureId.SYSTEM_MODE -> { /* System on/standby/sleep — not the workout state, and not exercise data */ }
-            // Used for the start-up transition confirmation; not pushed to ExerciseData (V2's
-            // numbering differs from the V1 workout-mode values the orchestrator's DMK monitor expects).
-            V2FeatureId.WORKOUT_STATE -> _workoutMode.value = value
+            // Translated to V1 [com.nettarion.hyperborea.hardware.fitpro.v1.WorkoutMode] numbering
+            // when pushed to the accumulator, so the orchestrator's workout-mode monitor (which
+            // uses V1 codes for DMK / IDLE / RUNNING) reacts uniformly to V1 and V2 sessions.
+            V2FeatureId.WORKOUT_STATE -> {
+                _workoutMode.value = value
+                accumulator.updateWorkoutMode(v2WorkoutStateToV1Code(V2WorkoutMode.fromRaw(value)))
+            }
             V2FeatureId.MAX_RESISTANCE -> { /* Device capability, not exercise data */ }
             V2FeatureId.GOAL_WATTS -> accumulator.updateTargetPower(value.toInt())
         }
@@ -302,11 +316,28 @@ class V2Session(
         (value / step).roundToInt() * step
 
     /**
-     * Brings the console up to the running WORKOUT state the way the firmware expects:
-     * `NONE → WARM_UP → RUNNING`, confirming each step from the [V2FeatureId.WORKOUT_STATE] events.
-     * If the console never confirms, logs a warning and proceeds (degraded — see [degradedReason]).
+     * Brings the console up to the workout-active state the way the firmware expects. Two paths,
+     * mirroring [com.nettarion.hyperborea.hardware.fitpro.v1.V1Session.transitionToActive]:
+     *
+     * - **Treadmill / incline trainer**: write `WARM_UP` and stop. The MCU gates belt motion on
+     *   the physical Start key; writing `RUNNING` from the app alone would only time out the
+     *   confirmation wait and surface as a (semantically wrong) degraded warning. Instead the
+     *   orchestrator parks in
+     *   [com.nettarion.hyperborea.core.orchestration.OrchestratorState.AwaitingConsoleStart] and
+     *   the WORKOUT_STATE subscription pushes a `RUNNING` event once the user presses the key.
+     * - **Bike / elliptical / rower**: drive the state machine ourselves —
+     *   `NONE → WARM_UP → RUNNING`, confirming each step from the [V2FeatureId.WORKOUT_STATE]
+     *   events. If the console never confirms, log a warning and continue degraded.
      */
     private suspend fun transitionToWorkout() {
+        if (detectedDeviceType == DeviceType.TREADMILL) {
+            writeWorkoutState(V2WorkoutMode.WARM_UP)
+            confirmWorkoutMode("leave idle") { it != V2WorkoutMode.NONE && it != V2WorkoutMode.READY_TO_START }
+            logger.i(TAG, "Console workout state: NONE → WARM_UP (awaiting physical Start key)")
+            _degradedReason.value = null
+            return
+        }
+
         writeWorkoutState(V2WorkoutMode.WARM_UP)
         confirmWorkoutMode("leave idle") { it != V2WorkoutMode.NONE && it != V2WorkoutMode.READY_TO_START }
         writeWorkoutState(V2WorkoutMode.RUNNING)
@@ -315,6 +346,58 @@ class V2Session(
         _degradedReason.value =
             if (running) null
             else "The console didn't confirm the workout started — resistance/speed may not respond"
+    }
+
+    /**
+     * Wait briefly for the QueryFeatures response, then resolve [detectedDeviceType]. If the
+     * response never arrives we keep the constructor-supplied default; the failure mode is just
+     * "treadmills get treated as bikes here" (existing pre-this-change behaviour).
+     */
+    private suspend fun awaitDeviceType() {
+        val features = withTimeoutOrNull(SUPPORTED_FEATURES_TIMEOUT_MS) {
+            _supportedFeatures.filterNotNull().first()
+        }
+        if (features == null) {
+            logger.w(TAG, "Console didn't reply with supported features within ${SUPPORTED_FEATURES_TIMEOUT_MS}ms — assuming $detectedDeviceType")
+            return
+        }
+        detectedDeviceType = deriveDeviceType(features)
+        logger.i(TAG, "Detected device type: $detectedDeviceType (from ${features.size} features)")
+    }
+
+    /**
+     * Heuristic: V2 has no equipment-id field, so we infer type from the feature set the console
+     * declared. Treadmills / incline trainers report belt-speed and grade features but no flywheel
+     * resistance; bikes, ellipticals and rowers report resistance features.
+     */
+    private fun deriveDeviceType(features: Set<V2FeatureId>): DeviceType {
+        val hasResistance = V2FeatureId.TARGET_RESISTANCE in features ||
+            V2FeatureId.MAX_RESISTANCE in features
+        val hasBeltSpeed = V2FeatureId.TARGET_KPH in features || V2FeatureId.CURRENT_KPH in features
+        val hasGrade = V2FeatureId.TARGET_GRADE in features || V2FeatureId.CURRENT_GRADE in features
+        return when {
+            !hasResistance && (hasBeltSpeed || hasGrade) -> DeviceType.TREADMILL
+            else -> DeviceType.BIKE
+        }
+    }
+
+    /**
+     * Translates V2's [V2WorkoutMode] ordinal to the V1
+     * [com.nettarion.hyperborea.hardware.fitpro.v1.WorkoutMode] raw value the orchestrator's
+     * workout-mode monitor expects (V1 numbering is the lingua franca because V1 is older). The
+     * `OFF_MACHINE` state has no V1 equivalent — the closest semantic match is `DMK` (user not on
+     * device / not driving telemetry), so the monitor's safety-pause path fires for both.
+     */
+    private fun v2WorkoutStateToV1Code(mode: V2WorkoutMode): Int = when (mode) {
+        V2WorkoutMode.RUNNING -> V1_WORKOUT_MODE_RUNNING
+        V2WorkoutMode.PAUSED -> V1_WORKOUT_MODE_PAUSE
+        V2WorkoutMode.OFF_MACHINE -> V1_WORKOUT_MODE_DMK
+        V2WorkoutMode.WARM_UP -> V1_WORKOUT_MODE_WARM_UP
+        V2WorkoutMode.COOL_DOWN -> V1_WORKOUT_MODE_COOL_DOWN
+        V2WorkoutMode.NONE,
+        V2WorkoutMode.READY_TO_START,
+        V2WorkoutMode.RESULTS -> V1_WORKOUT_MODE_IDLE
+        V2WorkoutMode.UNKNOWN -> V1_WORKOUT_MODE_UNKNOWN
     }
 
     private suspend fun writeWorkoutState(mode: V2WorkoutMode) {
@@ -359,5 +442,17 @@ class V2Session(
         private const val MAX_SUBSCRIBE_BATCH = 8
         // How long to wait for the console to confirm a WORKOUT_STATE transition before continuing degraded.
         private const val STATE_CONFIRM_TIMEOUT_MS = 5_000L
+        // How long to wait for the SupportedFeatures response before falling back to BIKE.
+        private const val SUPPORTED_FEATURES_TIMEOUT_MS = 3_000L
+
+        // V1 [com.nettarion.hyperborea.hardware.fitpro.v1.WorkoutMode] raw codes used by the
+        // orchestrator's workout-mode monitor — kept here as a translation target for V2's WORKOUT_STATE.
+        private const val V1_WORKOUT_MODE_UNKNOWN = 0
+        private const val V1_WORKOUT_MODE_IDLE = 1
+        private const val V1_WORKOUT_MODE_RUNNING = 2
+        private const val V1_WORKOUT_MODE_PAUSE = 3
+        private const val V1_WORKOUT_MODE_DMK = 8
+        private const val V1_WORKOUT_MODE_WARM_UP = 10
+        private const val V1_WORKOUT_MODE_COOL_DOWN = 11
     }
 }
