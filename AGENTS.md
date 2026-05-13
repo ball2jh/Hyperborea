@@ -25,6 +25,30 @@ It runs on the equipment's own Android console. It is an independent project, no
 
 Always use the `standard` product flavor. Release builds use `release.jks` if present, otherwise fall back to the debug signing key (see `local.properties.example`).
 
+## Publishing a release
+
+GitHub Releases is the source of truth for what the fleet auto-updates to. The
+website's `/api/device/manifest` endpoint reads `releases/latest` from
+`ball2jh/Hyperborea` directly — no admin form upload, no R2 push, no "set
+current" click. Bikes poll the manifest every ≤6 h and the in-app "Update Now"
+button triggers it immediately.
+
+The full flow lives in [`tools/publish-release.sh`](tools/publish-release.sh):
+
+1. Bump `appVersionName` in `gradle.properties`.
+2. Add a `## [X.Y.Z] - YYYY-MM-DD` section to `CHANGELOG.md` (under
+   `## [Unreleased]`).
+3. `git commit -m "release: X.Y.Z"`.
+4. `tools/publish-release.sh` — validates pre-conditions, runs
+   `./gradlew prepareRelease`, pushes main, tags `vX.Y.Z`, and `gh release
+   create`s with the APK + ZIP and the extracted changelog as release notes.
+
+The script has a `--dry-run` mode that prints exactly what would happen
+(including the assembled release notes) without pushing. Coding agents:
+the [`publish-release`](.claude/skills/publish-release/SKILL.md) skill walks
+through the whole flow including how to assemble the CHANGELOG entry from
+git log.
+
 ## Device Commands
 
 The console typically connects over WiFi (ADB over TCP). After rebooting, use `adb wait-for-device` to block until ADB reconnects, then poll `getprop sys.boot_completed` until it returns `1` (wait-for-device returns before boot finishes).
