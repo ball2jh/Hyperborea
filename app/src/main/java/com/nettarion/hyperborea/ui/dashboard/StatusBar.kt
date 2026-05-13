@@ -162,6 +162,17 @@ fun StatusBar(
                     Text("\u25B6  START", style = MaterialTheme.typography.titleSmall)
                 }
             }
+            is OrchestratorState.AwaitingConsoleStart -> {
+                // Equipment is armed; only allow cancelling (no workout has begun yet).
+                OutlinedButton(
+                    onClick = onStop,
+                    shape = RoundedCornerShape(20.dp),
+                    colors = ButtonDefaults.outlinedButtonColors(contentColor = colors.statusError),
+                    border = BorderStroke(1.dp, colors.statusError),
+                ) {
+                    Text("\u25A0  CANCEL", style = MaterialTheme.typography.titleSmall)
+                }
+            }
             is OrchestratorState.Running -> {
                 OutlinedButton(
                     onClick = onPause,
@@ -267,12 +278,16 @@ private fun StatusDot(state: OrchestratorState) {
     val dotColor = when (state) {
         is OrchestratorState.Running -> if (state.degraded != null) colors.accentWarm else colors.statusActive
         is OrchestratorState.Paused -> colors.accentWarm
+        is OrchestratorState.AwaitingConsoleStart -> colors.accentWarm
         is OrchestratorState.Error -> colors.statusError
         is OrchestratorState.Preparing, is OrchestratorState.Stopping -> colors.accentWarm
         is OrchestratorState.Idle -> colors.statusIdle
     }
 
-    val isPulsing = state is OrchestratorState.Preparing || state is OrchestratorState.Stopping || state is OrchestratorState.Paused
+    val isPulsing = state is OrchestratorState.Preparing ||
+        state is OrchestratorState.Stopping ||
+        state is OrchestratorState.Paused ||
+        state is OrchestratorState.AwaitingConsoleStart
     val alpha = if (isPulsing) {
         val infiniteTransition = rememberInfiniteTransition(label = "pulse")
         val pulseAlpha by infiniteTransition.animateFloat(
@@ -324,6 +339,7 @@ private fun BroadcastBadge(broadcast: BroadcastUiState) {
 private fun OrchestratorState.displayText(): String = when (this) {
     is OrchestratorState.Idle -> "Idle"
     is OrchestratorState.Preparing -> step
+    is OrchestratorState.AwaitingConsoleStart -> message
     is OrchestratorState.Running -> if (degraded != null) "Degraded: $degraded" else "Broadcasting"
     is OrchestratorState.Paused -> "Paused"
     is OrchestratorState.Error -> "Error: $message"

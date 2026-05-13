@@ -13,6 +13,7 @@ import com.nettarion.hyperborea.core.model.ConsoleKey
 import com.nettarion.hyperborea.core.model.DeviceCommand
 import com.nettarion.hyperborea.core.model.DeviceIdentity
 import com.nettarion.hyperborea.core.model.DeviceInfo
+import com.nettarion.hyperborea.core.model.DeviceType
 import com.nettarion.hyperborea.core.model.ExerciseData
 import com.nettarion.hyperborea.core.model.Profile
 import com.nettarion.hyperborea.core.model.RideSummary
@@ -619,6 +620,113 @@ class OrchestratorTest {
 
         // Should stay Paused (was already paused)
         assertThat(env.orchestrator.state.value).isEqualTo(OrchestratorState.Paused)
+    }
+
+    // --- Treadmill: AwaitingConsoleStart ---
+
+    @Test
+    fun `treadmill connect lands in AwaitingConsoleStart, not Running`() = runTest {
+        val env = TestEnv(this)
+        env.hardware.deviceInfo.value = buildDeviceInfo(type = DeviceType.TREADMILL)
+
+        env.orchestrator.start()
+        advanceUntilIdle()
+
+        val state = env.orchestrator.state.value
+        assertThat(state).isInstanceOf(OrchestratorState.AwaitingConsoleStart::class.java)
+        assertThat((state as OrchestratorState.AwaitingConsoleStart).message)
+            .contains("console")
+    }
+
+    @Test
+    fun `treadmill broadcasts go live in AwaitingConsoleStart`() = runTest {
+        val env = TestEnv(this)
+        env.hardware.deviceInfo.value = buildDeviceInfo(type = DeviceType.TREADMILL)
+
+        env.orchestrator.start()
+        advanceUntilIdle()
+
+        // The user's mental model: app Start = telemetry connects. So the broadcasts must
+        // already be running even while we wait on the physical Start key.
+        assertThat(env.broadcast1.startCalled).isTrue()
+    }
+
+    @Test
+    fun `treadmill WORKOUT_MODE 2 promotes AwaitingConsoleStart to Running`() = runTest {
+        val env = TestEnv(this)
+        env.hardware.deviceInfo.value = buildDeviceInfo(type = DeviceType.TREADMILL)
+        env.orchestrator.start()
+        advanceUntilIdle()
+        assertThat(env.orchestrator.state.value).isInstanceOf(OrchestratorState.AwaitingConsoleStart::class.java)
+
+        // User presses the physical Start key — MCU completes WARM_UP → RUNNING.
+        env.hardware.exerciseData.value = ExerciseData(
+            power = 0, cadence = 0, speed = 1.5f, resistance = 0,
+            incline = 0f, heartRate = null, distance = null, calories = null,
+            elapsedTime = 0, workoutMode = 2,
+        )
+        advanceUntilIdle()
+
+        assertThat(env.orchestrator.state.value).isEqualTo(OrchestratorState.Running())
+    }
+
+    @Test
+    fun `treadmill WORKOUT_MODE 1 from AwaitingConsoleStart tears the workout down silently`() = runTest {
+        val env = TestEnv(this)
+        env.hardware.deviceInfo.value = buildDeviceInfo(type = DeviceType.TREADMILL)
+        env.orchestrator.start()
+        advanceUntilIdle()
+        assertThat(env.orchestrator.state.value).isInstanceOf(OrchestratorState.AwaitingConsoleStart::class.java)
+
+        // User changed their mind, pressed console Stop while the equipment was armed.
+        env.hardware.exerciseData.value = ExerciseData(
+            power = 0, cadence = 0, speed = 0f, resistance = 0,
+            incline = 0f, heartRate = null, distance = null, calories = null,
+            elapsedTime = 0, workoutMode = 1,
+        )
+        advanceUntilIdle()
+
+        assertThat(env.orchestrator.state.value).isEqualTo(OrchestratorState.Idle)
+    }
+
+    @Test
+    fun `treadmill WORKOUT_MODE 1 from Running stops the workout`() = runTest {
+        val env = TestEnv(this)
+        env.hardware.deviceInfo.value = buildDeviceInfo(type = DeviceType.TREADMILL)
+        env.orchestrator.start()
+        // Promote AwaitingConsoleStart → Running by emitting RUNNING.
+        env.hardware.exerciseData.value = ExerciseData(
+            power = 0, cadence = 0, speed = 1.5f, resistance = 0,
+            incline = 0f, heartRate = null, distance = null, calories = null,
+            elapsedTime = 30, workoutMode = 2,
+        )
+        advanceUntilIdle()
+        assertThat(env.orchestrator.state.value).isEqualTo(OrchestratorState.Running())
+
+        // User presses console Stop mid-workout.
+        env.hardware.exerciseData.value = ExerciseData(
+            power = 0, cadence = 0, speed = 0f, resistance = 0,
+            incline = 0f, heartRate = null, distance = null, calories = null,
+            elapsedTime = 30, workoutMode = 1,
+        )
+        advanceUntilIdle()
+
+        assertThat(env.orchestrator.state.value).isEqualTo(OrchestratorState.Idle)
+    }
+
+    @Test
+    fun `stop from AwaitingConsoleStart transitions to Idle without saving`() = runTest {
+        val env = TestEnv(this)
+        env.hardware.deviceInfo.value = buildDeviceInfo(type = DeviceType.TREADMILL)
+        env.orchestrator.start()
+        advanceUntilIdle()
+        assertThat(env.orchestrator.state.value).isInstanceOf(OrchestratorState.AwaitingConsoleStart::class.java)
+
+        // User taps CANCEL on the app.
+        env.orchestrator.stop(saveRide = false)
+        advanceUntilIdle()
+
+        assertThat(env.orchestrator.state.value).isEqualTo(OrchestratorState.Idle)
     }
 
     // --- Fakes ---

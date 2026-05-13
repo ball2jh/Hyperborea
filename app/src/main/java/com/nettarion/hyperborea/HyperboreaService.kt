@@ -165,6 +165,7 @@ class HyperboreaService : Service() {
         val text = when (state) {
             is OrchestratorState.Idle -> "Idle"
             is OrchestratorState.Preparing -> state.step
+            is OrchestratorState.AwaitingConsoleStart -> state.message
             is OrchestratorState.Running -> if (state.degraded != null) "Degraded: ${state.degraded}" else "Broadcasting to Zwift"
             is OrchestratorState.Paused -> "Paused"
             is OrchestratorState.Error -> "Error: ${state.message}"

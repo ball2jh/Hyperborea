@@ -5,11 +5,16 @@ import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.Card
+import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
@@ -25,10 +30,13 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.nettarion.hyperborea.core.orchestration.OrchestratorState
 import com.nettarion.hyperborea.ui.admin.AdminDrawer
 import com.nettarion.hyperborea.ui.theme.LocalHyperboreaColors
 import com.nettarion.hyperborea.ui.util.ExportResultSnackbar
@@ -109,6 +117,17 @@ fun DashboardScreen(
                 supportedMetrics = uiState.deviceInfo?.supportedMetrics,
                 useImperial = uiState.useImperial,
                 modifier = Modifier.weight(1f),
+            )
+        }
+
+        // Treadmill safety overlay: equipment is armed (broadcasts live), MCU is parked in
+        // WARM_UP waiting for the physical Start key. The compact StatusBar status text is too
+        // subtle at 1920×1080 arm's-length; this is the visible cue.
+        val awaiting = uiState.orchestratorState as? OrchestratorState.AwaitingConsoleStart
+        if (awaiting != null) {
+            ConsoleStartPrompt(
+                message = awaiting.message,
+                modifier = Modifier.align(Alignment.Center),
             )
         }
 
@@ -213,5 +232,49 @@ fun DashboardScreen(
             state = exportSnackbar,
             modifier = Modifier.align(Alignment.BottomCenter),
         )
+    }
+}
+
+/**
+ * Centered overlay shown while the orchestrator is in
+ * [OrchestratorState.AwaitingConsoleStart] (treadmill armed in WARM_UP, MCU gating belt motion
+ * on the physical Start key). The StatusBar's 48 dp status indicator is too small to register
+ * at the console's 1920×1080 arm's-length viewing distance; this card is the visible cue.
+ */
+@Composable
+private fun ConsoleStartPrompt(message: String, modifier: Modifier = Modifier) {
+    val colors = LocalHyperboreaColors.current
+    Card(
+        modifier = modifier
+            .padding(32.dp)
+            .widthIn(max = 720.dp),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant),
+        elevation = CardDefaults.cardElevation(defaultElevation = 12.dp),
+        shape = RoundedCornerShape(24.dp),
+    ) {
+        Column(
+            modifier = Modifier.padding(horizontal = 48.dp, vertical = 36.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
+        ) {
+            Text(
+                "▶",
+                fontSize = 96.sp,
+                color = colors.accentWarm,
+            )
+            Spacer(Modifier.height(16.dp))
+            Text(
+                message,
+                style = MaterialTheme.typography.headlineMedium,
+                color = colors.textHigh,
+                textAlign = TextAlign.Center,
+            )
+            Spacer(Modifier.height(8.dp))
+            Text(
+                "The belt will start when you press the physical Start key. Broadcasts are already live — pair Zwift now if you haven't.",
+                style = MaterialTheme.typography.bodyLarge,
+                color = colors.textMedium,
+                textAlign = TextAlign.Center,
+            )
+        }
     }
 }

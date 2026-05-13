@@ -169,7 +169,12 @@ class OverlayManager(
                     userDismissed = false
                     hide()
                 }
-                is OrchestratorState.Preparing -> {}
+                is OrchestratorState.Preparing,
+                is OrchestratorState.AwaitingConsoleStart,
+                -> {
+                    // The on-screen banner on the dashboard is the visible cue; the floating
+                    // overlay only needs to surface mid-workout pause/running states.
+                }
             }
         }
     }
