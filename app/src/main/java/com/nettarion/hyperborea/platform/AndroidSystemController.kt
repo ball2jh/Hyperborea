@@ -36,8 +36,15 @@ class AndroidSystemController @Inject constructor(
             return true
         }
 
+        // FLAG_MUTABLE is required here, NOT FLAG_IMMUTABLE. AOSP's UsbPermissionActivity
+        // delivers the result by putting EXTRA_PERMISSION_GRANTED on a fill-in Intent and calling
+        // pendingIntent.send(ctx, 0, intent) — fill-in extras are silently dropped when the
+        // PendingIntent is immutable, so an immutable PI causes the user's "Allow" tap to look
+        // like "Deny" to our receiver. setPackage() above makes the Intent explicit, so the
+        // API 34+ "no mutable for implicit intents" rule doesn't apply. Pre-API-31 PendingIntents
+        // are mutable by default and FLAG_MUTABLE doesn't exist, so 0 is correct there.
         val pendingIntentFlags = PendingIntent.FLAG_UPDATE_CURRENT or
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) PendingIntent.FLAG_IMMUTABLE else 0
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) PendingIntent.FLAG_MUTABLE else 0
         val pendingIntent = PendingIntent.getBroadcast(
             context,
             0,
@@ -54,8 +61,11 @@ class AndroidSystemController @Inject constructor(
                 override fun onReceive(ctx: Context, intent: Intent) {
                     if (intent.action != ACTION_USB_PERMISSION) return
                     runCatching { context.unregisterReceiver(this) }
-                    val granted = intent.getBooleanExtra(UsbManager.EXTRA_PERMISSION_GRANTED, false) &&
-                        usbManager.hasPermission(device)
+                    // hasPermission() is the authoritative answer — it's what the rest of the
+                    // codebase (SystemMonitor snapshot, UsbHidTransportFactory.openDevice, the
+                    // prerequisite's isMet lambda) actually cares about. EXTRA_PERMISSION_GRANTED
+                    // is just a hint and historically unreliable (see FLAG_MUTABLE note above).
+                    val granted = usbManager.hasPermission(device)
                     logger.i(
                         TAG,
                         "USB permission ${if (granted) "granted" else "denied"} " +
