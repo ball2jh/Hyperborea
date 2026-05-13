@@ -8,6 +8,7 @@ import com.nettarion.hyperborea.hardware.fitpro.v2.V2Codec
 import com.nettarion.hyperborea.hardware.fitpro.v2.V2FeatureId
 import com.nettarion.hyperborea.hardware.fitpro.v2.V2Message
 import com.nettarion.hyperborea.hardware.fitpro.v2.V2Session
+import com.nettarion.hyperborea.hardware.fitpro.v2.V2WorkoutMode
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
 import kotlinx.coroutines.ExperimentalCoroutinesApi
@@ -38,6 +39,34 @@ class V2SessionTest {
         advanceUntilIdle()
 
         assertThat(session.sessionState.value).isEqualTo(SessionState.Streaming)
+    }
+
+    @Test
+    fun `start brings the console up to RUNNING and clears degraded when it confirms`() = runTest {
+        val session = createSession(this)
+        // Console reports its workout state as we drive it: NONE → WARM_UP → RUNNING.
+        transport.emitIncoming(buildEventPacket(V2FeatureId.WORKOUT_STATE, V2WorkoutMode.WARM_UP.raw))
+        transport.emitIncoming(buildEventPacket(V2FeatureId.WORKOUT_STATE, V2WorkoutMode.RUNNING.raw))
+
+        session.start()
+        advanceUntilIdle()
+
+        assertThat(session.sessionState.value).isEqualTo(SessionState.Streaming)
+        assertThat(session.degradedReason.value).isNull()
+        // Both WORKOUT_STATE writes (WARM_UP then RUNNING) went out — not a single jump to RUNNING.
+        val workoutStateWrites = transport.writtenPackets.count { it.size > 3 && it[3] == V2FeatureId.WORKOUT_STATE.wireLo }
+        assertThat(workoutStateWrites).isAtLeast(2)
+    }
+
+    @Test
+    fun `start still reaches Streaming but flags degraded when the console never confirms the workout`() = runTest {
+        val session = createSession(this)
+        // No WORKOUT_STATE events — the confirmation reads time out.
+        session.start()
+        advanceUntilIdle()
+
+        assertThat(session.sessionState.value).isEqualTo(SessionState.Streaming)
+        assertThat(session.degradedReason.value).isNotNull()
     }
 
     @Test
@@ -273,7 +302,7 @@ class V2SessionTest {
     }
 
     @Test
-    fun `writeFeature PauseWorkout sends SYSTEM_MODE PAUSE`() = runTest {
+    fun `writeFeature PauseWorkout sends WORKOUT_STATE PAUSED`() = runTest {
         val session = createSession(this)
         session.start()
         advanceUntilIdle()
@@ -283,11 +312,11 @@ class V2SessionTest {
 
         val written = transport.writtenPackets.drop(countBefore)
         assertThat(written).hasSize(1)
-        assertThat(written[0][3]).isEqualTo(V2FeatureId.SYSTEM_MODE.wireLo)
+        assertThat(written[0][3]).isEqualTo(V2FeatureId.WORKOUT_STATE.wireLo)
     }
 
     @Test
-    fun `writeFeature ResumeWorkout sends SYSTEM_MODE RUNNING`() = runTest {
+    fun `writeFeature ResumeWorkout sends WORKOUT_STATE RUNNING`() = runTest {
         val session = createSession(this)
         session.start()
         advanceUntilIdle()
@@ -297,7 +326,7 @@ class V2SessionTest {
 
         val written = transport.writtenPackets.drop(countBefore)
         assertThat(written).hasSize(1)
-        assertThat(written[0][3]).isEqualTo(V2FeatureId.SYSTEM_MODE.wireLo)
+        assertThat(written[0][3]).isEqualTo(V2FeatureId.WORKOUT_STATE.wireLo)
     }
 
     // --- Multiple events ---

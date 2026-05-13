@@ -20,8 +20,12 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.filterNotNull
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withTimeoutOrNull
 
 class V2Session(
     private val transport: HidTransport,
@@ -43,10 +47,11 @@ class V2Session(
     // The V2 protocol has no console-keypad field — this never emits.
     override val consoleKeyPresses: SharedFlow<ConsoleKey> = MutableSharedFlow()
 
-    // V2's workout-mode transition isn't confirmed yet (the V2 console-start path still needs a
-    // GlassOS-faithful rework — see the V1 equivalent), so we never report it as degraded.
     private val _degradedReason = MutableStateFlow<String?>(null)
     override val degradedReason: StateFlow<String?> = _degradedReason.asStateFlow()
+
+    /** Latest [V2FeatureId.WORKOUT_STATE] value reported by the console (raw [V2WorkoutMode] ordinal); null until first event. */
+    private val _workoutMode = MutableStateFlow<Float?>(null)
 
     private var heartbeatJob: Job? = null
     private var receiveJob: Job? = null
@@ -62,17 +67,16 @@ class V2Session(
 
             _sessionState.value = SessionState.Handshaking
             queryAndSubscribe()
+            startReceiveLoop()   // WORKOUT_STATE (and other) events flow now
+            startHeartbeat()     // keeps the console alive during the workout-mode transition below
+
+            // Bring the console up to the running WORKOUT state the way the firmware expects:
+            // NONE → WARM_UP → RUNNING, confirming each step via the WORKOUT_STATE events.
+            transitionToWorkout()
 
             accumulator.start()
             _sessionState.value = SessionState.Streaming
-
-            startReceiveLoop()
-            startHeartbeat()
-
-            // Enter RUNNING mode so the bike accepts control writes
-            val running = V2Message.Outgoing.WriteFeature(V2FeatureId.SYSTEM_MODE, SYSTEM_MODE_RUNNING)
-            transport.write(V2Codec.encode(running))
-            logger.i(TAG, "V2 session started, entered RUNNING mode")
+            logger.i(TAG, "V2 session started")
         } catch (e: CancellationException) {
             throw e
         } catch (e: Exception) {
@@ -90,12 +94,11 @@ class V2Session(
 
         try {
             if (transport.isOpen) {
-                // Return to IDLE before disconnecting
-                val idle = V2Message.Outgoing.WriteFeature(V2FeatureId.SYSTEM_MODE, SYSTEM_MODE_IDLE)
-                transport.write(V2Codec.encode(idle))
-
-                val unsubscribe = V2Message.Outgoing.Unsubscribe(V2FeatureId.subscribable)
-                transport.write(V2Codec.encode(unsubscribe))
+                // Return the console to idle before disconnecting
+                transport.write(V2Codec.encode(
+                    V2Message.Outgoing.WriteFeature(V2FeatureId.WORKOUT_STATE, V2WorkoutMode.NONE.raw),
+                ))
+                transport.write(V2Codec.encode(V2Message.Outgoing.Unsubscribe(V2FeatureId.subscribable)))
                 transport.close()
             }
         } catch (e: CancellationException) {
@@ -107,6 +110,7 @@ class V2Session(
         accumulator.reset()
         _exerciseData.value = null
         _deviceIdentity.value = null
+        _degradedReason.value = null
         _sessionState.value = SessionState.Disconnected
         logger.i(TAG, "V2 session stopped")
     }
@@ -161,17 +165,11 @@ class V2Session(
             )
             is DeviceCommand.PauseWorkout -> {
                 accumulator.pause()
-                V2Message.Outgoing.WriteFeature(
-                    V2FeatureId.SYSTEM_MODE,
-                    SYSTEM_MODE_PAUSE,
-                )
+                V2Message.Outgoing.WriteFeature(V2FeatureId.WORKOUT_STATE, V2WorkoutMode.PAUSED.raw)
             }
             is DeviceCommand.ResumeWorkout -> {
                 accumulator.resume()
-                V2Message.Outgoing.WriteFeature(
-                    V2FeatureId.SYSTEM_MODE,
-                    SYSTEM_MODE_RUNNING,
-                )
+                V2Message.Outgoing.WriteFeature(V2FeatureId.WORKOUT_STATE, V2WorkoutMode.RUNNING.raw)
             }
             is DeviceCommand.CalibrateIncline -> {
                 logger.w(TAG, "CalibrateIncline not supported on V2")
@@ -283,7 +281,10 @@ class V2Session(
             V2FeatureId.TARGET_KPH -> accumulator.updateTargetSpeed(value)
             V2FeatureId.TARGET_GRADE -> accumulator.updateTargetIncline(value)
             V2FeatureId.HEART_BEAT_INTERVAL -> { /* Protocol keepalive echo */ }
-            V2FeatureId.SYSTEM_MODE -> { /* System mode notification, not exercise data */ }
+            V2FeatureId.SYSTEM_MODE -> { /* System on/standby/sleep — not the workout state, and not exercise data */ }
+            // Used for the start-up transition confirmation; not pushed to ExerciseData (V2's
+            // numbering differs from the V1 workout-mode values the orchestrator's DMK monitor expects).
+            V2FeatureId.WORKOUT_STATE -> _workoutMode.value = value
             V2FeatureId.MAX_RESISTANCE -> { /* Device capability, not exercise data */ }
             V2FeatureId.GOAL_WATTS -> accumulator.updateTargetPower(value.toInt())
         }
@@ -292,9 +293,41 @@ class V2Session(
     private fun roundToStep(value: Float, step: Float): Float =
         (value / step).roundToInt() * step
 
+    /**
+     * Brings the console up to the running WORKOUT state the way the firmware expects:
+     * `NONE → WARM_UP → RUNNING`, confirming each step from the [V2FeatureId.WORKOUT_STATE] events.
+     * If the console never confirms, logs a warning and proceeds (degraded — see [degradedReason]).
+     */
+    private suspend fun transitionToWorkout() {
+        writeWorkoutState(V2WorkoutMode.WARM_UP)
+        confirmWorkoutMode("leave idle") { it != V2WorkoutMode.NONE && it != V2WorkoutMode.READY_TO_START }
+        writeWorkoutState(V2WorkoutMode.RUNNING)
+        val running = confirmWorkoutMode("reach RUNNING") { it == V2WorkoutMode.RUNNING }
+        logger.i(TAG, "Console workout state: NONE → WARM_UP → ${if (running) V2WorkoutMode.RUNNING else V2WorkoutMode.UNKNOWN}")
+        _degradedReason.value =
+            if (running) null
+            else "The console didn't confirm the workout started — resistance/speed may not respond"
+    }
+
+    private suspend fun writeWorkoutState(mode: V2WorkoutMode) {
+        transport.write(V2Codec.encode(V2Message.Outgoing.WriteFeature(V2FeatureId.WORKOUT_STATE, mode.raw)))
+    }
+
+    /** Waits (up to [STATE_CONFIRM_TIMEOUT_MS]) for a [V2FeatureId.WORKOUT_STATE] event satisfying [accept]. */
+    private suspend fun confirmWorkoutMode(what: String, accept: (V2WorkoutMode) -> Boolean): Boolean {
+        val ok = withTimeoutOrNull(STATE_CONFIRM_TIMEOUT_MS) {
+            _workoutMode.filterNotNull().map { V2WorkoutMode.fromRaw(it) }.first { accept(it) }
+            true
+        } != null
+        if (!ok) logger.w(TAG, "Console didn't $what — workout may be inactive; continuing")
+        return ok
+    }
+
     private fun startHeartbeat() {
         heartbeatJob = scope.launch {
-            while (isActive && _sessionState.value is SessionState.Streaming) {
+            // Runs from Handshaking on, so the console stays alive through the workout-mode transition too.
+            while (isActive &&
+                (_sessionState.value is SessionState.Streaming || _sessionState.value is SessionState.Handshaking)) {
                 try {
                     val heartbeat = V2Message.Outgoing.WriteFeature(
                         V2FeatureId.HEART_BEAT_INTERVAL,
@@ -316,8 +349,7 @@ class V2Session(
         private const val HEARTBEAT_INTERVAL_MS = 720L
         private const val HEARTBEAT_VALUE = 720f
         private const val MAX_SUBSCRIBE_BATCH = 8
-        private const val SYSTEM_MODE_IDLE = 1f
-        private const val SYSTEM_MODE_RUNNING = 2f
-        private const val SYSTEM_MODE_PAUSE = 3f
+        // How long to wait for the console to confirm a WORKOUT_STATE transition before continuing degraded.
+        private const val STATE_CONFIRM_TIMEOUT_MS = 5_000L
     }
 }

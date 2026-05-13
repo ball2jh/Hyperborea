@@ -15,6 +15,8 @@ enum class V2FeatureId(val code: Int) {
     MAX_RESISTANCE(504),
     WATTS(522),
     GOAL_WATTS(523),
+    /** The console workout state — its value is a [V2WorkoutMode] ordinal. This is the one to drive for start/pause/resume/stop. */
+    WORKOUT_STATE(602),
     RUNNING_TIME(604),
     ;
 
@@ -32,7 +34,7 @@ enum class V2FeatureId(val code: Int) {
         }
 
         val subscribable: List<V2FeatureId> = listOf(
-            SYSTEM_MODE, CURRENT_CALORIES, PULSE, DISTANCE, CURRENT_KPH, RPM,
+            SYSTEM_MODE, WORKOUT_STATE, CURRENT_CALORIES, PULSE, DISTANCE, CURRENT_KPH, RPM,
             CURRENT_GRADE, TARGET_RESISTANCE, MAX_RESISTANCE, WATTS, RUNNING_TIME,
         )
     }
