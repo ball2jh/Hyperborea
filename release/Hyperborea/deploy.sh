@@ -679,13 +679,21 @@ done < <(adb shell "pm list packages com.ifit" 2>/dev/null | tr -d '\r' \
 if [ ${#IFIT_PACKAGES[@]} -eq 0 ]; then
     warn "No com.ifit.* packages found on the device — nothing to disable."
 else
+    # A package is "neutralised" if it's either disabled (shows under `pm list packages -d`) or
+    # hidden (vanishes from the plain package list). pm disable-user is preferred, but some firmware
+    # refuses it from an unprivileged shell — for the system-uid com.ifit.eru and even the
+    # user-installed com.ifit.standalone. pm hide needs a less-restrictive permission set, is
+    # accepted there, and has the same end effect (invisible to pm, receivers don't fire, no
+    # autolaunch), so we fall back to it.
     is_disabled() { adb shell "pm list packages -d com.ifit" 2>/dev/null | tr -d '\r' | grep -qFx "package:$1"; }
+    is_hidden()   { ! adb shell "pm list packages com.ifit"  2>/dev/null | tr -d '\r' | grep -qFx "package:$1"; }
     DISABLED=0
+    HIDDEN=0
     ALREADY=0
     FAILED=0
     for pkg in "${IFIT_PACKAGES[@]}"; do
-        if is_disabled "$pkg"; then
-            ok "$pkg already disabled"
+        if is_disabled "$pkg" || is_hidden "$pkg"; then
+            ok "$pkg already disabled/hidden"
             ALREADY=$((ALREADY + 1))
             continue
         fi
@@ -700,16 +708,24 @@ else
             ok "$pkg already disabled"
             ALREADY=$((ALREADY + 1))
         else
-            warn "Could not disable $pkg"
-            [ "$VERBOSE" -eq 1 ] && printf '%s\n' "$out" | indent
-            FAILED=$((FAILED + 1))
+            # disable-user refused (SecurityException) — fall back to the less-privileged pm hide.
+            hideout=$(adb shell "pm hide $pkg" 2>&1 | tr -d '\r')
+            if printf '%s\n' "$hideout" | grep -q "new hidden state: true" || is_hidden "$pkg"; then
+                ok "Hid $pkg (pm disable-user refused)"
+                HIDDEN=$((HIDDEN + 1))
+            else
+                warn "Could not disable or hide $pkg"
+                [ "$VERBOSE" -eq 1 ] && printf '%s\n' "$out" "$hideout" | indent
+                FAILED=$((FAILED + 1))
+            fi
         fi
     done
     echo ""
+    SUMMARY="$DISABLED newly disabled, $HIDDEN hidden, $ALREADY already disabled/hidden"
     if [ "$FAILED" -eq 0 ]; then
-        info "$DISABLED newly disabled, $ALREADY already disabled (${#IFIT_PACKAGES[@]} iFit package(s) found)"
+        info "$SUMMARY (${#IFIT_PACKAGES[@]} iFit package(s) found)"
     else
-        warn "$DISABLED newly disabled, $ALREADY already disabled, $FAILED could not be disabled (${#IFIT_PACKAGES[@]} iFit package(s) found)"
+        warn "$SUMMARY, $FAILED could not be disabled or hidden (${#IFIT_PACKAGES[@]} iFit package(s) found)"
     fi
 fi
 

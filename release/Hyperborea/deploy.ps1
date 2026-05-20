@@ -666,18 +666,27 @@ $ifitPackages = @(
         Sort-Object
 )
 
+# A package is "neutralised" if it's either disabled (shows under `pm list packages -d`) or hidden
+# (vanishes from the plain package list). pm disable-user is preferred, but some firmware refuses it
+# from an unprivileged shell (system-uid com.ifit.eru, and even user-installed com.ifit.standalone);
+# pm hide needs a less-restrictive permission set and has the same end effect, so we fall back to it.
 function Test-PkgDisabled($pkg) {
     $d = (Invoke-Adb shell "pm list packages -d com.ifit" 2>$null) -replace "`r",""
     return ($d -contains "package:$pkg")
 }
 
+function Test-PkgHidden($pkg) {
+    $p = (Invoke-Adb shell "pm list packages com.ifit" 2>$null) -replace "`r",""
+    return (-not ($p -contains "package:$pkg"))
+}
+
 if ($ifitPackages.Count -eq 0) {
     Write-Warn "No com.ifit.* packages found on the device -- nothing to disable."
 } else {
-    $disabled = 0; $already = 0; $failed = 0
+    $disabled = 0; $hidden = 0; $already = 0; $failed = 0
     foreach ($pkg in $ifitPackages) {
-        if (Test-PkgDisabled $pkg) {
-            Write-Ok "$pkg already disabled"
+        if ((Test-PkgDisabled $pkg) -or (Test-PkgHidden $pkg)) {
+            Write-Ok "$pkg already disabled/hidden"
             $already++
             continue
         }
@@ -692,15 +701,23 @@ if ($ifitPackages.Count -eq 0) {
             Write-Ok "$pkg already disabled"
             $already++
         } else {
-            Write-Warn "Could not disable $pkg"
-            $failed++
+            # disable-user refused (SecurityException) -- fall back to the less-privileged pm hide.
+            $hideResult = Invoke-Adb shell "pm hide $pkg" 2>&1
+            if (($hideResult -match "new hidden state: true") -or (Test-PkgHidden $pkg)) {
+                Write-Ok "Hid $pkg (pm disable-user refused)"
+                $hidden++
+            } else {
+                Write-Warn "Could not disable or hide $pkg"
+                $failed++
+            }
         }
     }
     Write-Host ""
+    $summary = "$disabled newly disabled, $hidden hidden, $already already disabled/hidden"
     if ($failed -eq 0) {
-        Write-Info "$disabled newly disabled, $already already disabled ($($ifitPackages.Count) iFit package(s) found)"
+        Write-Info "$summary ($($ifitPackages.Count) iFit package(s) found)"
     } else {
-        Write-Warn "$disabled newly disabled, $already already disabled, $failed could not be disabled ($($ifitPackages.Count) iFit package(s) found)"
+        Write-Warn "$summary, $failed could not be disabled or hidden ($($ifitPackages.Count) iFit package(s) found)"
     }
 }
 
