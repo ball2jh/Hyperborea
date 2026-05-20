@@ -36,8 +36,8 @@ object UnitFormatter {
         ((feet * 12 + inches) * CM_PER_INCH).roundToInt()
 
     fun distanceDisplay(km: Float, imperial: Boolean): String =
-        if (imperial) "%.1f mi".format(km * KM_TO_MI)
-        else "%.1f km".format(km)
+        if (imperial) "%.2f mi".format(km * KM_TO_MI)
+        else "%.2f km".format(km)
 
     fun speedDisplay(kph: Float, imperial: Boolean): String =
         if (imperial) "%.1f mph".format(kph * KM_TO_MI)

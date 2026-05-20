@@ -139,7 +139,7 @@ fun MetricGrid(
             VerticalDivider(thickness = 1.dp, color = colors.divider)
             MetricCell(
                 value = exerciseData?.distance?.let {
-                    "%.1f".format(if (useImperial) it * UnitFormatter.KM_TO_MI else it)
+                    "%.2f".format(if (useImperial) it * UnitFormatter.KM_TO_MI else it)
                 },
                 unit = if (useImperial) "MI" else "KM",
                 label = "Distance",
