@@ -25,6 +25,11 @@ object ControlPointParser {
         return when (opcode) {
             0x00.toByte() -> ControlPointResult.SessionControl(opcode) // Request Control
             0x01.toByte() -> ControlPointResult.SessionControl(opcode) // Reset
+            0x02.toByte() -> { // Set Target Speed (UINT16 LE, 0.01 km/h resolution)
+                if (payload.size < 3) return ControlPointResult.Unsupported(opcode)
+                val raw = uint16LEAt(payload, 1)
+                ControlPointResult.DeviceCmd(DeviceCommand.SetTargetSpeed(raw / 100f))
+            }
             0x03.toByte() -> { // Set Target Incline
                 if (payload.size < 3) return ControlPointResult.Unsupported(opcode)
                 val raw = sint16LEAt(payload, 1)

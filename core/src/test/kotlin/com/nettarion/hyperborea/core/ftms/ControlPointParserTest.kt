@@ -22,6 +22,22 @@ class ControlPointParserTest {
     }
 
     @Test
+    fun `parseFtmsControlPoint set target speed`() {
+        // 8.0 km/h = 800 as uint16 LE (0.01 resolution) = 0x20, 0x03
+        val result = ControlPointParser.parseFtmsControlPoint(byteArrayOf(0x02, 0x20, 0x03))
+        assertThat(result).isInstanceOf(ControlPointParser.ControlPointResult.DeviceCmd::class.java)
+        val cmd = (result as ControlPointParser.ControlPointResult.DeviceCmd).command
+        assertThat(cmd).isInstanceOf(DeviceCommand.SetTargetSpeed::class.java)
+        assertThat((cmd as DeviceCommand.SetTargetSpeed).kph).isWithin(0.01f).of(8.0f)
+    }
+
+    @Test
+    fun `parseFtmsControlPoint set target speed too short returns Unsupported`() {
+        val result = ControlPointParser.parseFtmsControlPoint(byteArrayOf(0x02))
+        assertThat(result).isInstanceOf(ControlPointParser.ControlPointResult.Unsupported::class.java)
+    }
+
+    @Test
     fun `parseFtmsControlPoint set target incline`() {
         // 5.0% = 50 as sint16 LE = 0x32, 0x00
         val result = ControlPointParser.parseFtmsControlPoint(byteArrayOf(0x03, 0x32, 0x00))
