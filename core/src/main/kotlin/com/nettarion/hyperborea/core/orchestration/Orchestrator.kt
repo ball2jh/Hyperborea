@@ -236,8 +236,15 @@ class Orchestrator(
 
         // Wire data source to broadcasts. exerciseData already merges the external HR sensor — it's
         // the same flow the dashboard reads, so broadcasts/recording/UI never disagree.
+        // A null deviceInfo means the hardware reported connected but never produced an identity
+        // (e.g. a handshake that failed late) — surface a clear error rather than an unexpected throw.
         val deviceInfo = hardwareAdapter.deviceInfo.value
-            ?: throw IllegalStateException("Hardware connected but deviceInfo is null")
+        if (deviceInfo == null) {
+            val msg = "Couldn't read the bike's details — it may not have finished connecting"
+            logger.e(TAG, msg)
+            _state.value = OrchestratorState.Error(msg)
+            return
+        }
         broadcastManager.connectDataSource(exerciseData)
         broadcastManager.updateDeviceInfo(deviceInfo)
 

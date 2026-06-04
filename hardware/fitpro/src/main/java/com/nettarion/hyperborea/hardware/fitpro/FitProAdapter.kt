@@ -132,13 +132,26 @@ class FitProAdapter @Inject constructor(
             }
 
             newSession.start()
+
+            // start() never throws — it captures handshake failures into sessionState — so a failed
+            // connect returns here in Error (or otherwise not Streaming). Don't claim "Connected" or
+            // wire up forwarding for a session that isn't live; surface the failure and bail. The
+            // transport was already closed by start()'s own failure path.
+            val startedState = newSession.sessionState.value
+            if (startedState !is SessionState.Streaming) {
+                val message = (startedState as? SessionState.Error)?.message ?: "Hardware did not finish connecting"
+                val cause = (startedState as? SessionState.Error)?.cause
+                logger.e(TAG, "Hardware connect failed: $message")
+                session = null
+                _state.value = AdapterState.Error(message, cause)
+                return
+            }
+
             session = newSession
             logger.i(TAG, "Connected via ${if (productId == FITPRO_PRODUCT_ID_V1) "V1" else "V2"}")
-
-            // Set Active immediately if session already streaming (monitor coroutine may not have collected yet)
-            if (newSession.sessionState.value is SessionState.Streaming) {
-                _state.value = AdapterState.Active
-            }
+            // Monitor coroutine below may not have collected yet, so set Active now that we've
+            // confirmed the session is streaming.
+            _state.value = AdapterState.Active
 
             // Capture identity / health available from start() (the forwarding coroutines below may not have run yet)
             updateIdentity(newSession.deviceIdentity.value)
