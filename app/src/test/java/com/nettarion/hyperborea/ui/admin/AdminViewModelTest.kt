@@ -109,6 +109,10 @@ class AdminViewModelTest {
         override fun setImmersiveModeEnabled(enabled: Boolean) {}
         override val useImperial: StateFlow<Boolean> = MutableStateFlow(true)
         override fun setUseImperial(enabled: Boolean) {}
+        override val screenSleepEnabled: StateFlow<Boolean> = MutableStateFlow(false)
+        override fun setScreenSleepEnabled(enabled: Boolean) {}
+        override val screenSleepTimeoutMinutes: StateFlow<Int> = MutableStateFlow(10)
+        override fun setScreenSleepTimeoutMinutes(minutes: Int) {}
     }
 
     private val fakeSupportClient = object : SupportHttpClient {

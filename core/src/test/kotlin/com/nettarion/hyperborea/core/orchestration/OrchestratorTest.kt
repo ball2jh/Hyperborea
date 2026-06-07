@@ -883,6 +883,14 @@ class OrchestratorTest {
         override fun setUseImperial(enabled: Boolean) {
             useImperial.value = enabled
         }
+        override val screenSleepEnabled = MutableStateFlow(false)
+        override fun setScreenSleepEnabled(enabled: Boolean) {
+            screenSleepEnabled.value = enabled
+        }
+        override val screenSleepTimeoutMinutes = MutableStateFlow(10)
+        override fun setScreenSleepTimeoutMinutes(minutes: Int) {
+            screenSleepTimeoutMinutes.value = minutes
+        }
     }
 
     private class FakeSensorAdapter : SensorAdapter {

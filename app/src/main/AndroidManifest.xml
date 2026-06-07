@@ -46,6 +46,12 @@
          OverlayManager degrades gracefully when not granted. -->
     <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />
 
+    <!-- Screen sleep — writing Settings.System.SCREEN_OFF_TIMEOUT for the "sleep after idle"
+         feature. Special access: granted via Settings.System.canWrite() / the
+         ACTION_MANAGE_WRITE_SETTINGS screen on API 23+ (auto-granted at install below that).
+         ScreenSleepController degrades gracefully when not granted. -->
+    <uses-permission android:name="android.permission.WRITE_SETTINGS" />
+
     <!-- Foreground service. connectedDevice type needs its own permission on API 34+;
          POST_NOTIFICATIONS is a runtime perm on API 33+ (requested in MainActivity),
          needed so the service notification's updates aren't dropped. -->

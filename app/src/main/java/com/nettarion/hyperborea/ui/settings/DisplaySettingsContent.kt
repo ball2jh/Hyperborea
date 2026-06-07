@@ -1,5 +1,7 @@
 package com.nettarion.hyperborea.ui.settings
 
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -14,8 +16,12 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Switch
 import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
@@ -36,6 +42,23 @@ fun DisplaySettingsContent(
     val useImperial by viewModel.useImperial.collectAsStateWithLifecycle()
     val overlayEnabled by viewModel.overlayEnabled.collectAsStateWithLifecycle()
     val immersiveModeEnabled by viewModel.immersiveModeEnabled.collectAsStateWithLifecycle()
+    val screenSleepEnabled by viewModel.screenSleepEnabled.collectAsStateWithLifecycle()
+    val screenSleepMinutes by viewModel.screenSleepTimeoutMinutes.collectAsStateWithLifecycle()
+
+    // Re-read the WRITE_SETTINGS grant after the user returns from the special-access screen.
+    // The launcher result carries no payload (the system screen reports nothing), so we bump a
+    // tick to recompute canWriteSettings() and re-apply the timeout if it was just granted.
+    var permissionTick by remember { mutableIntStateOf(0) }
+    val canWriteSettings = remember(permissionTick) { viewModel.canWriteSettings() }
+    val writeSettingsLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.StartActivityForResult(),
+    ) {
+        permissionTick++
+        viewModel.reapplyScreenSleep()
+    }
+    fun requestWriteSettings() {
+        viewModel.writeSettingsIntent()?.let { writeSettingsLauncher.launch(it) }
+    }
 
     Text(
         text = "Display",
@@ -79,6 +102,74 @@ fun DisplaySettingsContent(
             checked = immersiveModeEnabled,
             onCheckedChange = viewModel::setImmersiveModeEnabled,
         )
+    }
+
+    HorizontalDivider(color = colors.divider, modifier = Modifier.padding(vertical = 8.dp))
+
+    // Screen sleep — turn the display off after a period of inactivity. The screen is held on
+    // during an active workout regardless; the timeout only applies when idle.
+    SettingsRow(
+        title = "Screen Sleep",
+        subtitle = when {
+            !screenSleepEnabled -> "Turn the display off after a period of inactivity"
+            !canWriteSettings -> "Permission needed to control the screen timeout"
+            else -> "Sleeps after ${screenSleepMinutes} min idle — stays on during workouts"
+        },
+    ) {
+        ThemedSwitch(
+            checked = screenSleepEnabled,
+            onCheckedChange = { enabled ->
+                viewModel.setScreenSleepEnabled(enabled)
+                if (enabled && !viewModel.canWriteSettings()) requestWriteSettings()
+            },
+        )
+    }
+
+    if (screenSleepEnabled && !canWriteSettings) {
+        TextButton(onClick = { requestWriteSettings() }) {
+            Text("Grant permission")
+        }
+    }
+
+    if (screenSleepEnabled && canWriteSettings) {
+        Spacer(Modifier.height(8.dp))
+        SleepTimeoutSelector(
+            selectedMinutes = screenSleepMinutes,
+            onSelect = viewModel::setScreenSleepTimeoutMinutes,
+        )
+    }
+}
+
+/** Idle-duration options, balanced for both busy-gym and home use. */
+private val SLEEP_TIMEOUT_OPTIONS = listOf(2, 5, 10, 30)
+
+@Composable
+private fun SleepTimeoutSelector(
+    selectedMinutes: Int,
+    onSelect: (Int) -> Unit,
+) {
+    val colors = LocalHyperboreaColors.current
+    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        SLEEP_TIMEOUT_OPTIONS.forEach { minutes ->
+            val selected = minutes == selectedMinutes
+            FilterChip(
+                selected = selected,
+                onClick = { if (!selected) onSelect(minutes) },
+                label = { Text("$minutes min") },
+                colors = FilterChipDefaults.filterChipColors(
+                    selectedContainerColor = colors.electricBlue.copy(alpha = 0.15f),
+                    selectedLabelColor = colors.electricBlue,
+                    containerColor = MaterialTheme.colorScheme.surface,
+                    labelColor = colors.textLow,
+                ),
+                border = FilterChipDefaults.filterChipBorder(
+                    enabled = true,
+                    selected = selected,
+                    borderColor = colors.divider,
+                    selectedBorderColor = colors.electricBlue,
+                ),
+            )
+        }
     }
 }
 

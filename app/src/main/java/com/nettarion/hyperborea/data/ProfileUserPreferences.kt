@@ -35,6 +35,13 @@ class ProfileUserPreferences(
     private val _useImperial = MutableStateFlow(prefs.getBoolean(KEY_USE_IMPERIAL, true))
     override val useImperial: StateFlow<Boolean> = _useImperial
 
+    private val _screenSleepEnabled = MutableStateFlow(prefs.getBoolean(KEY_SCREEN_SLEEP_ENABLED, false))
+    override val screenSleepEnabled: StateFlow<Boolean> = _screenSleepEnabled
+
+    private val _screenSleepTimeoutMinutes =
+        MutableStateFlow(prefs.getInt(KEY_SCREEN_SLEEP_TIMEOUT_MINUTES, DEFAULT_SCREEN_SLEEP_MINUTES))
+    override val screenSleepTimeoutMinutes: StateFlow<Int> = _screenSleepTimeoutMinutes
+
     override fun setBroadcastEnabled(id: BroadcastId, enabled: Boolean) {
         val current = _enabledBroadcasts.value.toMutableSet()
         if (enabled) current.add(id) else current.remove(id)
@@ -76,6 +83,18 @@ class ProfileUserPreferences(
         logger.i(TAG, "Units set to ${if (enabled) "imperial" else "metric"}")
     }
 
+    override fun setScreenSleepEnabled(enabled: Boolean) {
+        _screenSleepEnabled.value = enabled
+        prefs.edit().putBoolean(KEY_SCREEN_SLEEP_ENABLED, enabled).apply()
+        logger.i(TAG, "Screen sleep ${if (enabled) "enabled" else "disabled"}")
+    }
+
+    override fun setScreenSleepTimeoutMinutes(minutes: Int) {
+        _screenSleepTimeoutMinutes.value = minutes
+        prefs.edit().putInt(KEY_SCREEN_SLEEP_TIMEOUT_MINUTES, minutes).apply()
+        logger.i(TAG, "Screen sleep timeout set to $minutes min")
+    }
+
     private fun loadEnabledBroadcasts(): Set<BroadcastId> {
         val stored = prefs.getStringSet(KEY_ENABLED_BROADCASTS, null) ?: return BroadcastId.entries.toSet()
         return stored.mapNotNull { name ->
@@ -96,5 +115,8 @@ class ProfileUserPreferences(
         const val KEY_FAN_MODE = "fan_mode"
         const val KEY_IMMERSIVE_MODE = "immersive_mode_enabled"
         const val KEY_USE_IMPERIAL = "use_imperial"
+        const val KEY_SCREEN_SLEEP_ENABLED = "screen_sleep_enabled"
+        const val KEY_SCREEN_SLEEP_TIMEOUT_MINUTES = "screen_sleep_timeout_minutes"
+        const val DEFAULT_SCREEN_SLEEP_MINUTES = 10
     }
 }

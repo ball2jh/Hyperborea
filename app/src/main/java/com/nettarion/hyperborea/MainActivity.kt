@@ -6,12 +6,19 @@ import android.content.pm.PackageManager
 import android.os.Build
 import android.os.Bundle
 import android.util.Log
+import android.view.WindowManager
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.core.content.ContextCompat
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.lifecycleScope
+import androidx.lifecycle.repeatOnLifecycle
+import com.nettarion.hyperborea.platform.ScreenSleepController
+import kotlinx.coroutines.launch
+import javax.inject.Inject
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.MutableState
 import androidx.compose.runtime.getValue
@@ -37,6 +44,8 @@ import dagger.hilt.android.AndroidEntryPoint
 @AndroidEntryPoint
 class MainActivity : ComponentActivity() {
 
+    @Inject lateinit var screenSleepController: ScreenSleepController
+
     private val pendingStopDialog = mutableStateOf(false)
 
     private val permissionLauncher =
@@ -53,6 +62,7 @@ class MainActivity : ComponentActivity() {
             requestRuntimePermissions()
         }
         handleStopDialogIntent(intent)
+        observeKeepScreenOn()
         enableEdgeToEdge()
         setContent {
             HyperboreaTheme {
@@ -64,6 +74,26 @@ class MainActivity : ComponentActivity() {
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
         handleStopDialogIntent(intent)
+    }
+
+    /**
+     * Hold `FLAG_KEEP_SCREEN_ON` while the controller reports a workout is active (and the
+     * sleep-after-idle feature is on), releasing it when idle so the system screen-off timeout
+     * can take over. No-op when the feature is disabled. Scoped to STARTED so it only manages the
+     * flag while this Activity is visible.
+     */
+    private fun observeKeepScreenOn() {
+        lifecycleScope.launch {
+            repeatOnLifecycle(Lifecycle.State.STARTED) {
+                screenSleepController.keepScreenOn.collect { keepOn ->
+                    if (keepOn) {
+                        window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+                    } else {
+                        window.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+                    }
+                }
+            }
+        }
     }
 
     private fun handleStopDialogIntent(intent: Intent?) {

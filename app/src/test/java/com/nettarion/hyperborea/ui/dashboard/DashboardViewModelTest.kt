@@ -110,6 +110,10 @@ class DashboardViewModelTest {
         override fun setUseImperial(enabled: Boolean) {
             useImperialFlow.value = enabled
         }
+        override val screenSleepEnabled: StateFlow<Boolean> = MutableStateFlow(false)
+        override fun setScreenSleepEnabled(enabled: Boolean) {}
+        override val screenSleepTimeoutMinutes: StateFlow<Int> = MutableStateFlow(10)
+        override fun setScreenSleepTimeoutMinutes(minutes: Int) {}
     }
 
     private val fakeSensorAdapter = object : SensorAdapter {

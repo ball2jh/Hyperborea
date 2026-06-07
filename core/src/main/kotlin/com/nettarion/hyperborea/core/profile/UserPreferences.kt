@@ -13,10 +13,20 @@ interface UserPreferences {
     val immersiveModeEnabled: StateFlow<Boolean>
     /** `true` = imperial (mph, mi, lbs, ft/in), `false` = metric. Global, applies to guests too. */
     val useImperial: StateFlow<Boolean>
+    /**
+     * When `true`, the platform layer lets the console screen turn off after
+     * [screenSleepTimeoutMinutes] of inactivity (the display is held on during an active
+     * workout regardless). When `false` the screen never sleeps — the field default.
+     */
+    val screenSleepEnabled: StateFlow<Boolean>
+    /** Minutes of inactivity before the screen is allowed to sleep when [screenSleepEnabled]. */
+    val screenSleepTimeoutMinutes: StateFlow<Int>
     fun setBroadcastEnabled(id: BroadcastId, enabled: Boolean)
     fun setOverlayEnabled(enabled: Boolean)
     fun setSavedSensorAddress(address: String?)
     fun setFanMode(mode: FanMode)
     fun setImmersiveModeEnabled(enabled: Boolean)
     fun setUseImperial(enabled: Boolean)
+    fun setScreenSleepEnabled(enabled: Boolean)
+    fun setScreenSleepTimeoutMinutes(minutes: Int)
 }
