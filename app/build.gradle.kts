@@ -131,9 +131,10 @@ android {
 
     buildTypes {
         release {
-            isMinifyEnabled = true
-            isShrinkResources = true
-            proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
+            // No R8/ProGuard: this is an open-source project — obfuscation buys nothing and
+            // minified class names used to leak into diagnostics and crash reports.
+            isMinifyEnabled = false
+            isShrinkResources = false
             // Use the release keystore when present (release.jks + passwords in local.properties);
             // otherwise fall back to the debug key so the project builds without those secrets.
             signingConfig = if (rootProject.file("release.jks").exists()) {

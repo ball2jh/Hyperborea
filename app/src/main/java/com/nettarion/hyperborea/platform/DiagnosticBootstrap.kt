@@ -2,8 +2,8 @@ package com.nettarion.hyperborea.platform
 
 import com.nettarion.hyperborea.BuildConfig
 
-import com.nettarion.hyperborea.core.adapter.AdapterState
 import com.nettarion.hyperborea.core.AppLogger
+import com.nettarion.hyperborea.core.adapter.describe
 import com.nettarion.hyperborea.core.adapter.BroadcastAdapter
 import com.nettarion.hyperborea.core.system.CaptureConfig
 import com.nettarion.hyperborea.core.system.ComponentState
@@ -89,8 +89,7 @@ class DiagnosticBootstrap @Inject constructor(
             logger.i(TAG, "Hardware canOperate: ${hardwareAdapter.canOperate(snapshot)}")
 
             for (adapter in broadcastAdapters) {
-                val name = adapter::class.simpleName ?: "unknown"
-                logger.i(TAG, "Broadcast adapter $name: ${adapter.state.value.describe()}, canOperate: ${adapter.canOperate(snapshot)}")
+                logger.i(TAG, "Broadcast adapter ${adapter.id.displayName}: ${adapter.state.value.describe()}, canOperate: ${adapter.canOperate(snapshot)}")
             }
 
             // One-time component dump
@@ -113,13 +112,6 @@ class DiagnosticBootstrap @Inject constructor(
                 }
             }
         }
-    }
-
-    private fun AdapterState.describe(): String = when (this) {
-        is AdapterState.Inactive -> "Inactive"
-        is AdapterState.Activating -> "Activating"
-        is AdapterState.Active -> "Active"
-        is AdapterState.Error -> "Error: $message"
     }
 
     private companion object {

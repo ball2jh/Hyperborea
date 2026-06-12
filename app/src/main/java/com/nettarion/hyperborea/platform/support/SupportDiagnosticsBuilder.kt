@@ -4,6 +4,7 @@ import com.nettarion.hyperborea.BuildConfig
 import com.nettarion.hyperborea.core.LogStore
 import com.nettarion.hyperborea.core.adapter.BroadcastAdapter
 import com.nettarion.hyperborea.core.adapter.HardwareAdapter
+import com.nettarion.hyperborea.core.adapter.describe
 import com.nettarion.hyperborea.core.system.SystemLogStore
 import com.nettarion.hyperborea.core.system.SystemMonitor
 import org.json.JSONArray
@@ -51,7 +52,7 @@ class SupportDiagnosticsBuilder(
                 broadcastAdapters.sortedBy { it.id.ordinal }.forEach { adapter ->
                     put(JSONObject().apply {
                         put("id", adapter.id.name)
-                        put("state", adapter.state.value.javaClass.simpleName)
+                        put("state", adapter.state.value.describe())
                         put("clientCount", adapter.connectedClients.value.size)
                     })
                 }
