@@ -230,13 +230,18 @@ class AndroidSystemMonitor @Inject constructor(
         val usbManager = context.getSystemService(Context.USB_SERVICE) as? UsbManager
             ?: return emptyList()
         return usbManager.deviceList?.values?.map { dev ->
+            val hasPermission = usbManager.hasPermission(dev)
             UsbDeviceInfo(
                 vendorId = dev.vendorId,
                 productId = dev.productId,
                 deviceName = dev.deviceName,
                 manufacturerName = dev.manufacturerName,
                 productName = dev.productName,
-                hasPermission = usbManager.hasPermission(dev),
+                // Reading the serial needs permission on API 29+ (SecurityException otherwise).
+                // Whether the controller reports a serial at all matters: the OS can't reliably
+                // remember an "always open this app" default for a serial-less device.
+                serialNumber = if (hasPermission) runCatching { dev.serialNumber }.getOrNull() else null,
+                hasPermission = hasPermission,
                 interfaces = (0 until dev.interfaceCount).map { i ->
                     val iface = dev.getInterface(i)
                     UsbInterfaceInfo(

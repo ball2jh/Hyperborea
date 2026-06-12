@@ -46,7 +46,12 @@ class DiagnosticBootstrap @Inject constructor(
             logger.i(TAG, "Root: ${s.isRootAvailable}, SELinux enforcing: ${s.isSeLinuxEnforcing}")
             logger.i(TAG, "USB devices: ${snapshot.usbDevices.size}")
             for (dev in snapshot.usbDevices) {
-                logger.i(TAG, "  USB ${dev.manufacturerName ?: "?"} / ${dev.productName ?: "?"} (vid=${dev.vendorId}, pid=${dev.productId}) at ${dev.deviceName}")
+                val serial = when {
+                    dev.serialNumber != null -> "serial=${dev.serialNumber}"
+                    dev.hasPermission -> "serial=none"
+                    else -> "serial=unreadable (no permission)"
+                }
+                logger.i(TAG, "  USB ${dev.manufacturerName ?: "?"} / ${dev.productName ?: "?"} (vid=${dev.vendorId}, pid=${dev.productId}, $serial) at ${dev.deviceName}")
                 for (iface in dev.interfaces) {
                     logger.i(TAG, "    ${iface.describe()}")
                 }

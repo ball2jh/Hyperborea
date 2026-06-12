@@ -22,6 +22,8 @@ data class UsbDeviceInfo(
     val deviceName: String?,
     val manufacturerName: String?,
     val productName: String?,
+    /** Null when the device reports none OR when we lack permission to read it — see [hasPermission]. */
+    val serialNumber: String? = null,
     val hasPermission: Boolean = true,
     val interfaces: List<UsbInterfaceInfo> = emptyList(),
 )

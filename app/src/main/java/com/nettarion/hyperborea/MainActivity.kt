@@ -3,6 +3,8 @@ package com.nettarion.hyperborea
 import android.Manifest
 import android.content.Intent
 import android.content.pm.PackageManager
+import android.hardware.usb.UsbDevice
+import android.hardware.usb.UsbManager
 import android.os.Build
 import android.os.Bundle
 import android.util.Log
@@ -61,6 +63,7 @@ class MainActivity : ComponentActivity() {
         if (savedInstanceState == null && Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
             requestRuntimePermissions()
         }
+        logUsbAttachIntent(intent)
         handleStopDialogIntent(intent)
         observeKeepScreenOn()
         enableEdgeToEdge()
@@ -73,7 +76,25 @@ class MainActivity : ComponentActivity() {
 
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
+        logUsbAttachIntent(intent)
         handleStopDialogIntent(intent)
+    }
+
+    /**
+     * Visible proof in support exports that the OS's "always open Hyperborea when this device is
+     * connected" default actually fired (the launch implies USB permission was auto-granted). Its
+     * absence on a console where the user keeps ticking the checkbox means the system is failing
+     * to persist or apply the default — which is a device/OS problem, not a missing grant request.
+     */
+    private fun logUsbAttachIntent(intent: Intent?) {
+        if (intent?.action != UsbManager.ACTION_USB_DEVICE_ATTACHED) return
+        @Suppress("DEPRECATION")
+        val device = intent.getParcelableExtra<UsbDevice>(UsbManager.EXTRA_DEVICE)
+        Log.i(
+            TAG,
+            "Launched by USB attach: ${device?.productName} " +
+                "(vid=${device?.vendorId}, pid=${device?.productId}) — OS default handler fired",
+        )
     }
 
     /**
