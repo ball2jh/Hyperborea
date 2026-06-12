@@ -806,6 +806,105 @@ class V2SessionTest {
     }
 
     @Test
+    fun `confirmed start commands the minimum belt speed`() = runTest {
+        val session = createSession(this)
+        emitSupportedFeatures(V2FeatureId.TARGET_KPH, V2FeatureId.WORKOUT_STATE)
+        session.start()
+        advanceUntilIdle()
+        val baseline = transport.writtenPackets.size
+
+        transport.emitIncoming(buildEventPacket(V2FeatureId.WORKOUT_STATE, V2WorkoutMode.READY_TO_START.raw))
+        runCurrent()
+        advanceTimeBy(200)
+        runCurrent()                 // WARM_UP + RUNNING written
+        transport.emitIncoming(buildEventPacket(V2FeatureId.WORKOUT_STATE, V2WorkoutMode.RUNNING.raw))
+        runCurrent()                 // confirm completes → initial belt speed write
+
+        val speedWrites = transport.writtenPackets.drop(baseline)
+            .filter { it.isFeatureWrite(V2FeatureId.TARGET_KPH) }
+        assertThat(speedWrites).hasSize(1)
+        assertThat(speedWrites[0].featureWriteValue()).isEqualTo(0.5f)
+    }
+
+    @Test
+    fun `speed and incline keys drive targets while RUNNING on a treadmill`() = runTest {
+        val session = createSession(this)
+        emitSupportedFeatures(V2FeatureId.TARGET_KPH, V2FeatureId.TARGET_GRADE, V2FeatureId.WORKOUT_STATE)
+        session.start()
+        advanceUntilIdle()
+        // Console reaches RUNNING (start drive + confirmation + initial belt speed).
+        transport.emitIncoming(buildEventPacket(V2FeatureId.WORKOUT_STATE, V2WorkoutMode.READY_TO_START.raw))
+        runCurrent()
+        advanceTimeBy(200)
+        runCurrent()
+        transport.emitIncoming(buildEventPacket(V2FeatureId.WORKOUT_STATE, V2WorkoutMode.RUNNING.raw))
+        runCurrent()
+        val baseline = transport.writtenPackets.size
+
+        transport.emitIncoming(buildEventPacket(V2FeatureId.KEY_COOKED, 3f)) // speed up
+        runCurrent()
+        transport.emitIncoming(buildEventPacket(V2FeatureId.KEY_COOKED, 0f)) // release
+        transport.emitIncoming(buildEventPacket(V2FeatureId.KEY_COOKED, 5f)) // incline up
+        runCurrent()
+
+        val writes = transport.writtenPackets.drop(baseline)
+        val speed = writes.filter { it.isFeatureWrite(V2FeatureId.TARGET_KPH) }
+        val grade = writes.filter { it.isFeatureWrite(V2FeatureId.TARGET_GRADE) }
+        assertThat(speed).hasSize(1)
+        // 0.5 initial belt speed + 0.5 default speedStep.
+        assertThat(speed[0].featureWriteValue()).isEqualTo(1.0f)
+        assertThat(grade).hasSize(1)
+    }
+
+    @Test
+    fun `speed keys are ignored while the treadmill is still parked`() = runTest {
+        // Presses before RUNNING must not pre-wind the speed target (belt would jump on start).
+        val session = createSession(this)
+        emitSupportedFeatures(V2FeatureId.TARGET_KPH, V2FeatureId.WORKOUT_STATE)
+        session.start()
+        advanceUntilIdle()
+        val baseline = transport.writtenPackets.size
+
+        transport.emitIncoming(buildEventPacket(V2FeatureId.KEY_COOKED, 3f)) // speed up while armed
+        runCurrent()
+        advanceTimeBy(200)
+        runCurrent()
+
+        assertThat(
+            transport.writtenPackets.drop(baseline).filter { it.isFeatureWrite(V2FeatureId.TARGET_KPH) },
+        ).isEmpty()
+    }
+
+    @Test
+    fun `Stop key pauses a RUNNING treadmill`() = runTest {
+        val session = createSession(this)
+        emitSupportedFeatures(V2FeatureId.TARGET_KPH, V2FeatureId.WORKOUT_STATE)
+        session.start()
+        advanceUntilIdle()
+        transport.emitIncoming(buildEventPacket(V2FeatureId.WORKOUT_STATE, V2WorkoutMode.RUNNING.raw))
+        runCurrent()
+        val baseline = transport.writtenPackets.size
+
+        transport.emitIncoming(buildEventPacket(V2FeatureId.KEY_COOKED, 1f)) // STOP
+        runCurrent()
+
+        val states = transport.writtenPackets.drop(baseline).mapNotNull { it.workoutStateWriteValue() }
+        assertThat(states).containsExactly(V2WorkoutMode.PAUSED.raw)
+    }
+
+    @Test
+    fun `DISTANCE events are meters on the wire and kilometers in ExerciseData`() = runTest {
+        val session = createSession(this)
+        session.start()
+        advanceUntilIdle()
+
+        transport.emitIncoming(buildEventPacket(V2FeatureId.DISTANCE, 8000f)) // 8 km in meters
+        runCurrent()
+
+        assertThat(session.exerciseData.value!!.distance).isEqualTo(8f)
+    }
+
+    @Test
     fun `READY_TO_START on a bike does not trigger a start drive`() = runTest {
         val session = createSession(this)
         emitSupportedFeatures(V2FeatureId.TARGET_RESISTANCE, V2FeatureId.WORKOUT_STATE)

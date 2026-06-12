@@ -368,6 +368,32 @@ class V2Session(
         logger.d(TAG, "Console keypad: code=$code${key?.let { " ($it)" } ?: ""}")
         key?.let { _consoleKeyPresses.tryEmit(it) }
         if (key == ConsoleKey.START) requestWorkoutStart("physical Start key")
+        if (key != null && detectedDeviceType == DeviceType.TREADMILL) routeTreadmillKey(key)
+    }
+
+    /**
+     * Acts on the host-routed treadmill keys. On V2 the MCU forwards EVERY key and drives
+     * nothing itself — speed/incline +/- and Stop only work if the host answers them, exactly
+     * like the Start key (the stock UI consumes the same KeyPress stream). Gated on the workout
+     * being RUNNING so presses while parked can't pre-wind `lastSentSpeed` and make the belt
+     * jump on start. Treadmill-only: V1 MCUs act on their own keys, and V2 bikes haven't shown
+     * the need in the field yet — widening this without a test machine risks double-stepping.
+     * START is handled separately ([requestWorkoutStart] — also valid while parked/paused).
+     */
+    private fun routeTreadmillKey(key: ConsoleKey) {
+        val mode = _workoutMode.value?.let { V2WorkoutMode.fromRaw(it) }
+        if (mode != V2WorkoutMode.RUNNING) return
+        val command = when (key) {
+            ConsoleKey.SPEED_UP -> DeviceCommand.AdjustSpeed(increase = true)
+            ConsoleKey.SPEED_DOWN -> DeviceCommand.AdjustSpeed(increase = false)
+            ConsoleKey.INCLINE_UP -> DeviceCommand.AdjustIncline(increase = true)
+            ConsoleKey.INCLINE_DOWN -> DeviceCommand.AdjustIncline(increase = false)
+            // Safety: a Stop press on a moving belt must halt it — PAUSED is what stops the
+            // belt on V2 (see haltForTeardown). The user resumes with Start.
+            ConsoleKey.STOP -> DeviceCommand.PauseWorkout
+            else -> return
+        }
+        scope.launch { writeFeature(command) }
     }
 
     /**
@@ -407,7 +433,14 @@ class V2Session(
                 return@launch
             }
             val running = confirmWorkoutMode("reach RUNNING after Start") { it == V2WorkoutMode.RUNNING }
-            if (running) logger.i(TAG, "Console workout state: RUNNING (start request honored)")
+            if (running) {
+                logger.i(TAG, "Console workout state: RUNNING (start request honored)")
+                // Pressing Start on a treadmill means "belt go": command the minimum belt speed
+                // (or the last commanded speed when resuming), like the stock UI does after its
+                // countdown. Without this the workout is RUNNING over a dead belt and — since
+                // the speed keys are host-routed too — there'd be no way to ever move it.
+                writeFeature(DeviceCommand.SetTargetSpeed(maxOf(lastSentSpeed, INITIAL_BELT_KPH)))
+            }
         }
     }
 
@@ -572,7 +605,11 @@ class V2Session(
             // Grip HR is a noisy analog contact reading — gate + smooth it, clearing on contact loss.
             // External BLE HRMs bypass this and are merged in the orchestrator.
             V2FeatureId.PULSE -> accumulator.updateHeartRate(gripHeartRate.update(value.toInt()))
-            V2FeatureId.DISTANCE -> accumulator.updateDistance(value)
+            // Meters on the wire (like V1's CURRENT_DISTANCE), but ExerciseData.distance — and
+            // every consumer (FTMS ×1000→m, dashboard "KM", ride recorder distanceKm) — is
+            // kilometers. Convert here, or distance reads 1000× high (the LargeX field test
+            // showed "8 km" after 5 seconds of walking — 8 m of belt travel).
+            V2FeatureId.DISTANCE -> accumulator.updateDistance(value / 1000f)
             V2FeatureId.CURRENT_CALORIES -> accumulator.updateCalories(value.toInt())
             V2FeatureId.RUNNING_TIME -> accumulator.updateElapsedTime(value.toLong())
             V2FeatureId.TARGET_KPH -> accumulator.updateTargetSpeed(value)
@@ -736,6 +773,9 @@ class V2Session(
         private const val BELT_HALT_SETTLE_MS = 200L
         // Start request: brief gap so the MCU lands in WARM_UP before the RUNNING write follows.
         private const val START_WRITE_GAP_MS = 150L
+        // Belt speed commanded right after a confirmed Start — the documented V2 floor
+        // (values below 0.5 kph are rejected; see haltForTeardown).
+        private const val INITIAL_BELT_KPH = 0.5f
         // Init configuration values — mirror the stock service's one-shot connect writes.
         private const val HEART_BEAT_INTERVAL_MS = 720f
         private const val IDLE_MODE_UNLOCKED = 0f
