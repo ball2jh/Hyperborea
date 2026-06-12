@@ -211,7 +211,8 @@ class V2SessionTest {
             V2FeatureId.PULSE, V2FeatureId.DISTANCE, V2FeatureId.CURRENT_KPH,
             V2FeatureId.CURRENT_GRADE, V2FeatureId.RUNNING_TIME,
         )
-        // Critical treadmill behaviour: never command RUNNING from the app.
+        // Critical treadmill behaviour: never command RUNNING at arm time — only a start
+        // request (READY_TO_START report / physical Start key) may drive it.
         val workoutStateWrites = transport.writtenPackets.mapNotNull { it.workoutStateWriteValue() }
         assertThat(workoutStateWrites).doesNotContain(V2WorkoutMode.RUNNING.raw)
     }
@@ -697,6 +698,97 @@ class V2SessionTest {
         assertThat(workoutStateWrites).doesNotContain(V2WorkoutMode.RUNNING.raw)
         // And no spurious "degraded" — this is the expected armed state.
         assertThat(session.degradedReason.value).isNull()
+    }
+
+    @Test
+    fun `READY_TO_START report drives the treadmill workout to RUNNING`() = runTest {
+        // LargeX-style firmware: pressing the physical Start key makes the MCU report
+        // READY_TO_START and wait for the HOST to drive the state machine (the stock service
+        // translates this report to START_REQUESTED). The session must answer WARM_UP → RUNNING.
+        val session = createSession(this)
+        emitSupportedFeatures(
+            V2FeatureId.TARGET_KPH, V2FeatureId.CURRENT_KPH,
+            V2FeatureId.TARGET_GRADE, V2FeatureId.CURRENT_GRADE, V2FeatureId.WORKOUT_STATE,
+        )
+        session.start()
+        advanceUntilIdle()
+        val baseline = transport.writtenPackets.size
+
+        transport.emitIncoming(buildEventPacket(V2FeatureId.WORKOUT_STATE, V2WorkoutMode.READY_TO_START.raw))
+        runCurrent()                 // drive job launches: WARM_UP written, parked at the write gap
+        advanceTimeBy(200)
+        runCurrent()                 // gap elapsed: RUNNING written
+
+        val writes = transport.writtenPackets.drop(baseline).mapNotNull { it.workoutStateWriteValue() }
+        assertThat(writes).containsExactly(V2WorkoutMode.WARM_UP.raw, V2WorkoutMode.RUNNING.raw).inOrder()
+    }
+
+    @Test
+    fun `physical Start key drives the treadmill workout when no READY_TO_START is reported`() = runTest {
+        val session = createSession(this)
+        emitSupportedFeatures(V2FeatureId.TARGET_KPH, V2FeatureId.CURRENT_KPH, V2FeatureId.WORKOUT_STATE)
+        session.start()
+        advanceUntilIdle()
+        val baseline = transport.writtenPackets.size
+
+        transport.emitIncoming(buildEventPacket(V2FeatureId.KEY_COOKED, 2f)) // START
+        runCurrent()
+        advanceTimeBy(200)
+        runCurrent()
+
+        val writes = transport.writtenPackets.drop(baseline).mapNotNull { it.workoutStateWriteValue() }
+        assertThat(writes).containsExactly(V2WorkoutMode.WARM_UP.raw, V2WorkoutMode.RUNNING.raw).inOrder()
+    }
+
+    @Test
+    fun `overlapping start triggers collapse to one drive and re-presses while RUNNING are ignored`() = runTest {
+        val session = createSession(this)
+        emitSupportedFeatures(V2FeatureId.TARGET_KPH, V2FeatureId.WORKOUT_STATE)
+        session.start()
+        advanceUntilIdle()
+        val baseline = transport.writtenPackets.size
+
+        // Firmware that both reports READY_TO_START and forwards the key — one drive, not two.
+        transport.emitIncoming(buildEventPacket(V2FeatureId.WORKOUT_STATE, V2WorkoutMode.READY_TO_START.raw))
+        transport.emitIncoming(buildEventPacket(V2FeatureId.KEY_COOKED, 2f))
+        runCurrent()                 // one drive job: WARM_UP written, parked at the write gap
+        advanceTimeBy(200)
+        runCurrent()                 // RUNNING written
+        // Console confirms RUNNING; the drive's confirmation completes.
+        transport.emitIncoming(buildEventPacket(V2FeatureId.WORKOUT_STATE, V2WorkoutMode.RUNNING.raw))
+        runCurrent()
+
+        val writes = transport.writtenPackets.drop(baseline).mapNotNull { it.workoutStateWriteValue() }
+        assertThat(writes).containsExactly(V2WorkoutMode.WARM_UP.raw, V2WorkoutMode.RUNNING.raw).inOrder()
+
+        // Pressing Start again while RUNNING is a no-op.
+        val afterRunning = transport.writtenPackets.size
+        transport.emitIncoming(buildEventPacket(V2FeatureId.KEY_COOKED, 0f)) // release
+        transport.emitIncoming(buildEventPacket(V2FeatureId.KEY_COOKED, 2f)) // press again
+        runCurrent()
+        advanceTimeBy(6_000)
+        runCurrent()
+        assertThat(
+            transport.writtenPackets.drop(afterRunning).mapNotNull { it.workoutStateWriteValue() },
+        ).isEmpty()
+    }
+
+    @Test
+    fun `READY_TO_START on a bike does not trigger a start drive`() = runTest {
+        val session = createSession(this)
+        emitSupportedFeatures(V2FeatureId.TARGET_RESISTANCE, V2FeatureId.WORKOUT_STATE)
+        session.start()
+        advanceUntilIdle()
+        val baseline = transport.writtenPackets.size
+
+        transport.emitIncoming(buildEventPacket(V2FeatureId.WORKOUT_STATE, V2WorkoutMode.READY_TO_START.raw))
+        runCurrent()
+        advanceTimeBy(6_000)
+        runCurrent()
+
+        assertThat(
+            transport.writtenPackets.drop(baseline).mapNotNull { it.workoutStateWriteValue() },
+        ).isEmpty()
     }
 
     @Test

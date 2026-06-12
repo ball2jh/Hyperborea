@@ -5,17 +5,24 @@ package com.nettarion.hyperborea.core.model
  * hardware adapter exposes a stream of these — one per press — on
  * [com.nettarion.hyperborea.core.adapter.HardwareAdapter.consoleKeyPresses].
  *
- * This is observe-only: the equipment's own MCU acts on these keys directly (changing
- * resistance/incline/speed, transitioning the workout state machine on START/STOP, etc.) and the
- * new state flows up through normal polling. Nothing in the Hyperborea pipeline drives the
- * hardware from this stream — it exists for UI/diagnostics.
+ * This stream is observational — nothing in the core pipeline drives the hardware from it; it
+ * exists for UI/diagnostics. How a press takes effect is protocol-specific and handled inside
+ * the session layer:
  *
- * One firmware-level subtlety: on a FitPro V1 treadmill the MCU itself gates belt motion on the
- * physical [START] key (the rising edge of the read-only `START_REQUESTED` telemetry field, set
- * by the MCU when this key is pressed). Writing `WORKOUT_MODE=RUNNING` from the app alone will
- * not move the belt — the workout transitions to RUNNING only once the MCU has seen both the
- * mode write AND a Start-key press. The orchestrator models this with
- * [com.nettarion.hyperborea.core.orchestration.OrchestratorState.AwaitingConsoleStart].
+ * - **FitPro V1**: the MCU acts on its keys directly (resistance/incline/speed, and the workout
+ *   state machine on START/STOP); the new state flows up through normal polling. On a V1
+ *   treadmill the MCU itself gates belt motion on the physical [START] key — writing
+ *   `WORKOUT_MODE=RUNNING` from the app alone will not move the belt; the MCU needs both the
+ *   mode write AND a Start-key press.
+ * - **FitPro V2**: the MCU is a forwarder — pressing [START] makes it report
+ *   `WORKOUT_STATE=READY_TO_START` (and emit the key event), then it waits for the HOST to
+ *   drive the workout state machine, mirroring the stock GlassOS service's `START_REQUESTED`
+ *   handling. `V2Session.requestWorkoutStart` answers those triggers by writing the workout to
+ *   RUNNING.
+ *
+ * Either way the orchestrator parks treadmills in
+ * [com.nettarion.hyperborea.core.orchestration.OrchestratorState.AwaitingConsoleStart] and
+ * promotes to Running once telemetry reports the workout RUNNING.
  */
 enum class ConsoleKey {
     START,

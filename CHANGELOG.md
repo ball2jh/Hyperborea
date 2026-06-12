@@ -1,6 +1,8 @@
 # Changelog
 
 ## [Unreleased]
+- **The physical Start key now actually starts V2 treadmills.** On V2 firmware the controller never starts the workout itself: pressing Start makes it report "ready to start" (and forward the key press) and then wait for the *software* to drive the workout state machine — exactly how the stock iFIT service handles it (`START_REQUESTED`). The app armed the session, told the user to press Start, and then ignored both signals, so the belt never moved (the LargeX field test on 1.2.16). The app now answers either signal by driving the workout to RUNNING — warm-up first where the firmware wants it — retrying on the next press if the console doesn't confirm. Pressing Start while paused resumes. V1 treadmills (where the MCU starts the belt itself) are unaffected.
+- **"Connecting to bike" no longer calls every machine a bike.** The connection-progress step and the failed-connect error now say "equipment" — at that point the device type isn't even known yet.
 
 ## [1.2.16] - 2026-06-12
 - **V2 consoles now report their real identity.** The app asks the console for its product information during the handshake — model name, serial number, firmware version, and hardware part number — so Device settings show the actual equipment instead of "FitPro Device" with blank fields, and the part number unlocks the built-in equipment catalog (correct speed/incline/resistance ranges and power curves) for V2 machines the same way it already worked for V1.

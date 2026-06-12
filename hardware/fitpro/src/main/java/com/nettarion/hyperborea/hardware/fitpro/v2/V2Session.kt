@@ -91,6 +91,8 @@ class V2Session(
         private set
 
     private var receiveJob: Job? = null
+    /** In-flight start-request drive (see [requestWorkoutStart]); completes → next press may retry. */
+    private var startRequestJob: Job? = null
     private var lastSentGrade = 0f
     private var lastSentSpeed = 0f
     private val gripHeartRate = GripHeartRateFilter()
@@ -145,6 +147,8 @@ class V2Session(
     override suspend fun stop() {
         receiveJob?.cancel()
         receiveJob = null
+        startRequestJob?.cancel()
+        startRequestJob = null
 
         try {
             if (transport.isOpen) {
@@ -335,8 +339,13 @@ class V2Session(
 
     /**
      * Console keypad. Same code space as the V1 keypad field; events repeat the current code, so
-     * emit only on changes and ignore the idle/no-key value. Observe-only — the MCU acts on its
-     * own keys; this stream feeds UI, diagnostics, and the orchestrator's key routing.
+     * emit only on changes and ignore the idle/no-key value. Mostly observe-only — the stream
+     * feeds UI and diagnostics — with one exception: on a V2 treadmill the MCU does NOT act on
+     * its own Start key (it just forwards the press and waits for the host to drive the workout
+     * state machine — see [requestWorkoutStart]), so START doubles as a start request here. This
+     * covers firmware that forwards the key without also reporting
+     * [V2WorkoutMode.READY_TO_START]; [requestWorkoutStart]'s single-flight guard absorbs the
+     * overlap when both arrive.
      */
     private fun handleKeyCode(code: Int) {
         if (code == lastKeyCode) return
@@ -357,6 +366,48 @@ class V2Session(
         }
         logger.d(TAG, "Console keypad: code=$code${key?.let { " ($it)" } ?: ""}")
         key?.let { _consoleKeyPresses.tryEmit(it) }
+        if (key == ConsoleKey.START) requestWorkoutStart("physical Start key")
+    }
+
+    /**
+     * Drives the workout to RUNNING in response to the user's physical Start press. On V2 the
+     * MCU never starts the workout itself — pressing Start makes it report
+     * [V2WorkoutMode.READY_TO_START] (and/or forward the key event) and wait for the HOST to
+     * write the state machine; the stock GlassOS service translates that report into
+     * `START_REQUESTED` and its UI starts the workout (see `V2ConsoleStateHolder` in the
+     * decompiled sources, and the LargeX field logs where `WARM_UP` writes from idle bounce with
+     * `WRITE_VALUE_NOT_ALLOWED` and Start presses go nowhere). We are that host now, so both
+     * triggers land here.
+     *
+     * Treadmill-only: bikes/ellipticals are driven straight to RUNNING at arm time and have no
+     * Start gate. Single-flight: a completed attempt (confirmed or timed out) re-arms, so the
+     * user's next press simply retries. Skips WARM_UP when resuming from PAUSED — RUNNING alone
+     * is the resume transition.
+     */
+    private fun requestWorkoutStart(trigger: String) {
+        if (detectedDeviceType != DeviceType.TREADMILL) return
+        if (_sessionState.value !is SessionState.Streaming) return
+        val from = _workoutMode.value?.let { V2WorkoutMode.fromRaw(it) }
+        if (from == V2WorkoutMode.RUNNING) return
+        if (startRequestJob?.isActive == true) return
+
+        startRequestJob = scope.launch {
+            logger.i(TAG, "Start requested ($trigger, console state=${from ?: "unreported"}) — driving workout to RUNNING")
+            try {
+                if (from != V2WorkoutMode.PAUSED) {
+                    writeWorkoutState(V2WorkoutMode.WARM_UP)
+                    delay(START_WRITE_GAP_MS)
+                }
+                writeWorkoutState(V2WorkoutMode.RUNNING)
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                logger.e(TAG, "Start-request writes failed", e)
+                return@launch
+            }
+            val running = confirmWorkoutMode("reach RUNNING after Start") { it == V2WorkoutMode.RUNNING }
+            if (running) logger.i(TAG, "Console workout state: RUNNING (start request honored)")
+        }
     }
 
     /**
@@ -507,7 +558,16 @@ class V2Session(
             // uses V1 codes for DMK / IDLE / RUNNING) reacts uniformly to V1 and V2 sessions.
             V2FeatureId.WORKOUT_STATE -> {
                 _workoutMode.value = value
-                accumulator.updateWorkoutMode(v2WorkoutStateToV1Code(V2WorkoutMode.fromRaw(value)))
+                val mode = V2WorkoutMode.fromRaw(value)
+                // Info-level on purpose: which states a console actually reports (and when) is
+                // the load-bearing fact in field logs — e.g. whether READY_TO_START follows a
+                // Start-key press. Low volume: V2 events fire on change only.
+                logger.i(TAG, "Console workout state event: $mode (raw=$value)")
+                // READY_TO_START is the V2 MCU's "user pressed the physical Start key" report —
+                // it parks there waiting for the host to start the workout. Mirrors the stock
+                // service's START_REQUESTED handling.
+                if (mode == V2WorkoutMode.READY_TO_START) requestWorkoutStart("console reported READY_TO_START")
+                accumulator.updateWorkoutMode(v2WorkoutStateToV1Code(mode))
             }
             V2FeatureId.MAX_RESISTANCE -> { /* Device capability, not exercise data */ }
             V2FeatureId.GOAL_WATTS -> accumulator.updateTargetPower(value.toInt())
@@ -521,12 +581,14 @@ class V2Session(
      * Brings the console up to the workout-active state the way the firmware expects. Two paths,
      * mirroring [com.nettarion.hyperborea.hardware.fitpro.v1.V1Session.transitionToActive]:
      *
-     * - **Treadmill / incline trainer**: write `WARM_UP` and stop. The MCU gates belt motion on
-     *   the physical Start key; writing `RUNNING` from the app alone would only time out the
-     *   confirmation wait and surface as a (semantically wrong) degraded warning. Instead the
+     * - **Treadmill / incline trainer**: try `WARM_UP` and park. The belt is gated on the
+     *   physical Start key; some firmware accepts the arm-time `WARM_UP` (and self-runs on the
+     *   key), other firmware (LargeX) rejects any write from idle with `WRITE_VALUE_NOT_ALLOWED`
+     *   and instead reports [V2WorkoutMode.READY_TO_START] when the key is pressed, expecting
+     *   the host to drive the workout — [requestWorkoutStart] handles that. Either way the
      *   orchestrator parks in
-     *   [com.nettarion.hyperborea.core.orchestration.OrchestratorState.AwaitingConsoleStart] and
-     *   the WORKOUT_STATE subscription pushes a `RUNNING` event once the user presses the key.
+     *   [com.nettarion.hyperborea.core.orchestration.OrchestratorState.AwaitingConsoleStart]
+     *   until a `RUNNING` event promotes it.
      * - **Bike / elliptical / rower**: drive the state machine ourselves —
      *   `NONE → WARM_UP → RUNNING`, confirming each step from the [V2FeatureId.WORKOUT_STATE]
      *   events. If the console never confirms, log a warning and continue degraded.
@@ -645,6 +707,8 @@ class V2Session(
 
         // Belt-machine halt on stop: let the speed-0 + PAUSED writes settle before teardown.
         private const val BELT_HALT_SETTLE_MS = 200L
+        // Start request: brief gap so the MCU lands in WARM_UP before the RUNNING write follows.
+        private const val START_WRITE_GAP_MS = 150L
         private const val MAX_SUBSCRIBE_BATCH = 8
         // How long to wait for the console to confirm a WORKOUT_STATE transition before continuing degraded.
         private const val STATE_CONFIRM_TIMEOUT_MS = 5_000L

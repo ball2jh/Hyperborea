@@ -222,7 +222,7 @@ class Orchestrator(
         }
 
         // Connect hardware
-        _state.value = OrchestratorState.Preparing("Connecting to bike")
+        _state.value = OrchestratorState.Preparing("Connecting to equipment")
         hardwareAdapter.connect()
 
         val hardwareState = hardwareAdapter.state.value
@@ -242,7 +242,7 @@ class Orchestrator(
         // (e.g. a handshake that failed late) — surface a clear error rather than an unexpected throw.
         val deviceInfo = hardwareAdapter.deviceInfo.value
         if (deviceInfo == null) {
-            val msg = "Couldn't read the bike's details — it may not have finished connecting"
+            val msg = "Couldn't read the equipment's details — it may not have finished connecting"
             logger.e(TAG, msg)
             _state.value = OrchestratorState.Error(msg)
             return
