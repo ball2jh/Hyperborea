@@ -46,6 +46,10 @@ class AndroidSystemMonitor @Inject constructor(
     private val _snapshot = MutableStateFlow(EMPTY_SNAPSHOT)
     override val snapshot: StateFlow<SystemSnapshot> = _snapshot.asStateFlow()
 
+    // Declared before init: the init block's updateStatus() reads these lazy delegates.
+    private val rootAvailable by lazy { checkRootAvailable() }
+    private val seLinuxEnforcing by lazy { checkSeLinuxEnforcing() }
+
     private val receiver = object : BroadcastReceiver() {
         override fun onReceive(context: Context, intent: Intent) {
             logger.d(TAG, "Broadcast received: ${intent.action}")
@@ -152,11 +156,11 @@ class AndroidSystemMonitor @Inject constructor(
             false
         }
 
-        // Root
-        val rootAvailable = checkRootAvailable()
-
-        // SELinux
-        val seLinuxEnforcing = checkSeLinuxEnforcing()
+        // Root + SELinux — probed once and cached: neither changes while the app is running,
+        // and re-probing on every status update spawns a `su` process and re-reads selinuxfs
+        // (audit-log spam on every connectivity broadcast).
+        val rootAvailable = this.rootAvailable
+        val seLinuxEnforcing = this.seLinuxEnforcing
 
         return SystemStatus(
             isBluetoothLeEnabled = bleEnabled,

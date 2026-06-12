@@ -75,8 +75,9 @@
         android:icon="@mipmap/ic_launcher"
         android:label="@string/app_name"
         android:supportsRtl="true"
+        android:enableOnBackInvokedCallback="true"
         android:theme="@style/Theme.Hyperborea"
-        tools:targetApi="n">
+        tools:targetApi="tiramisu">
         <!-- screenOrientation is intentional: the console is a fixed-landscape kiosk. -->
         <activity
             android:name=".MainActivity"

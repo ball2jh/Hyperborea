@@ -32,6 +32,9 @@ class NsdRegistrar(
             serviceName = "$deviceName $suffix"
             serviceType = SERVICE_TYPE
             setPort(port)
+            // TXT keys are fixed by the discovery protocol the fitness apps implement — clients
+            // look these names up verbatim, so the framework's "key lengths > 9 are discouraged"
+            // logcat warning cannot be avoided by renaming them.
             setAttribute("ble-service-uuids", "00001826-0000-1000-8000-00805F9B34FB,00001818-0000-1000-8000-00805F9B34FB")
             setAttribute("mac-address", macFormatted)
             setAttribute("serial-number", mac.joinToString("") { "%02X".format(it) })
