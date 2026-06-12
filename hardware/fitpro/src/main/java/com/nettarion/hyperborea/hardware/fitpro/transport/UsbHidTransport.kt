@@ -116,10 +116,28 @@ class UsbHidTransport(
                 if (attempts == 1 || attempts % 10 == 0) {
                     logger.w(TAG, "USB write refused, retrying (attempt $attempts/$WRITE_MAX_ATTEMPTS)")
                 }
+                if (attempts == 1) {
+                    // An instantly-refused write usually means the OUT endpoint is halted. Try the
+                    // standard clear-halt request once per write call: if it succeeds and the retry
+                    // works, the halt was stale; if it succeeds but writes keep stalling, the MCU is
+                    // actively rejecting; if it fails too, the device is mute even at control level.
+                    val cleared = transferMutex.withLock { clearHalt(outEndpoint) }
+                    logger.w(TAG, if (cleared) "OUT endpoint halt cleared" else "OUT endpoint clear-halt refused — device mute at control level")
+                }
                 delay(WRITE_RETRY_DELAY_MS)
             }
         }
     }
+
+    /** Standard CLEAR_FEATURE(ENDPOINT_HALT) control request to [endpoint]. True on success. */
+    private fun clearHalt(endpoint: UsbEndpoint): Boolean =
+        connection.controlTransfer(
+            0x02, // host-to-device | standard | endpoint recipient
+            0x01, // CLEAR_FEATURE
+            0x00, // ENDPOINT_HALT
+            endpoint.address,
+            null, 0, CONTROL_TIMEOUT_MS,
+        ) >= 0
 
     override suspend fun readPacket(): ByteArray? {
         if (!_isOpen) return null
@@ -252,6 +270,8 @@ class UsbHidTransport(
 
         const val CLAIM_ATTEMPTS = 20
         const val CLAIM_RETRY_DELAY_MS = 500L
+
+        const val CONTROL_TIMEOUT_MS = 200
 
         const val MAX_CLEAR_ATTEMPTS = 10
     }

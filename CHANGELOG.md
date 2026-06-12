@@ -1,6 +1,8 @@
 # Changelog
 
 ## [Unreleased]
+- **Stalled-endpoint recovery probe.** A field log on 1.2.15 showed the equipment controller refusing every write *instantly* even right after the tablet rebooted — the signature of a halted/stalled USB endpoint (the controller is separately powered, so a tablet reboot doesn't reset it). On the first refused write the app now issues the standard endpoint clear-halt request and logs the outcome, which both recovers a stale halt and tells support exports whether the controller is actively rejecting writes or mute entirely.
+- **The equipment controller's USB serial is now logged at connect time** (the boot diagnostic runs before USB permission is granted and can't read it). Whether the controller reports a serial decides whether Android can remember the "Always open Hyperborea" choice — this pins down the recurring permission dialog.
 
 ## [1.2.15] - 2026-06-12
 - **Reworked the FitPro V2 connection to match how these consoles' own software drives them — targets the "iFIT-LargeX" boards that got past interface selection in 1.2.14 but failed with "USB write failed".**

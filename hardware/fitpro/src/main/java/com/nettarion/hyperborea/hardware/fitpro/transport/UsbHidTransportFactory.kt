@@ -54,6 +54,12 @@ class UsbHidTransportFactory(
         val connection = usbManager.openDevice(device)
             ?: throw IllegalStateException("Failed to open USB device (permission denied?)")
 
+        // openDevice() succeeding means we hold permission, so the serial is readable here —
+        // the boot diagnostic runs pre-grant and can't see it. Whether the controller reports
+        // one at all decides if the OS can remember an "always open" default for it.
+        val serial = runCatching { device.serialNumber }.getOrNull()
+        logger.i(TAG, "Device serial: ${serial ?: "none reported"}")
+
         val transport = UsbHidTransport(
             context, connection, usbInterface, inEndpoint, outEndpoint, device.deviceName, logger,
         )
