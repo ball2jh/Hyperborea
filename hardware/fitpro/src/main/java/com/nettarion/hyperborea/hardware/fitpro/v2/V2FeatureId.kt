@@ -4,6 +4,11 @@ enum class V2FeatureId(val code: Int) {
     /** Equipment-type code reported by the console — see [V2Session.mapReportedDeviceType]. */
     DEVICE_TYPE(10),
     SYSTEM_MODE(102),
+    /**
+     * "Idle mode lockout" — written UNLOCKED (0) once at connect, mirroring the stock service's
+     * bring-up (FitPro2Console). Write-only for us; not subscribed.
+     */
+    IDLE_SYSTEM_MODE_LOCK(103),
     /** Rider weight (kg) — written for the console's own calorie estimation. */
     USER_WEIGHT_KG(105),
     /** Console keypad presses — key-code values shared with the V1 keypad field. */
@@ -14,6 +19,13 @@ enum class V2FeatureId(val code: Int) {
     REQUEST_DISCONNECT(123),
     /** Console fan state/level. */
     FAN_STATE(129),
+    /**
+     * MCU heartbeat interval (ms) — a single CONFIGURATION write of 720 at connect, mirroring the
+     * stock service (HeartbeatCoroutine writes it once; nothing re-writes it periodically — the
+     * repo doc's "every 720ms" claim describes the stock app's internal 30s value-collection
+     * cycle, not wire traffic). Write-only for us; not subscribed.
+     */
+    HEART_BEAT_INTERVAL(161),
     CURRENT_CALORIES(202),
     PULSE(222),
     DISTANCE(252),

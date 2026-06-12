@@ -127,7 +127,8 @@ class V2SessionTest {
 
     @Test
     fun `no periodic keepalive packets while streaming`() = runTest {
-        // The V2 protocol has no keepalive feature — nothing must be written unprompted.
+        // Init may include one-shot configuration writes (heartbeat interval, idle lock), but
+        // nothing is ever written unprompted after bring-up — the stock stack doesn't either.
         val session = createSession(this)
         session.start()
         advanceUntilIdle()
@@ -183,6 +184,37 @@ class V2SessionTest {
         advanceUntilIdle()
 
         assertThat(subscribedFeatures()).containsExactlyElementsIn(V2FeatureId.subscribable)
+    }
+
+    @Test
+    fun `init writes heartbeat interval and idle unlock when the console declares them`() = runTest {
+        // Mirrors the stock service's one-shot connect configuration (HEART_BEAT_INTERVAL=720,
+        // IDLE_SYSTEM_MODE_LOCK=UNLOCKED) — written once, only when declared.
+        val session = createSession(this)
+        emitSupportedFeatures(
+            V2FeatureId.HEART_BEAT_INTERVAL, V2FeatureId.IDLE_SYSTEM_MODE_LOCK,
+            V2FeatureId.TARGET_RESISTANCE, V2FeatureId.WORKOUT_STATE,
+        )
+        session.start()
+        advanceUntilIdle()
+
+        val heartbeat = transport.writtenPackets.filter { it.isFeatureWrite(V2FeatureId.HEART_BEAT_INTERVAL) }
+        val idleLock = transport.writtenPackets.filter { it.isFeatureWrite(V2FeatureId.IDLE_SYSTEM_MODE_LOCK) }
+        assertThat(heartbeat).hasSize(1)
+        assertThat(heartbeat[0].featureWriteValue()).isEqualTo(720f)
+        assertThat(idleLock).hasSize(1)
+        assertThat(idleLock[0].featureWriteValue()).isEqualTo(0f)
+    }
+
+    @Test
+    fun `init configuration writes are skipped when the console doesn't declare them`() = runTest {
+        val session = createSession(this)
+        emitSupportedFeatures(V2FeatureId.TARGET_RESISTANCE, V2FeatureId.WORKOUT_STATE)
+        session.start()
+        advanceUntilIdle()
+
+        assertThat(transport.writtenPackets.none { it.isFeatureWrite(V2FeatureId.HEART_BEAT_INTERVAL) }).isTrue()
+        assertThat(transport.writtenPackets.none { it.isFeatureWrite(V2FeatureId.IDLE_SYSTEM_MODE_LOCK) }).isTrue()
     }
 
     @Test
@@ -845,6 +877,15 @@ class V2SessionTest {
      * WriteFeature targeting [V2FeatureId.WORKOUT_STATE]; otherwise null. Packet layout:
      * `[0x02, sourceType, len, featureLo, featureHi, f32 LE]`.
      */
+    private fun ByteArray.isFeatureWrite(feature: V2FeatureId): Boolean {
+        if (size < 9 || this[0] != 0x02.toByte()) return false
+        if ((this[1].toInt() and 0x0F) != 0x02) return false // CMD_WRITE
+        return this[3] == feature.wireLo && this[4] == feature.wireHi
+    }
+
+    private fun ByteArray.featureWriteValue(): Float =
+        ByteBuffer.wrap(this, 5, 4).order(ByteOrder.LITTLE_ENDIAN).float
+
     private fun ByteArray.workoutStateWriteValue(): Float? {
         if (size < 9 || this[0] != 0x02.toByte()) return null
         val type = this[1].toInt() and 0x0F

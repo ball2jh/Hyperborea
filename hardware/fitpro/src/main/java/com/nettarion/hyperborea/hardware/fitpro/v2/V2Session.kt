@@ -121,6 +121,7 @@ class V2Session(
             _deviceIdentity.value = queryProductInfo() ?: DeviceIdentity()
 
             configureSubscriptions(supported)
+            writeInitConfiguration(supported)
 
             // Equipment type: the console reports it directly as the DEVICE_TYPE feature's
             // initial event after subscribing; the supported-feature-set heuristic covers
@@ -454,6 +455,30 @@ class V2Session(
         }
     }
 
+    /**
+     * One-shot configuration writes mirroring the stock service's connect sequence
+     * (FitPro2Console): `HEART_BEAT_INTERVAL = 720` (a single configure of the MCU's heartbeat
+     * cadence — the stock stack writes it once and never again; there is no periodic keepalive
+     * on the wire) and `IDLE_SYSTEM_MODE_LOCK = UNLOCKED`. Strictly gated on the console
+     * DECLARING each feature — unlike user-driven commands there's no value in attempting these
+     * blind, and undeclared writes just generate rejection noise. Closing this bring-up gap is
+     * part of ruling out "missing init precondition" as the cause of the LargeX refusing
+     * WORKOUT_STATE writes from idle.
+     */
+    private suspend fun writeInitConfiguration(supported: Set<V2FeatureId>?) {
+        if (supported == null) return
+        if (V2FeatureId.HEART_BEAT_INTERVAL in supported) {
+            transport.write(V2Codec.encode(
+                V2Message.Outgoing.WriteFeature(V2FeatureId.HEART_BEAT_INTERVAL, HEART_BEAT_INTERVAL_MS),
+            ))
+        }
+        if (V2FeatureId.IDLE_SYSTEM_MODE_LOCK in supported) {
+            transport.write(V2Codec.encode(
+                V2Message.Outgoing.WriteFeature(V2FeatureId.IDLE_SYSTEM_MODE_LOCK, IDLE_MODE_UNLOCKED),
+            ))
+        }
+    }
+
     private fun startReceiveLoop() {
         receiveJob = scope.launch {
             try {
@@ -553,6 +578,8 @@ class V2Session(
             V2FeatureId.TARGET_KPH -> accumulator.updateTargetSpeed(value)
             V2FeatureId.TARGET_GRADE -> accumulator.updateTargetIncline(value)
             V2FeatureId.SYSTEM_MODE -> { /* System on/standby/sleep — not the workout state, and not exercise data */ }
+            // Write-only init configuration — never subscribed, but a console may echo writes back.
+            V2FeatureId.HEART_BEAT_INTERVAL, V2FeatureId.IDLE_SYSTEM_MODE_LOCK -> { }
             // Translated to V1 [com.nettarion.hyperborea.hardware.fitpro.v1.WorkoutMode] numbering
             // when pushed to the accumulator, so the orchestrator's workout-mode monitor (which
             // uses V1 codes for DMK / IDLE / RUNNING) reacts uniformly to V1 and V2 sessions.
@@ -709,6 +736,9 @@ class V2Session(
         private const val BELT_HALT_SETTLE_MS = 200L
         // Start request: brief gap so the MCU lands in WARM_UP before the RUNNING write follows.
         private const val START_WRITE_GAP_MS = 150L
+        // Init configuration values — mirror the stock service's one-shot connect writes.
+        private const val HEART_BEAT_INTERVAL_MS = 720f
+        private const val IDLE_MODE_UNLOCKED = 0f
         private const val MAX_SUBSCRIBE_BATCH = 8
         // How long to wait for the console to confirm a WORKOUT_STATE transition before continuing degraded.
         private const val STATE_CONFIRM_TIMEOUT_MS = 5_000L
