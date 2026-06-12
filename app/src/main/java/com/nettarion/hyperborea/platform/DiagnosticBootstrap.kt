@@ -47,6 +47,9 @@ class DiagnosticBootstrap @Inject constructor(
             logger.i(TAG, "USB devices: ${snapshot.usbDevices.size}")
             for (dev in snapshot.usbDevices) {
                 logger.i(TAG, "  USB ${dev.manufacturerName ?: "?"} / ${dev.productName ?: "?"} (vid=${dev.vendorId}, pid=${dev.productId}) at ${dev.deviceName}")
+                for (iface in dev.interfaces) {
+                    logger.i(TAG, "    ${iface.describe()}")
+                }
             }
 
             logger.i(TAG, "Installed packages: ${snapshot.packages.size}")

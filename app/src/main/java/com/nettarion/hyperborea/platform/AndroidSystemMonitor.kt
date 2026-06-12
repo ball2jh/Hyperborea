@@ -28,6 +28,8 @@ import com.nettarion.hyperborea.core.system.SystemMonitor
 import com.nettarion.hyperborea.core.system.SystemSnapshot
 import com.nettarion.hyperborea.core.system.SystemStatus
 import com.nettarion.hyperborea.core.system.UsbDeviceInfo
+import com.nettarion.hyperborea.core.system.UsbEndpointInfo
+import com.nettarion.hyperborea.core.system.UsbInterfaceInfo
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -235,6 +237,23 @@ class AndroidSystemMonitor @Inject constructor(
                 manufacturerName = dev.manufacturerName,
                 productName = dev.productName,
                 hasPermission = usbManager.hasPermission(dev),
+                interfaces = (0 until dev.interfaceCount).map { i ->
+                    val iface = dev.getInterface(i)
+                    UsbInterfaceInfo(
+                        id = iface.id,
+                        interfaceClass = iface.interfaceClass,
+                        interfaceSubclass = iface.interfaceSubclass,
+                        interfaceProtocol = iface.interfaceProtocol,
+                        endpoints = (0 until iface.endpointCount).map { e ->
+                            val ep = iface.getEndpoint(e)
+                            UsbEndpointInfo(
+                                address = ep.address,
+                                type = ep.type,
+                                maxPacketSize = ep.maxPacketSize,
+                            )
+                        },
+                    )
+                },
             )
         } ?: emptyList()
     }

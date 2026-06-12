@@ -45,6 +45,7 @@ class SupportDiagnosticsBuilder(
                         put("vendorId", "%04X".format(device.vendorId))
                         put("productId", "%04X".format(device.productId))
                         put("productName", device.productName ?: JSONObject.NULL)
+                        put("interfaces", JSONArray(device.interfaces.map { it.describe() }))
                     })
                 }
             })

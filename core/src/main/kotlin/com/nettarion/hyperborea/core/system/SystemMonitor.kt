@@ -23,7 +23,43 @@ data class UsbDeviceInfo(
     val manufacturerName: String?,
     val productName: String?,
     val hasPermission: Boolean = true,
+    val interfaces: List<UsbInterfaceInfo> = emptyList(),
 )
+
+data class UsbInterfaceInfo(
+    val id: Int,
+    val interfaceClass: Int,
+    val interfaceSubclass: Int,
+    val interfaceProtocol: Int,
+    val endpoints: List<UsbEndpointInfo>,
+) {
+    fun describe(): String = "if=%d cls=%02x/%02x/%02x eps=[%s]".format(
+        id, interfaceClass, interfaceSubclass, interfaceProtocol,
+        endpoints.joinToString(", ") { it.describe() },
+    )
+}
+
+data class UsbEndpointInfo(
+    // Full bEndpointAddress — bit 7 is the direction (1 = IN)
+    val address: Int,
+    // bmAttributes transfer type: 0=control, 1=isochronous, 2=bulk, 3=interrupt
+    val type: Int,
+    val maxPacketSize: Int,
+) {
+    val isInput: Boolean get() = address and 0x80 != 0
+
+    fun describe(): String {
+        val direction = if (isInput) "in" else "out"
+        val typeName = when (type) {
+            0 -> "ctrl"
+            1 -> "iso"
+            2 -> "bulk"
+            3 -> "int"
+            else -> "type$type"
+        }
+        return "0x%02x/%s/%s/%d".format(address, direction, typeName, maxPacketSize)
+    }
+}
 
 data class InstalledPackage(
     val packageName: String,
