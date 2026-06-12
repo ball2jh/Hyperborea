@@ -35,11 +35,15 @@ class RingBufferLogStore @Inject constructor() : AppLogger, LogStore {
 
     private fun log(level: LogLevel, tag: String, message: String, throwable: Throwable? = null) {
         val logcatTag = "Hyperborea.$tag"
+        // The exception summary goes on the message line: android.util.Log suppresses the entire
+        // stack trace for UnknownHostException (the common offline failure), which would otherwise
+        // leave bare "X failed" lines in captured logcat with no cause at all.
+        val logcatMessage = if (throwable != null) "$message: $throwable" else message
         when (level) {
-            LogLevel.DEBUG -> Log.d(logcatTag, message, throwable)
-            LogLevel.INFO -> Log.i(logcatTag, message, throwable)
-            LogLevel.WARN -> Log.w(logcatTag, message, throwable)
-            LogLevel.ERROR -> Log.e(logcatTag, message, throwable)
+            LogLevel.DEBUG -> Log.d(logcatTag, logcatMessage, throwable)
+            LogLevel.INFO -> Log.i(logcatTag, logcatMessage, throwable)
+            LogLevel.WARN -> Log.w(logcatTag, logcatMessage, throwable)
+            LogLevel.ERROR -> Log.e(logcatTag, logcatMessage, throwable)
         }
 
         val entry = LogEntry(
