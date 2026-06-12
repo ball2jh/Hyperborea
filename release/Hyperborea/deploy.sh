@@ -431,7 +431,14 @@ wait_for_reboot() {
         local elapsed=$(( $(date +%s) - wait_start ))
         if [ "$elapsed" -gt "$max_wait" ]; then
             stop_timer
-            die "Timed out after ${max_wait}s. Try reconnecting manually."
+            warn "Timed out after ${max_wait}s waiting for the device to come back."
+            warn "The device likely rebooted fine but ADB didn't return. Some iFit firmware"
+            warn "disables USB debugging on every boot (a live ERU does this) — if the ADB"
+            warn "indicator is red, re-enable USB debugging in Settings > Developer options."
+            if is_ip_connection; then
+                warn "Over WiFi the console may also have come back on a different IP."
+            fi
+            die "Reconnect ADB and re-run this script — it will verify and finish from where it left off."
         fi
 
         # IP connections need periodic reconnect attempts since ADB
@@ -665,10 +672,13 @@ step 4 "Disable iFit"
 #
 # `pm disable-user --user 0` works as the unprivileged shell user; it doesn't
 # kill running processes (the reboot in step 5 handles that), but it stops them
-# from launching again. A package ERU previously hard-disabled (state "disabled"
-# rather than "disabled-user") still shows up under `pm list packages -d`, so
-# it's correctly counted as already-disabled instead of tripping the
-# SecurityException that `pm disable-user` throws on those.
+# from launching again. We always *attempt* the disable rather than trusting a
+# pre-check: a stale or failed "already hidden" reading once skipped the real
+# disable and left ERU live, and a live ERU re-enables its siblings and disables
+# ADB on every boot. A package ERU previously hard-disabled (state "disabled"
+# rather than "disabled-user") still shows under `pm list packages -d` and is
+# counted as already-disabled, avoiding the SecurityException disable-user throws
+# on those.
 IFIT_PACKAGES=()
 while IFS= read -r pkg; do
     [ -n "$pkg" ] || continue
@@ -682,18 +692,29 @@ else
     # A package is "neutralised" if it's either disabled (shows under `pm list packages -d`) or
     # hidden (vanishes from the plain package list). pm disable-user is preferred, but some firmware
     # refuses it from an unprivileged shell — for the system-uid com.ifit.eru and even the
-    # user-installed com.ifit.standalone. pm hide needs a less-restrictive permission set, is
-    # accepted there, and has the same end effect (invisible to pm, receivers don't fire, no
-    # autolaunch), so we fall back to it.
+    # user-installed com.ifit.standalone. pm hide needs MANAGE_USERS, which the shell user lacks on
+    # some builds (Android 13 refuses it outright); where it's accepted it has the same end effect
+    # (invisible to pm, receivers don't fire, no autolaunch), so we keep it as a fallback.
     is_disabled() { adb shell "pm list packages -d com.ifit" 2>/dev/null | tr -d '\r' | grep -qFx "package:$1"; }
-    is_hidden()   { ! adb shell "pm list packages com.ifit"  2>/dev/null | tr -d '\r' | grep -qFx "package:$1"; }
+    # Only trust a "hidden" verdict when the query actually returned packages — an empty result
+    # means the adb call failed, NOT that the package is hidden. That false positive previously
+    # skipped the real disable and left iFit live.
+    is_hidden() {
+        local list
+        list=$(adb shell "pm list packages com.ifit" 2>/dev/null | tr -d '\r')
+        [ -n "$list" ] || return 1
+        ! printf '%s\n' "$list" | grep -qFx "package:$1"
+    }
     DISABLED=0
     HIDDEN=0
     ALREADY=0
     FAILED=0
     for pkg in "${IFIT_PACKAGES[@]}"; do
-        if is_disabled "$pkg" || is_hidden "$pkg"; then
-            ok "$pkg already disabled/hidden"
+        # Skip ONLY when genuinely already disabled — re-running disable-user on a hard-"disabled"
+        # system package throws SecurityException. We deliberately do not skip on is_hidden: always
+        # attempt the disable so a stale/false "hidden" reading can't leave the package live.
+        if is_disabled "$pkg"; then
+            ok "$pkg already disabled"
             ALREADY=$((ALREADY + 1))
             continue
         fi
@@ -743,6 +764,17 @@ info "Flushing package state..."
 sleep 15
 adb shell sync >/dev/null 2>&1 || true
 
+# Make ADB-over-WiFi survive the reboot. `adb tcpip` mode is transient and wiped
+# on reboot, so without this the reconnect loop below can never re-establish the
+# TCP transport and the user has to re-pair manually. persist.adb.tcp.port makes
+# adbd re-listen on the same port every boot. Harmless if the property is
+# read-only for the shell user (the write just fails silently).
+if is_ip_connection; then
+    PORT="${ANDROID_SERIAL##*:}"
+    [ "$PORT" = "$ANDROID_SERIAL" ] && PORT=5555
+    adb shell "setprop persist.adb.tcp.port $PORT" >/dev/null 2>&1 || true
+fi
+
 info "Rebooting..."
 REBOOT_START=$(date +%s)
 start_timer "Waiting for device..." "$REBOOT_START"
@@ -756,6 +788,33 @@ if [ -z "$PKG_PATH" ]; then
     die "Hyperborea is not installed after reboot — something went wrong."
 fi
 ok "Install verified: $PKG_PATH"
+
+# Re-verify iFit stayed disabled across the reboot. The disable in step 4 only
+# "took" if it survived the boot: a live ERU (com.ifit.eru) re-enables its
+# siblings and rewrites settings — including disabling ADB — on every boot, so an
+# iFit package that came back means the deploy hasn't actually held. This is the
+# check that distinguishes "looked successful" from "is successful".
+if [ ${#IFIT_PACKAGES[@]} -gt 0 ]; then
+    DISABLED_NOW=$(adb shell "pm list packages -d com.ifit" 2>/dev/null | tr -d '\r')
+    PLAIN_NOW=$(adb shell "pm list packages com.ifit" 2>/dev/null | tr -d '\r')
+    BACK=()
+    for pkg in "${IFIT_PACKAGES[@]}"; do
+        # Neutralised = disabled (in -d list) OR hidden (gone from a non-empty plain list).
+        printf '%s\n' "$DISABLED_NOW" | grep -qFx "package:$pkg" && continue
+        [ -n "$PLAIN_NOW" ] && ! printf '%s\n' "$PLAIN_NOW" | grep -qFx "package:$pkg" && continue
+        BACK+=("$pkg")
+    done
+    if [ ${#BACK[@]} -eq 0 ]; then
+        ok "iFit stayed disabled after reboot"
+    else
+        warn "iFit re-enabled itself after reboot: ${BACK[*]}"
+        if printf '%s\n' "${BACK[@]}" | grep -qx "com.ifit.eru"; then
+            warn "com.ifit.eru is the cause — while it runs it re-enables the others and disables ADB each boot."
+        fi
+        warn "The deploy has NOT fully taken on this console. Re-run this script; if it keeps coming"
+        warn "back, this firmware needs root or a firmware-route deploy to neutralise ERU."
+    fi
+fi
 
 # Every com.ifit.* package is disabled now, so the stock iFit home screen is
 # gone. Hand the HOME intent to the device's own AOSP launcher
