@@ -10,6 +10,7 @@ import com.nettarion.hyperborea.core.model.ExerciseData
 import com.nettarion.hyperborea.core.model.isBeltBased
 import com.nettarion.hyperborea.hardware.fitpro.session.DeviceDatabase
 import com.nettarion.hyperborea.hardware.fitpro.session.ExerciseDataAccumulator
+import com.nettarion.hyperborea.hardware.fitpro.session.FitProKeypad
 import com.nettarion.hyperborea.hardware.fitpro.session.FitProSession
 import com.nettarion.hyperborea.hardware.fitpro.session.GripHeartRateFilter
 import com.nettarion.hyperborea.hardware.fitpro.session.PowerEstimator
@@ -873,23 +874,9 @@ class V1Session(
         if (code == lastKeyCode) return
         lastKeyCode = code
         if (code == 0) return
-        val key = fitProKeyToConsoleKey(code)
+        val key = FitProKeypad.consoleKeyFromCode(code)
         logger.d(TAG, "Console keypad: code=$code held=${keyObject?.timeHeld ?: 0}ms${key?.let { " ($it)" } ?: ""}")
         key?.let { _consoleKeyPresses.tryEmit(it) }
-    }
-
-    private fun fitProKeyToConsoleKey(code: Int): ConsoleKey? = when (code) {
-        KEY_START -> ConsoleKey.START
-        KEY_STOP -> ConsoleKey.STOP
-        KEY_SPEED_UP -> ConsoleKey.SPEED_UP
-        KEY_SPEED_DOWN -> ConsoleKey.SPEED_DOWN
-        KEY_INCLINE_UP -> ConsoleKey.INCLINE_UP
-        KEY_INCLINE_DOWN -> ConsoleKey.INCLINE_DOWN
-        // GEAR_UP/DOWN map to resistance — on bike consoles the +/- buttons are the resistance/gear
-        // selector and there's no separate "gear" the app tracks.
-        KEY_RESISTANCE_UP, KEY_GEAR_UP -> ConsoleKey.RESISTANCE_UP
-        KEY_RESISTANCE_DOWN, KEY_GEAR_DOWN -> ConsoleKey.RESISTANCE_DOWN
-        else -> null // fan / volume / etc. — not mapped (yet)
     }
 
     private fun estimatePowerIfNeeded() {
@@ -1008,15 +995,5 @@ class V1Session(
         // KEY_OBJECT key codes for the console-keypad buttons we surface as [ConsoleKey] events.
         // Hyperborea acts on none of them directly — the MCU does the work and the resulting
         // state flows up through the WORKOUT_MODE poll.
-        private const val KEY_STOP = 1
-        private const val KEY_START = 2
-        private const val KEY_SPEED_UP = 3
-        private const val KEY_SPEED_DOWN = 4
-        private const val KEY_INCLINE_UP = 5
-        private const val KEY_INCLINE_DOWN = 6
-        private const val KEY_RESISTANCE_UP = 7
-        private const val KEY_RESISTANCE_DOWN = 8
-        private const val KEY_GEAR_UP = 9
-        private const val KEY_GEAR_DOWN = 10
     }
 }

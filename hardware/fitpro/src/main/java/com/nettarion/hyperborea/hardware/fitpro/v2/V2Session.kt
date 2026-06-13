@@ -10,6 +10,7 @@ import com.nettarion.hyperborea.core.model.ExerciseData
 import com.nettarion.hyperborea.core.model.isBeltBased
 import com.nettarion.hyperborea.hardware.fitpro.session.ExerciseDataAccumulator
 import com.nettarion.hyperborea.hardware.fitpro.session.FitProSession
+import com.nettarion.hyperborea.hardware.fitpro.session.FitProKeypad
 import com.nettarion.hyperborea.hardware.fitpro.session.GripHeartRateFilter
 import com.nettarion.hyperborea.hardware.fitpro.session.SessionState
 import com.nettarion.hyperborea.hardware.fitpro.transport.HidTransport
@@ -352,19 +353,7 @@ class V2Session(
         if (code == lastKeyCode) return
         lastKeyCode = code
         if (code == 0) return
-        val key = when (code) {
-            KEY_START -> ConsoleKey.START
-            KEY_STOP -> ConsoleKey.STOP
-            KEY_SPEED_UP -> ConsoleKey.SPEED_UP
-            KEY_SPEED_DOWN -> ConsoleKey.SPEED_DOWN
-            KEY_INCLINE_UP -> ConsoleKey.INCLINE_UP
-            KEY_INCLINE_DOWN -> ConsoleKey.INCLINE_DOWN
-            // Gear up/down maps to resistance — on bike consoles the +/- buttons are the
-            // resistance/gear selector and there's no separate "gear" the app tracks.
-            KEY_RESISTANCE_UP, KEY_GEAR_UP -> ConsoleKey.RESISTANCE_UP
-            KEY_RESISTANCE_DOWN, KEY_GEAR_DOWN -> ConsoleKey.RESISTANCE_DOWN
-            else -> null // fan / volume / etc. — not mapped (yet)
-        }
+        val key = FitProKeypad.consoleKeyFromCode(code)
         logger.d(TAG, "Console keypad: code=$code${key?.let { " ($it)" } ?: ""}")
         key?.let { _consoleKeyPresses.tryEmit(it) }
         if (key == ConsoleKey.START) requestWorkoutStart("physical Start key")
@@ -621,12 +610,27 @@ class V2Session(
             // when pushed to the accumulator, so the orchestrator's workout-mode monitor (which
             // uses V1 codes for DMK / IDLE / RUNNING) reacts uniformly to V1 and V2 sessions.
             V2FeatureId.WORKOUT_STATE -> {
+                val previous = _workoutMode.value?.let { V2WorkoutMode.fromRaw(it) }
                 _workoutMode.value = value
                 val mode = V2WorkoutMode.fromRaw(value)
                 // Info-level on purpose: which states a console actually reports (and when) is
                 // the load-bearing fact in field logs — e.g. whether READY_TO_START follows a
                 // Start-key press. Low volume: V2 events fire on change only.
                 logger.i(TAG, "Console workout state event: $mode (raw=$value)")
+                if (previous != mode) {
+                    // Mirror V1's WORKOUT_MODE handling: the ride clock must follow
+                    // CONSOLE-initiated transitions too (pause timeout, safety interlock), not
+                    // just our own Pause/Resume commands. The accumulator guards make the
+                    // overlap with writeFeature's pause()/resume() calls harmless.
+                    when (mode) {
+                        V2WorkoutMode.PAUSED -> accumulator.pause()
+                        V2WorkoutMode.RUNNING -> {
+                            accumulator.resume()
+                            accumulator.startTimer()
+                        }
+                        else -> {}
+                    }
+                }
                 // READY_TO_START is the V2 MCU's "user pressed the physical Start key" report —
                 // it parks there waiting for the host to start the workout. Mirrors the stock
                 // service's START_REQUESTED handling.
@@ -790,18 +794,6 @@ class V2Session(
         private const val DEVICE_TYPE_TIMEOUT_MS = 2_000L
         // Product info streams many small frames — same long-command class as the features query.
         private const val PRODUCT_INFO_TIMEOUT_MS = 4_000L
-
-        // Console keypad codes (same space as the V1 keypad field).
-        private const val KEY_STOP = 1
-        private const val KEY_START = 2
-        private const val KEY_SPEED_UP = 3
-        private const val KEY_SPEED_DOWN = 4
-        private const val KEY_INCLINE_UP = 5
-        private const val KEY_INCLINE_DOWN = 6
-        private const val KEY_RESISTANCE_UP = 7
-        private const val KEY_RESISTANCE_DOWN = 8
-        private const val KEY_GEAR_UP = 9
-        private const val KEY_GEAR_DOWN = 10
 
         // V1 [com.nettarion.hyperborea.hardware.fitpro.v1.WorkoutMode] raw codes used by the
         // orchestrator's workout-mode monitor — kept here as a translation target for V2's WORKOUT_STATE.
