@@ -1,6 +1,5 @@
 package com.nettarion.hyperborea.platform.support
 
-import com.nettarion.hyperborea.BuildConfig
 import com.nettarion.hyperborea.core.LogStore
 import com.nettarion.hyperborea.core.adapter.BroadcastAdapter
 import com.nettarion.hyperborea.core.adapter.HardwareAdapter
@@ -19,6 +18,8 @@ class SupportDiagnosticsBuilder(
     private val systemMonitor: SystemMonitor,
     private val hardwareAdapter: HardwareAdapter,
     private val broadcastAdapters: Set<BroadcastAdapter>,
+    /** Installed version name from PackageManager — not BuildConfig (AGP-managed, build-cache-stale). */
+    private val appVersionName: String,
 ) {
 
     fun build(deviceUuid: String?): JSONObject {
@@ -63,7 +64,7 @@ class SupportDiagnosticsBuilder(
 
         return JSONObject().apply {
             put("deviceUuid", deviceUuid ?: JSONObject.NULL)
-            put("appVersion", BuildConfig.VERSION_NAME)
+            put("appVersion", appVersionName)
             put("timestamp", SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss'Z'", Locale.US).format(Date()))
             put("appLogs", truncateLogExport(logStore.export(), 400_000))
             put("systemLogs", truncateLogExport(systemLogStore.export(), 400_000))

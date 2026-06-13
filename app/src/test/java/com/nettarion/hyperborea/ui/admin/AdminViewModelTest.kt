@@ -129,7 +129,7 @@ class AdminViewModelTest {
             appInstaller = FakeUpdateInstaller(),
             logger = noOpLogger,
             scope = scope,
-            versionProvider = VersionProvider { 1 },
+            versionProvider = testVersionProvider(1),
             downloadDir = downloadDir,
             orchestratorState = kotlinx.coroutines.flow.MutableStateFlow(com.nettarion.hyperborea.core.orchestration.OrchestratorState.Idle),
         )
@@ -144,9 +144,15 @@ class AdminViewModelTest {
             userPreferences = fakeUserPreferences,
             supportHttpClient = fakeSupportClient,
             installId = InstallId(ContextWrapper(null)),
+            versionProvider = testVersionProvider(1),
             logger = noOpLogger,
             context = ContextWrapper(null),
         )
+    }
+
+    private fun testVersionProvider(code: Int) = object : VersionProvider {
+        override fun getVersionCode() = code
+        override fun getVersionName() = "test"
     }
 
     private fun runViewModelTest(block: suspend TestScope.() -> Unit) = runTest {

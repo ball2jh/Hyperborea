@@ -1,6 +1,7 @@
 package com.nettarion.hyperborea.platform
 
 import com.nettarion.hyperborea.BuildConfig
+import com.nettarion.hyperborea.platform.update.VersionProvider
 
 import com.nettarion.hyperborea.core.AppLogger
 import com.nettarion.hyperborea.core.adapter.describe
@@ -27,12 +28,16 @@ class DiagnosticBootstrap @Inject constructor(
     private val hardwareAdapter: HardwareAdapter,
     private val broadcastAdapters: Set<@JvmSuppressWildcards BroadcastAdapter>,
     private val logExporter: LogExporter,
+    private val versionProvider: VersionProvider,
     private val scope: CoroutineScope,
 ) {
     fun start() {
         scope.launch {
             logger.i(TAG, "=== Hyperborea diagnostic boot ===")
-            logger.i(TAG, "Build: ${BuildConfig.VERSION_NAME} (${BuildConfig.VERSION_CODE})")
+            // Version from PackageManager (the installed manifest), not BuildConfig — the latter
+            // is AGP-managed and can be restored stale from the Gradle build cache. GIT_HASH is a
+            // custom BuildConfig field and is reliable, so it pins the exact running commit.
+            logger.i(TAG, "Build: ${versionProvider.getVersionName()} (${versionProvider.getVersionCode()}) git=${BuildConfig.GIT_HASH}")
 
             // Start system log capture (logcat main+system buffers)
             systemLogCapture.start(CaptureConfig(logcat = true, dmesg = false))

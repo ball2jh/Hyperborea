@@ -40,7 +40,10 @@ class UpdateManagerTest {
             appInstaller = installer,
             logger = logger,
             scope = scope,
-            versionProvider = VersionProvider { currentVersionCode },
+            versionProvider = object : VersionProvider {
+                override fun getVersionCode() = currentVersionCode
+                override fun getVersionName() = "test"
+            },
             downloadDir = downloadDir,
             orchestratorState = orchestratorState,
         )

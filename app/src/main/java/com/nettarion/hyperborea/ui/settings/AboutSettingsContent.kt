@@ -14,7 +14,6 @@ import androidx.compose.runtime.getValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import com.nettarion.hyperborea.BuildConfig
 import com.nettarion.hyperborea.ui.admin.AdminViewModel
 import com.nettarion.hyperborea.ui.admin.UpdatePanel
 import com.nettarion.hyperborea.ui.theme.LocalHyperboreaColors
@@ -47,7 +46,7 @@ fun AboutSettingsContent(
             modifier = Modifier.width(100.dp),
         )
         Text(
-            text = "${BuildConfig.VERSION_NAME} (${BuildConfig.VERSION_CODE})",
+            text = adminViewModel.installedVersion,
             style = MaterialTheme.typography.bodyMedium,
             color = colors.textHigh,
         )

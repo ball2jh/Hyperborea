@@ -38,9 +38,13 @@ abstract class UpdateModule {
 
         @Provides
         fun provideVersionProvider(@ApplicationContext context: Context): VersionProvider =
-            VersionProvider {
+            object : VersionProvider {
+                private fun info() = context.packageManager.getPackageInfo(context.packageName, 0)
+
                 @Suppress("DEPRECATION")
-                context.packageManager.getPackageInfo(context.packageName, 0).versionCode
+                override fun getVersionCode(): Int = info().versionCode
+
+                override fun getVersionName(): String = info().versionName ?: "unknown"
             }
 
         @Provides

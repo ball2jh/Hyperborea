@@ -28,6 +28,7 @@ import com.nettarion.hyperborea.platform.support.SupportDiagnosticsBuilder
 import com.nettarion.hyperborea.platform.support.SupportHttpClient
 import com.nettarion.hyperborea.platform.update.TrackState
 import com.nettarion.hyperborea.platform.update.UpdateManager
+import com.nettarion.hyperborea.platform.update.VersionProvider
 import dagger.hilt.android.lifecycle.HiltViewModel
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.CancellationException
@@ -56,12 +57,20 @@ class AdminViewModel @Inject constructor(
     private val userPreferences: UserPreferences,
     private val supportHttpClient: SupportHttpClient,
     private val installId: InstallId,
+    private val versionProvider: VersionProvider,
     private val logger: AppLogger,
     @param:ApplicationContext private val context: Context,
 ) : ViewModel() {
 
+    /**
+     * Installed app version for display, from PackageManager (via [versionProvider]) — not
+     * `BuildConfig`, which is AGP-managed and can be restored stale from the Gradle build cache.
+     */
+    val installedVersion: String = "${versionProvider.getVersionName()} (${versionProvider.getVersionCode()})"
+
     private val diagnosticsBuilder = SupportDiagnosticsBuilder(
         logStore, systemLogStore, systemMonitor, hardwareAdapter, broadcastAdapters,
+        appVersionName = versionProvider.getVersionName(),
     )
 
     val broadcastDiagnostics: Flow<List<BroadcastDiagnostic>> = run {

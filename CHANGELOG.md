@@ -2,6 +2,9 @@
 
 ## [Unreleased]
 
+## [1.2.20] - 2026-06-13
+- **The reported app version is now always accurate.** The version shown on the About screen, in the boot log, and in support-diagnostic uploads previously came from `BuildConfig`, which Android's build tooling manages and can restore stale from the Gradle build cache — a 1.2.18 build shipped reporting "1.2.17" while it was genuinely running 1.2.18 code. All version readouts now come from the installed package manifest (PackageManager), which can't drift, and the boot log additionally prints the exact git commit. This only affected what was *displayed* — the auto-updater always read the correct installed version, so updates themselves were never impacted.
+
 ## [1.2.19] - 2026-06-13
 - **"Calibrate Incline" no longer errors on V2 consoles.** Incline calibration is a V1-only maintenance routine; V2 consoles (the LargeX) self-calibrate. Tapping it on a V2 machine threw an error dialog — it now shows a plain "Calibration not needed" note instead, and the failed attempt no longer logs as an error.
 - **Belt-speed reporting diagnostics.** Added a log line whenever the console's reported belt speed crosses zero (`Belt speed started: X kph` / `stopped`). For a Zwift run the belt speed is the entire signal — Zwift mirrors the treadmill's speed, it never drives it — so this pins down whether a "no speed in Zwift" report is the console not reporting speed versus the belt genuinely not moving.
