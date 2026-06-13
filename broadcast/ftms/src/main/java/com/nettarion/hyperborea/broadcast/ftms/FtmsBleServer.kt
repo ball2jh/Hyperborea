@@ -18,7 +18,9 @@ import com.nettarion.hyperborea.core.model.ClientInfo
 import com.nettarion.hyperborea.core.model.DeviceCommand
 import com.nettarion.hyperborea.core.model.DeviceInfo
 import com.nettarion.hyperborea.core.model.ExerciseData
+import com.nettarion.hyperborea.core.ftms.BroadcastProfile
 import com.nettarion.hyperborea.core.ftms.FtmsDataEncoder
+import com.nettarion.hyperborea.core.ftms.GattService
 import com.nettarion.hyperborea.core.ftms.RevolutionCounter
 import android.os.RemoteException
 import kotlinx.coroutines.CoroutineScope
@@ -93,14 +95,18 @@ class FtmsBleServer(
         gattCallback.gattServer = server
         gattServer = server
 
-        // Add FTMS service → wait → add CPS service → wait
-        server.addService(FtmsServiceBuilder.buildFtmsService(deviceInfo.type))
-        withTimeout(SERVICE_ADD_TIMEOUT_MS) { serviceAddedChannel.receive() }
-        logger.d(TAG, "FTMS service added")
-
-        server.addService(FtmsServiceBuilder.buildCpsService())
-        withTimeout(SERVICE_ADD_TIMEOUT_MS) { serviceAddedChannel.receive() }
-        logger.d(TAG, "CPS service added")
+        // Add each service this device type advertises, one at a time — the GATT stack only accepts
+        // the next addService() after the previous one has been acknowledged.
+        for (service in BroadcastProfile.servicesFor(deviceInfo.type)) {
+            val gattService = when (service) {
+                GattService.FTMS -> FtmsServiceBuilder.buildFtmsService(deviceInfo.type)
+                GattService.CYCLING_POWER -> FtmsServiceBuilder.buildCpsService()
+                GattService.RUNNING_SPEED_CADENCE -> FtmsServiceBuilder.buildRscService()
+            }
+            server.addService(gattService)
+            withTimeout(SERVICE_ADD_TIMEOUT_MS) { serviceAddedChannel.receive() }
+            logger.d(TAG, "$service service added")
+        }
 
         // Start advertising
         startAdvertising()
@@ -197,6 +203,20 @@ class FtmsBleServer(
                     char.value = cpsMeasurement
                     if (!server.notifyCharacteristicChanged(device, char, false)) {
                         logger.w(TAG, "Failed to send CPS Measurement notification")
+                    }
+                }
+            }
+
+            // RSC Measurement notification (treadmills only — the service is absent otherwise, so
+            // no client can subscribe and this stays inert for bikes/rowers/ellipticals).
+            if (cb.isSubscribed(FtmsServiceBuilder.RSC_MEASUREMENT_UUID)) {
+                val rscMeasurement = FtmsDataEncoder.encodeRscMeasurement(data)
+                val char = server.getService(FtmsServiceBuilder.RSC_SERVICE_UUID)
+                    ?.getCharacteristic(FtmsServiceBuilder.RSC_MEASUREMENT_UUID)
+                if (char != null) {
+                    char.value = rscMeasurement
+                    if (!server.notifyCharacteristicChanged(device, char, false)) {
+                        logger.w(TAG, "Failed to send RSC Measurement notification")
                     }
                 }
             }

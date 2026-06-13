@@ -387,6 +387,35 @@ object FtmsDataEncoder {
     }
 
     /**
+     * Encodes ExerciseData into RSC Measurement (0x2A53) characteristic value.
+     *
+     * Layout (BLE Running Speed and Cadence spec):
+     *  - Flags (uint8): bit1 → total distance present (always set here), bit2 → running (not
+     *    walking), set when belt speed ≥ [FtmsServiceMetadata.RUN_WALK_THRESHOLD_KPH].
+     *  - Instantaneous Speed (uint16 LE): 1/256 m/s.
+     *  - Instantaneous Cadence (uint8): steps/min — always 0; treadmills report belt speed, not
+     *    step cadence. Run apps derive pace from speed, so 0 is tolerated.
+     *  - Total Distance (uint32 LE): 1/10 m.
+     */
+    fun encodeRscMeasurement(data: ExerciseData): ByteArray {
+        val speedKph = data.speed ?: 0f
+        val speedRaw = ((speedKph / 3.6f) * 256f).toInt().coerceIn(0, 0xFFFF)
+        val totalDistanceDm = ((data.distance ?: 0f) * 10_000f).toLong().coerceIn(0, 0xFFFFFFFFL)
+
+        var flags = 1 shl 1 // total distance present
+        if (speedKph >= FtmsServiceMetadata.RUN_WALK_THRESHOLD_KPH) {
+            flags = flags or (1 shl 2) // running status
+        }
+
+        val result = ByteArray(8)
+        result[0] = (flags and 0xFF).toByte()
+        uint16LE(speedRaw).copyInto(result, 1)
+        result[3] = 0x00 // instantaneous cadence (steps/min) — not measured
+        putUint32LE(result, 4, totalDistanceDm)
+        return result
+    }
+
+    /**
      * Encodes FTMS Training Status (0x2AD3) characteristic value from FitPro workout mode.
      *
      * Maps FitPro MCU hardware workout mode values to FTMS Training Status (Table 4.13).

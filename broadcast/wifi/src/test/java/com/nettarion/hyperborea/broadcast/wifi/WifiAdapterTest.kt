@@ -2,6 +2,7 @@ package com.nettarion.hyperborea.broadcast.wifi
 
 import com.google.common.truth.Truth.assertThat
 import com.nettarion.hyperborea.core.adapter.AdapterState
+import com.nettarion.hyperborea.core.model.DeviceType
 import com.nettarion.hyperborea.core.test.TestAppLogger
 import com.nettarion.hyperborea.core.test.buildDeviceInfo
 import com.nettarion.hyperborea.core.test.buildSystemSnapshot
@@ -105,7 +106,7 @@ class WifiAdapterTest {
     @Test
     fun `start registers mDNS`() = runTest {
         adapter.start(emptyFlow(), buildDeviceInfo())
-        verify { nsdRegistrar.register(WifiServer.PORT, "Test Device") }
+        verify { nsdRegistrar.register(WifiServer.PORT, "Test Device", DeviceType.BIKE) }
     }
 
     @Test

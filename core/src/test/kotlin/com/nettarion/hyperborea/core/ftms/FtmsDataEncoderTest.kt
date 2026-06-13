@@ -654,6 +654,56 @@ class FtmsDataEncoderTest {
             .isEqualTo(byteArrayOf(0x00, 0x00))
     }
 
+    // --- RSC Measurement (0x2A53) ---
+
+    @Test
+    fun `encodeRscMeasurement has fixed 8-byte layout`() {
+        val encoded = FtmsDataEncoder.encodeRscMeasurement(exerciseData(speed = 10f, distance = 1f))
+        assertThat(encoded).hasLength(8)
+    }
+
+    @Test
+    fun `encodeRscMeasurement converts kph to 1 over 256 m per s`() {
+        // 10 km/h = 2.7778 m/s → ×256 = 711
+        val encoded = FtmsDataEncoder.encodeRscMeasurement(exerciseData(speed = 10f))
+        assertThat(uint16LE(encoded, 1)).isEqualTo(711)
+    }
+
+    @Test
+    fun `encodeRscMeasurement reports cadence as zero`() {
+        val encoded = FtmsDataEncoder.encodeRscMeasurement(exerciseData(speed = 10f))
+        assertThat(encoded[3].toInt() and 0xFF).isEqualTo(0)
+    }
+
+    @Test
+    fun `encodeRscMeasurement encodes total distance in tenths of a metre`() {
+        // 2.5 km = 2500 m → ×10 (1/10 m units) = 25000
+        val encoded = FtmsDataEncoder.encodeRscMeasurement(exerciseData(speed = 10f, distance = 2.5f))
+        assertThat(uint32LE(encoded, 4)).isEqualTo(25_000L)
+    }
+
+    @Test
+    fun `encodeRscMeasurement always sets total-distance-present flag`() {
+        val encoded = FtmsDataEncoder.encodeRscMeasurement(exerciseData(speed = 0f))
+        assertThat(encoded[0].toInt() and (1 shl 1)).isNotEqualTo(0)
+    }
+
+    @Test
+    fun `encodeRscMeasurement sets running flag at or above threshold`() {
+        val walking = FtmsDataEncoder.encodeRscMeasurement(exerciseData(speed = 5f))
+        val running = FtmsDataEncoder.encodeRscMeasurement(exerciseData(speed = 12f))
+        assertThat(walking[0].toInt() and (1 shl 2)).isEqualTo(0)
+        assertThat(running[0].toInt() and (1 shl 2)).isNotEqualTo(0)
+    }
+
+    @Test
+    fun `encodeRscMeasurement accepts ExerciseData ZERO seed`() {
+        val encoded = FtmsDataEncoder.encodeRscMeasurement(ExerciseData.ZERO)
+        assertThat(encoded).hasLength(8)
+        assertThat(uint16LE(encoded, 1)).isEqualTo(0)
+        assertThat(uint32LE(encoded, 4)).isEqualTo(0L)
+    }
+
     // --- Helpers ---
 
     private fun uint16LE(data: ByteArray, offset: Int): Int =

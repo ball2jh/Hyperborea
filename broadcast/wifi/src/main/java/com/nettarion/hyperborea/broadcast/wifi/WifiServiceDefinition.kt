@@ -1,8 +1,10 @@
 package com.nettarion.hyperborea.broadcast.wifi
 
 import com.nettarion.hyperborea.core.model.DeviceInfo
+import com.nettarion.hyperborea.core.ftms.BroadcastProfile
 import com.nettarion.hyperborea.core.ftms.FtmsDataEncoder
 import com.nettarion.hyperborea.core.ftms.FtmsServiceMetadata
+import com.nettarion.hyperborea.core.ftms.GattService
 
 class WifiServiceDefinition(deviceInfo: DeviceInfo) {
 
@@ -32,13 +34,26 @@ class WifiServiceDefinition(deviceInfo: DeviceInfo) {
         CharDef(CPS_MEASUREMENT, PROP_NOTIFY, null),
     )
 
-    private val charsByService: Map<ShortUuid, List<CharDef>> = mapOf(
-        FTMS_SERVICE to ftmsChars,
-        CPS_SERVICE to cpsChars,
+    private val rscChars = listOf(
+        CharDef(RSC_FEATURE, PROP_READ, FtmsServiceMetadata.RSC_FEATURE_VALUE),
+        CharDef(RSC_MEASUREMENT, PROP_NOTIFY, null),
     )
 
+    // Driven by the per-device-type service set so the WiFi/TNP service list, the BLE GATT layer,
+    // and the mDNS TXT record never disagree about which services this device exposes.
+    private val charsByService: Map<ShortUuid, List<CharDef>> =
+        BroadcastProfile.servicesFor(deviceInfo.type).associate { service ->
+            when (service) {
+                GattService.FTMS -> FTMS_SERVICE to ftmsChars
+                GattService.CYCLING_POWER -> CPS_SERVICE to cpsChars
+                GattService.RUNNING_SPEED_CADENCE -> RSC_SERVICE to rscChars
+            }
+        }
+
+    val services: List<ShortUuid> = charsByService.keys.toList()
+
     private val allChars: Map<ShortUuid, CharDef> =
-        (ftmsChars + cpsChars).associateBy { it.uuid }
+        charsByService.values.flatten().associateBy { it.uuid }
 
     fun characteristicsFor(service: ShortUuid): List<Pair<ShortUuid, Byte>>? =
         charsByService[service]?.map { it.uuid to it.properties }
@@ -86,6 +101,9 @@ class WifiServiceDefinition(deviceInfo: DeviceInfo) {
         val SENSOR_LOCATION = ShortUuid(FtmsServiceMetadata.SENSOR_LOCATION)
         val CPS_MEASUREMENT = ShortUuid(FtmsServiceMetadata.CPS_MEASUREMENT)
 
-        val services: List<ShortUuid> = listOf(FTMS_SERVICE, CPS_SERVICE)
+        // RSC service + characteristics
+        val RSC_SERVICE = ShortUuid(FtmsServiceMetadata.RSC_SERVICE)
+        val RSC_FEATURE = ShortUuid(FtmsServiceMetadata.RSC_FEATURE)
+        val RSC_MEASUREMENT = ShortUuid(FtmsServiceMetadata.RSC_MEASUREMENT)
     }
 }

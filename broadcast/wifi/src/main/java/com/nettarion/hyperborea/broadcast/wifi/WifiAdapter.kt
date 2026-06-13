@@ -41,7 +41,7 @@ class WifiAdapter @Inject constructor(
         server = wifiServer
         wifiServer.start()
 
-        nsdRegistrar.register(WifiServer.PORT, deviceInfo.name)
+        nsdRegistrar.register(WifiServer.PORT, deviceInfo.name, deviceInfo.type)
 
         return { data -> wifiServer.broadcastData(data) }
     }

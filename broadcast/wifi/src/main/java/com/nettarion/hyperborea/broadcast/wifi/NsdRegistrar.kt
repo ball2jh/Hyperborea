@@ -6,6 +6,8 @@ import android.net.nsd.NsdManager
 import android.net.nsd.NsdServiceInfo
 import android.provider.Settings
 import com.nettarion.hyperborea.core.AppLogger
+import com.nettarion.hyperborea.core.ftms.BroadcastProfile
+import com.nettarion.hyperborea.core.model.DeviceType
 import java.net.NetworkInterface
 
 class NsdRegistrar(
@@ -16,7 +18,7 @@ class NsdRegistrar(
     private var nsdManager: NsdManager? = null
     private var registrationListener: NsdManager.RegistrationListener? = null
 
-    fun register(port: Int, deviceName: String) {
+    fun register(port: Int, deviceName: String, deviceType: DeviceType) {
         val manager = context.getSystemService(Context.NSD_SERVICE) as? NsdManager
         if (manager == null) {
             logger.e(TAG, "NsdManager not available")
@@ -34,8 +36,9 @@ class NsdRegistrar(
             setPort(port)
             // TXT keys are fixed by the discovery protocol the fitness apps implement — clients
             // look these names up verbatim, so the framework's "key lengths > 9 are discouraged"
-            // logcat warning cannot be avoided by renaming them.
-            setAttribute("ble-service-uuids", "00001826-0000-1000-8000-00805F9B34FB,00001818-0000-1000-8000-00805F9B34FB")
+            // logcat warning cannot be avoided by renaming them. The advertised service set varies
+            // by device type (treadmills advertise Running Speed & Cadence, not Cycling Power).
+            setAttribute("ble-service-uuids", BroadcastProfile.advertisedUuidCsv(deviceType))
             setAttribute("mac-address", macFormatted)
             setAttribute("serial-number", mac.joinToString("") { "%02X".format(it) })
         }

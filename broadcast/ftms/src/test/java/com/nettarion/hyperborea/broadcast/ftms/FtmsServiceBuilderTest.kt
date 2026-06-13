@@ -62,6 +62,15 @@ class FtmsServiceBuilderTest {
     }
 
     @Test
+    fun `RSC Feature static value advertises total-distance support`() {
+        val value = FtmsServiceBuilder.staticValueFor(FtmsServiceBuilder.RSC_FEATURE_UUID, testDeviceInfo)
+        assertThat(value).isNotNull()
+        assertThat(value!!.size).isEqualTo(2)
+        // bit1 = Total Distance Measurement Supported
+        assertThat(value).isEqualTo(byteArrayOf(0x02, 0x00))
+    }
+
+    @Test
     fun `unknown UUID returns null`() {
         val value = FtmsServiceBuilder.staticValueFor(FtmsServiceBuilder.dataCharacteristicUuid(DeviceType.BIKE), testDeviceInfo)
         assertThat(value).isNull()

@@ -100,6 +100,11 @@ class WifiClientHandler(
             sendNotification(WifiCodec.encodeNotification(WifiServiceDefinition.CPS_MEASUREMENT, value))
         }
 
+        if (enabledNotifications.contains(WifiServiceDefinition.RSC_MEASUREMENT)) {
+            val value = FtmsDataEncoder.encodeRscMeasurement(data)
+            sendNotification(WifiCodec.encodeNotification(WifiServiceDefinition.RSC_MEASUREMENT, value))
+        }
+
         if (enabledNotifications.contains(WifiServiceDefinition.TRAINING_STATUS)) {
             val value = FtmsDataEncoder.encodeTrainingStatus(data.workoutMode)
             sendNotification(WifiCodec.encodeNotification(WifiServiceDefinition.TRAINING_STATUS, value))
@@ -144,7 +149,7 @@ class WifiClientHandler(
     }
 
     private suspend fun handleDiscoverServices(request: WifiMessage.DiscoverServices) {
-        val services = WifiServiceDefinition.services
+        val services = serviceDef.services
         val payload = ByteArray(services.size * 16)
         services.forEachIndexed { i, uuid ->
             WifiCodec.encodeUuidBlob(uuid).copyInto(payload, i * 16)

@@ -18,6 +18,7 @@ object FtmsServiceBuilder {
     // Service UUIDs
     val FTMS_SERVICE_UUID: UUID = bleUuid(FtmsServiceMetadata.FTMS_SERVICE)
     val CPS_SERVICE_UUID: UUID = bleUuid(FtmsServiceMetadata.CPS_SERVICE)
+    val RSC_SERVICE_UUID: UUID = bleUuid(FtmsServiceMetadata.RSC_SERVICE)
 
     // FTMS characteristic UUIDs
     val FTMS_FEATURE_UUID: UUID = bleUuid(FtmsServiceMetadata.FTMS_FEATURE)
@@ -32,6 +33,10 @@ object FtmsServiceBuilder {
     val CPS_FEATURE_UUID: UUID = bleUuid(FtmsServiceMetadata.CPS_FEATURE)
     val SENSOR_LOCATION_UUID: UUID = bleUuid(FtmsServiceMetadata.SENSOR_LOCATION)
     val CPS_MEASUREMENT_UUID: UUID = bleUuid(FtmsServiceMetadata.CPS_MEASUREMENT)
+
+    // RSC characteristic UUIDs
+    val RSC_FEATURE_UUID: UUID = bleUuid(FtmsServiceMetadata.RSC_FEATURE)
+    val RSC_MEASUREMENT_UUID: UUID = bleUuid(FtmsServiceMetadata.RSC_MEASUREMENT)
 
     // CCCD
     val CCCD_UUID: UUID = bleUuid(FtmsServiceMetadata.CCCD)
@@ -117,6 +122,21 @@ object FtmsServiceBuilder {
         return service
     }
 
+    fun buildRscService(): BluetoothGattService {
+        val service = BluetoothGattService(
+            RSC_SERVICE_UUID,
+            BluetoothGattService.SERVICE_TYPE_PRIMARY,
+        )
+
+        // RSC Feature — READ
+        service.addCharacteristic(readCharacteristic(RSC_FEATURE_UUID))
+
+        // RSC Measurement — NOTIFY
+        service.addCharacteristic(notifyCharacteristic(RSC_MEASUREMENT_UUID))
+
+        return service
+    }
+
     fun resistanceRangeValue(info: DeviceInfo): ByteArray =
         FtmsServiceMetadata.resistanceRangeValue(info)
 
@@ -134,6 +154,7 @@ object FtmsServiceBuilder {
         TRAINING_STATUS_UUID -> FtmsServiceMetadata.TRAINING_STATUS_VALUE.copyOf()
         CPS_FEATURE_UUID -> FtmsServiceMetadata.CPS_FEATURE_VALUE.copyOf()
         SENSOR_LOCATION_UUID -> FtmsServiceMetadata.SENSOR_LOCATION_VALUE.copyOf()
+        RSC_FEATURE_UUID -> FtmsServiceMetadata.RSC_FEATURE_VALUE.copyOf()
         else -> null
     }
 

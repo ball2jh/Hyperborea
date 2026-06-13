@@ -11,6 +11,7 @@ object FtmsServiceMetadata {
     // Service short UUIDs
     const val FTMS_SERVICE = 0x1826
     const val CPS_SERVICE = 0x1818
+    const val RSC_SERVICE = 0x1814
 
     // FTMS characteristic short UUIDs
     const val FTMS_FEATURE = 0x2ACC
@@ -26,8 +27,15 @@ object FtmsServiceMetadata {
     const val SENSOR_LOCATION = 0x2A5D
     const val CPS_MEASUREMENT = 0x2A63
 
+    // RSC characteristic short UUIDs
+    const val RSC_MEASUREMENT = 0x2A53
+    const val RSC_FEATURE = 0x2A54
+
     // CCCD
     const val CCCD = 0x2902
+
+    // Belt speed (km/h) at/above which the RSC measurement reports "running" rather than "walking".
+    const val RUN_WALK_THRESHOLD_KPH = 7.0f
 
     // Trainer-specific control (0xE005)
     const val TRAINER_CONTROL = 0xE005
@@ -36,6 +44,9 @@ object FtmsServiceMetadata {
     val TRAINING_STATUS_VALUE = byteArrayOf(0x00, 0x01)
     val CPS_FEATURE_VALUE = byteArrayOf(0x0C, 0x00, 0x00, 0x00)
     val SENSOR_LOCATION_VALUE = byteArrayOf(0x0D)
+
+    // RSC Feature (0x2A54), uint16 LE: bit1 = Total Distance Measurement Supported.
+    val RSC_FEATURE_VALUE = byteArrayOf(0x02, 0x00)
 
     fun ftmsFeatureValue(deviceType: DeviceType): ByteArray = when (deviceType) {
         DeviceType.BIKE -> byteArrayOf(
