@@ -48,7 +48,8 @@ fun DeviceSettingsContent(
 
     LaunchedEffect(calibrationState) {
         when (calibrationState) {
-            is CalibrationState.Done, is CalibrationState.Failed -> showCalibrationResult = true
+            is CalibrationState.Done, is CalibrationState.Failed, is CalibrationState.NotSupported ->
+                showCalibrationResult = true
             else -> {}
         }
     }
@@ -212,6 +213,22 @@ fun DeviceSettingsContent(
                     },
                     title = { Text("Calibration failed") },
                     text = { Text((calibrationState as CalibrationState.Failed).message) },
+                    confirmButton = {
+                        TextButton(onClick = {
+                            showCalibrationResult = false
+                            adminViewModel.dismissCalibration()
+                        }) { Text("OK") }
+                    },
+                )
+            }
+            is CalibrationState.NotSupported -> {
+                AlertDialog(
+                    onDismissRequest = {
+                        showCalibrationResult = false
+                        adminViewModel.dismissCalibration()
+                    },
+                    title = { Text("Calibration not needed") },
+                    text = { Text("This console calibrates its own incline — there's nothing to do here.") },
                     confirmButton = {
                         TextButton(onClick = {
                             showCalibrationResult = false

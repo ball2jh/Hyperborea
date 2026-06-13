@@ -96,6 +96,8 @@ class V2Session(
     private var startRequestJob: Job? = null
     private var lastSentGrade = 0f
     private var lastSentSpeed = 0f
+    /** Last CURRENT_KPH the console reported; drives the belt zero<->moving edge log. */
+    private var lastSpeedKph: Float? = null
     private val gripHeartRate = GripHeartRateFilter()
 
     override suspend fun start() {
@@ -181,6 +183,7 @@ class V2Session(
         _productInfo.value = null
         declaredFeatures = null
         lastKeyCode = 0
+        lastSpeedKph = null
         _exerciseData.value = null
         _deviceIdentity.value = null
         _degradedReason.value = null
@@ -588,7 +591,20 @@ class V2Session(
             V2FeatureId.FAN_STATE -> { /* console fan state — not exercise data */ }
             V2FeatureId.WATTS -> accumulator.updatePower(value.toInt())
             V2FeatureId.RPM -> accumulator.updateCadence(value.toInt())
-            V2FeatureId.CURRENT_KPH -> accumulator.updateSpeed(value)
+            V2FeatureId.CURRENT_KPH -> {
+                // Diagnostic: does this console actually report belt speed, and when? For Zwift
+                // Run the belt speed IS the signal (Zwift mirrors it, never commands it), so a
+                // field log that shows speed stuck at 0 needs to distinguish "console never emits
+                // CURRENT_KPH" from "emits 0". Log the zero<->non-zero edges (low volume) so the
+                // next capture is decisive on the open "no speed / nothing to Zwift" question.
+                val wasMoving = (lastSpeedKph ?: 0f) > 0f
+                val nowMoving = value > 0f
+                if (wasMoving != nowMoving) {
+                    logger.i(TAG, "Belt speed ${if (nowMoving) "started: $value kph" else "stopped (0)"}")
+                }
+                lastSpeedKph = value
+                accumulator.updateSpeed(value)
+            }
             V2FeatureId.TARGET_RESISTANCE -> accumulator.updateResistance(value.toInt())
             V2FeatureId.CURRENT_GRADE -> accumulator.updateIncline(value)
             // Grip HR is a noisy analog contact reading — gate + smooth it, clearing on contact loss.

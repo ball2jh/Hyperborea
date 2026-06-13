@@ -227,6 +227,11 @@ class AdminViewModel @Inject constructor(
                 logger.i(TAG, "Incline calibration completed")
                 _calibrationState.value = CalibrationState.Done
             } catch (e: CancellationException) { throw e }
+            catch (e: UnsupportedOperationException) {
+                // Not an error — this console (e.g. V2) has no manual calibration routine.
+                logger.i(TAG, "Incline calibration not supported on this console")
+                _calibrationState.value = CalibrationState.NotSupported
+            }
             catch (e: Exception) {
                 logger.e(TAG, "Incline calibration failed", e)
                 _calibrationState.value = CalibrationState.Failed(e.message ?: "Calibration failed")
@@ -247,6 +252,8 @@ sealed interface CalibrationState {
     data object Idle : CalibrationState
     data object InProgress : CalibrationState
     data object Done : CalibrationState
+    /** The connected console doesn't offer calibration (e.g. V2 self-calibrates) — informational, not an error. */
+    data object NotSupported : CalibrationState
     data class Failed(val message: String) : CalibrationState
 }
 

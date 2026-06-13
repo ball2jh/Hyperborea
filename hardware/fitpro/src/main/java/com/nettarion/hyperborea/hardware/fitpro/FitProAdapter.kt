@@ -355,6 +355,14 @@ class FitProAdapter @Inject constructor(
                 session?.writeFeature(command)
             }
         } catch (e: CancellationException) { throw e }
+        catch (e: UnsupportedOperationException) {
+            // Expected on hardware that doesn't offer the command (e.g. incline calibration is a
+            // V1-only maintenance routine; V2 consoles self-calibrate). Not a failure — log
+            // quietly and rethrow so the caller can surface a neutral "not needed" message
+            // rather than a red error.
+            logger.i(TAG, "Command not supported on this console: $command — ${e.message}")
+            throw e
+        }
         catch (e: Exception) {
             logger.e(TAG, "Failed to send command: $command", e)
             throw e
@@ -371,7 +379,7 @@ class FitProAdapter @Inject constructor(
 
         val tempSession = when (productId) {
             FITPRO_PRODUCT_ID_V1 -> V1Session(transport, logger, scope, info)
-            else -> throw UnsupportedOperationException("Calibration not supported on product ID $productId")
+            else -> throw UnsupportedOperationException("Incline calibration isn't needed on this console — it self-calibrates.")
         }
 
         tempSession.calibrate()
