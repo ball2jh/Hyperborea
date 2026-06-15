@@ -55,8 +55,32 @@ class V2FeatureIdTest {
     }
 
     @Test
-    fun `subscribable list does not include target features`() {
-        assertThat(V2FeatureId.subscribable).doesNotContain(V2FeatureId.TARGET_KPH)
+    fun `limit feature wire bytes`() {
+        assertThat(V2FeatureId.MAX_KPH.code).isEqualTo(304)
+        assertThat(V2FeatureId.MAX_GRADE_PERCENT.code).isEqualTo(404)
+        assertThat(V2FeatureId.MAX_WATTS.code).isEqualTo(528)
+        assertThat(V2FeatureId.fromWireBytes(V2FeatureId.MAX_KPH.wireLo, V2FeatureId.MAX_KPH.wireHi))
+            .isEqualTo(V2FeatureId.MAX_KPH)
+    }
+
+    @Test
+    fun `per-workout caps are not modelled`() {
+        // WORKOUT_MAX_KPH(308) / WORKOUT_MAX_GRADE_PERCENT(408) are per-workout caps, not equipment
+        // limits — deliberately excluded so they're never mistaken for the device's physical bounds.
+        assertThat(V2FeatureId.fromCode(308)).isNull()
+        assertThat(V2FeatureId.fromCode(408)).isNull()
+    }
+
+    @Test
+    fun `subscribable includes TARGET_KPH and the reported limits but not target grade`() {
+        // Belt machines report actual belt speed in the writable TARGET_KPH field (CURRENT_KPH is
+        // never sent), so we subscribe to it. The device also reports its own physical limits.
+        assertThat(V2FeatureId.subscribable).contains(V2FeatureId.TARGET_KPH)
+        assertThat(V2FeatureId.subscribable).containsAtLeast(
+            V2FeatureId.MAX_KPH, V2FeatureId.MIN_KPH,
+            V2FeatureId.MAX_GRADE_PERCENT, V2FeatureId.MIN_GRADE_PERCENT,
+            V2FeatureId.MAX_RESISTANCE, V2FeatureId.MAX_WATTS,
+        )
         assertThat(V2FeatureId.subscribable).doesNotContain(V2FeatureId.TARGET_GRADE)
     }
 

@@ -230,7 +230,8 @@ class V2SessionTest {
         transport.emitIncoming(buildSupportedFeaturesPacket(V2FeatureId.TARGET_GRADE, V2FeatureId.CURRENT_GRADE))
         transport.emitIncoming(buildSupportedFeaturesPacket(V2FeatureId.WORKOUT_STATE, V2FeatureId.RUNNING_TIME))
         // Frame carrying feature ids outside our enum — list content, NOT a terminator.
-        transport.emitIncoming(byteArrayOf(0x02, 0x21, 0x04, 0x2F, 0x01, 0x30, 0x01))
+        // (0x03E7=999, 0x03E8=1000 — genuinely unmodelled codes.)
+        transport.emitIncoming(byteArrayOf(0x02, 0x21, 0x04, 0xE7.toByte(), 0x03, 0xE8.toByte(), 0x03))
         transport.emitIncoming(buildSupportedFeaturesPacket()) // end of list
 
         session.start()
@@ -240,13 +241,69 @@ class V2SessionTest {
         // Subscriptions reflect the union, not any single frame.
         assertThat(subscribedFeatures()).containsExactly(
             V2FeatureId.SYSTEM_MODE, V2FeatureId.WORKOUT_STATE, V2FeatureId.CURRENT_CALORIES,
-            V2FeatureId.PULSE, V2FeatureId.DISTANCE, V2FeatureId.CURRENT_KPH,
+            V2FeatureId.PULSE, V2FeatureId.DISTANCE, V2FeatureId.TARGET_KPH, V2FeatureId.CURRENT_KPH,
             V2FeatureId.CURRENT_GRADE, V2FeatureId.RUNNING_TIME,
         )
         // Critical treadmill behaviour: never command RUNNING at arm time — only a start
         // request (READY_TO_START report / physical Start key) may drive it.
         val workoutStateWrites = transport.writtenPackets.mapNotNull { it.workoutStateWriteValue() }
         assertThat(workoutStateWrites).doesNotContain(V2WorkoutMode.RUNNING.raw)
+    }
+
+    @Test
+    fun `treadmill belt speed is read from TARGET_KPH`() = runTest {
+        // The V2 treadmill never sends CURRENT_KPH; the belt runs at the commanded TARGET_KPH, so
+        // that is the actual speed and must reach exerciseData (and Zwift).
+        val session = createSession(this)
+        emitSupportedFeatures(
+            V2FeatureId.TARGET_KPH, V2FeatureId.CURRENT_GRADE, V2FeatureId.WORKOUT_STATE,
+        )
+        session.start()
+        advanceUntilIdle()
+        assertThat(session.detectedDeviceType).isEqualTo(DeviceType.TREADMILL)
+
+        transport.emitIncoming(buildEventPacket(V2FeatureId.TARGET_KPH, 6.5f))
+        runCurrent()
+
+        assertThat(session.exerciseData.value!!.speed).isEqualTo(6.5f)
+    }
+
+    @Test
+    fun `MCU-reported limits are captured into deviceCapabilities`() = runTest {
+        val session = createSession(this)
+        emitSupportedFeatures(
+            V2FeatureId.TARGET_KPH, V2FeatureId.MAX_KPH, V2FeatureId.MIN_GRADE_PERCENT,
+            V2FeatureId.MAX_GRADE_PERCENT, V2FeatureId.MAX_RESISTANCE, V2FeatureId.MAX_WATTS,
+            V2FeatureId.WORKOUT_STATE,
+        )
+        // The device reports its own physical bounds as events in the post-subscribe window.
+        transport.emitIncoming(buildEventPacket(V2FeatureId.MAX_KPH, 20f))
+        transport.emitIncoming(buildEventPacket(V2FeatureId.MIN_GRADE_PERCENT, 0f))
+        transport.emitIncoming(buildEventPacket(V2FeatureId.MAX_GRADE_PERCENT, 12f))
+        transport.emitIncoming(buildEventPacket(V2FeatureId.MAX_RESISTANCE, 22f))
+        transport.emitIncoming(buildEventPacket(V2FeatureId.MAX_WATTS, 800f))
+        session.start()
+        advanceUntilIdle()
+
+        val caps = session.deviceCapabilities
+        assertThat(caps.maxSpeed).isEqualTo(20f)
+        assertThat(caps.minIncline).isEqualTo(0f)
+        assertThat(caps.maxIncline).isEqualTo(12f)
+        assertThat(caps.maxResistance).isEqualTo(22)
+        assertThat(caps.maxPower).isEqualTo(800)
+    }
+
+    @Test
+    fun `unreported limits leave deviceCapabilities fields null`() = runTest {
+        val session = createSession(this)
+        emitSupportedFeatures(V2FeatureId.TARGET_KPH, V2FeatureId.WORKOUT_STATE)
+        session.start()
+        advanceUntilIdle()
+
+        val caps = session.deviceCapabilities
+        assertThat(caps.maxSpeed).isNull()
+        assertThat(caps.maxIncline).isNull()
+        assertThat(caps.maxResistance).isNull()
     }
 
     @Test

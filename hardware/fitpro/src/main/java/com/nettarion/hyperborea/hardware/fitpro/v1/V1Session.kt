@@ -2,6 +2,7 @@ package com.nettarion.hyperborea.hardware.fitpro.v1
 
 import com.nettarion.hyperborea.core.AppLogger
 import com.nettarion.hyperborea.core.model.ConsoleKey
+import com.nettarion.hyperborea.core.model.DeviceCapabilities
 import com.nettarion.hyperborea.core.model.DeviceCommand
 import com.nettarion.hyperborea.core.model.DeviceIdentity
 import com.nettarion.hyperborea.core.model.DeviceInfo
@@ -74,6 +75,19 @@ class V1Session(
     /** Device capabilities read from MCU during handshake. */
     var capabilities: V1Capabilities? = null
         private set
+
+    /** Protocol-neutral view of [capabilities] for the adapter's shared capability merge. */
+    override val deviceCapabilities: DeviceCapabilities?
+        get() = capabilities?.let { caps ->
+            DeviceCapabilities(
+                maxSpeed = caps.maxKph,
+                minIncline = caps.minGrade,
+                maxIncline = caps.maxGrade,
+                maxResistance = caps.maxResistance,
+                maxPower = null, // V1 derives max power from the power-curve table, not a read field
+                equipmentType = caps.equipmentDeviceId?.let { DeviceDatabase.deviceTypeFromEquipmentId(it) },
+            )
+        }
 
     /** Power-curve table index for this device, resolved during the handshake. */
     var powerCurveIndex: Int? = null

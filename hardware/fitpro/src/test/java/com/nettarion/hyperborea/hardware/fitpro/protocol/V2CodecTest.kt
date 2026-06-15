@@ -137,11 +137,11 @@ class V2CodecTest {
 
     @Test
     fun `decode SupportedFeatures keeps unknown feature ids as list content`() {
-        // Two ids we don't model: 0x012F (303) and 0x0130 (304).
-        val packet = byteArrayOf(0x02, 0x21, 0x04, 0x2F, 0x01, 0x30, 0x01)
+        // Two ids we don't model: 0x03E7 (999) and 0x03E8 (1000).
+        val packet = byteArrayOf(0x02, 0x21, 0x04, 0xE7.toByte(), 0x03, 0xE8.toByte(), 0x03)
         val decoded = V2Codec.decode(packet) as V2Message.Incoming.SupportedFeatures
         assertThat(decoded.features).isEmpty()
-        assertThat(decoded.unknownCodes).containsExactly(303, 304)
+        assertThat(decoded.unknownCodes).containsExactly(999, 1000)
         assertThat(decoded.isEndOfList).isFalse()
     }
 

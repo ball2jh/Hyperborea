@@ -99,8 +99,11 @@ object DeviceDatabase {
         }
     }
 
+    /** Name used for equipment not in the catalog; the adapter refines it to "FitPro <Type>". */
+    const val FALLBACK_NAME = "FitPro Device"
+
     private val FALLBACK = DeviceRecord(
-        name = "FitPro Device",
+        name = FALLBACK_NAME,
         type = null,
         maxResistance = null,
         minIncline = null,

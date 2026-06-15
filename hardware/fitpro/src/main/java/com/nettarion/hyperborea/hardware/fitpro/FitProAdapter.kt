@@ -3,11 +3,13 @@ package com.nettarion.hyperborea.hardware.fitpro
 import com.nettarion.hyperborea.core.adapter.AdapterState
 import com.nettarion.hyperborea.core.AppLogger
 import com.nettarion.hyperborea.core.model.ConsoleKey
+import com.nettarion.hyperborea.core.model.DeviceCapabilities
 import com.nettarion.hyperborea.core.model.DeviceCommand
 import com.nettarion.hyperborea.core.model.DeviceIdentity
 import com.nettarion.hyperborea.core.model.DeviceInfo
 import com.nettarion.hyperborea.core.model.DeviceType
 import com.nettarion.hyperborea.core.model.ExerciseData
+import com.nettarion.hyperborea.core.model.displayName
 import com.nettarion.hyperborea.core.orchestration.FulfillResult
 import com.nettarion.hyperborea.core.adapter.HardwareAdapter
 import com.nettarion.hyperborea.core.orchestration.Prerequisite
@@ -168,14 +170,11 @@ class FitProAdapter @Inject constructor(
                 logger.i(TAG, "Detected device type: ${newSession.detectedDeviceType}")
             }
 
-            // Capture identity / health available from start() (the forwarding coroutines below may not have run yet)
+            // Capture identity / health available from start() (the forwarding coroutines below may
+            // not have run yet). resolveDeviceInfo() overlays the session's MCU-reported limits, so
+            // this also publishes the merged bounds — and keeps them on every later identity update.
             updateIdentity(newSession.deviceIdentity.value)
             _degradedReason.value = newSession.degradedReason.value
-
-            // Merge MCU-reported capabilities into DeviceInfo. V1 reports detailed equipment
-            // bounds (min/max grade, speed, resistance) on top of the device type; V2's type
-            // refinement is handled inside resolveDeviceInfo() via lastDetectedType.
-            if (newSession is V1Session) mergeCapabilities(newSession)
 
             // Forward exercise data from session
             dataForwardJob = scope.launch {
@@ -266,6 +265,10 @@ class FitProAdapter @Inject constructor(
             }
 
             val identity = session.identify() ?: return baseInfo
+            // V2 infers the equipment type from the supported-features heuristic during identify;
+            // capture it so resolveDeviceInfo() overlays it and the idle dashboard shows the right
+            // device type. V1 reports its type via capabilities at connect, so leave its path alone.
+            if (session is V2Session) lastDetectedType = session.detectedDeviceType
             updateIdentity(identity)
             return resolveDeviceInfo(identity)
         } catch (e: CancellationException) { throw e }
@@ -326,7 +329,8 @@ class FitProAdapter @Inject constructor(
         val configKey = modelNumber ?: lastProductId?.let { -it }
         if (configKey != null) {
             val custom = deviceConfigRepository.getConfig(configKey)
-            // The user's saved config wins outright — including over the session-detected type.
+            // The user's saved config wins outright — including over the session-detected type and
+            // the MCU-reported limits (we skip the capability overlay below for it).
             if (custom != null) return custom.copy(configKey = configKey)
         }
         val partNum = identity.partNumber?.toIntOrNull()
@@ -334,7 +338,10 @@ class FitProAdapter @Inject constructor(
             DeviceDatabase.fromHandshake(modelNumber ?: 0, partNum ?: 0)
         else DeviceDatabase.fallback()
         val typed = lastDetectedType?.let { applyTypeDefaults(base, it) } ?: base
-        return typed.copy(configKey = configKey)
+        // Overlay the live session's MCU-reported limits (null during identify(), where there's no
+        // subscription). Re-applied on every identity update so lifetime-stat events don't wipe it.
+        val withCaps = session?.deviceCapabilities?.let { overlayCapabilities(typed, it) } ?: typed
+        return withCaps.copy(configKey = configKey)
     }
 
     override suspend fun refreshDeviceInfo() {
@@ -385,31 +392,43 @@ class FitProAdapter @Inject constructor(
         tempSession.calibrate()
     }
 
-    private fun mergeCapabilities(session: V1Session) {
-        val caps = session.capabilities ?: return
-        val current = _deviceInfo.value ?: return
-
-        // Overlay protocol-detected equipment type
-        val detectedType = caps.equipmentDeviceId?.let { DeviceDatabase.deviceTypeFromEquipmentId(it) }
-        val typeDefaults = detectedType?.let { DeviceDatabase.defaultsForType(it) }
-
-        _deviceInfo.value = current.copy(
-            type = detectedType ?: current.type,
-            supportedMetrics = typeDefaults?.supportedMetrics ?: current.supportedMetrics,
-            minResistance = typeDefaults?.minResistance ?: current.minResistance,
-            // MCU-reported bounds override; otherwise keep current (respects user config)
-            maxIncline = caps.maxGrade ?: current.maxIncline,
-            minIncline = caps.minGrade ?: current.minIncline,
-            maxSpeed = caps.maxKph ?: current.maxSpeed,
-            maxResistance = caps.maxResistance ?: current.maxResistance,
+    /**
+     * Overlays a session's MCU-reported [com.nettarion.hyperborea.core.model.DeviceCapabilities]
+     * onto a resolved [DeviceInfo]. Each reported value overrides the catalog/type-default; anything
+     * the console didn't report keeps its current value. An uncatalogued device (still named
+     * [DeviceDatabase.FALLBACK_NAME]) gets a type-derived name like "FitPro Treadmill". A user's
+     * saved custom config never reaches here — [resolveDeviceInfo] returns it before this overlay.
+     */
+    private fun overlayCapabilities(base: DeviceInfo, caps: DeviceCapabilities): DeviceInfo {
+        val type = caps.equipmentType ?: base.type
+        val typeDefaults = caps.equipmentType?.let { DeviceDatabase.defaultsForType(it) }
+        // Give an uncatalogued NON-bike device a type-derived name; a generic bike keeps the plain
+        // fallback name (BIKE is also the pre-detection default, so this avoids relabelling it).
+        val name = if (base.name == DeviceDatabase.FALLBACK_NAME && type != DeviceType.BIKE) {
+            "FitPro ${type.displayName}"
+        } else {
+            base.name
+        }
+        return base.copy(
+            name = name,
+            type = type,
+            supportedMetrics = typeDefaults?.supportedMetrics ?: base.supportedMetrics,
+            minResistance = typeDefaults?.minResistance ?: base.minResistance,
+            // MCU-reported bounds override; otherwise keep current (catalog/type-default).
+            maxIncline = caps.maxIncline ?: base.maxIncline,
+            minIncline = caps.minIncline ?: base.minIncline,
+            maxSpeed = caps.maxSpeed ?: base.maxSpeed,
+            maxResistance = caps.maxResistance ?: base.maxResistance,
+            maxPower = caps.maxPower ?: base.maxPower,
         )
-        logger.i(TAG, "Merged MCU capabilities into DeviceInfo: type=${detectedType ?: current.type}, name=${_deviceInfo.value?.name}")
     }
 
     /**
-     * V2 has no MCU-reported equipment bounds (those come from the model/partNumber catalog
-     * lookup), so refining for the session-detected type only means overlaying the type and its
-     * default metric set / minResistance onto the catalog/fallback base.
+     * Refines a catalog/fallback base for a session-detected equipment type before the MCU's own
+     * limits arrive — used on the identify()/idle-dashboard path (no subscribe, so no reported
+     * limits) and as the catalog-miss base at connect. Overlays the type and its default bounds so
+     * an uncatalogued treadmill isn't shown bike speed/incline; [mergeCapabilities] then overrides
+     * with the device's reported limits at connect.
      */
     private fun applyTypeDefaults(base: DeviceInfo, type: DeviceType): DeviceInfo {
         if (base.type == type) return base
@@ -418,6 +437,11 @@ class FitProAdapter @Inject constructor(
             type = type,
             supportedMetrics = typeDefaults.supportedMetrics,
             minResistance = typeDefaults.minResistance,
+            maxResistance = typeDefaults.maxResistance,
+            minIncline = typeDefaults.minIncline,
+            maxIncline = typeDefaults.maxIncline,
+            maxSpeed = typeDefaults.maxSpeed,
+            maxPower = typeDefaults.maxPower,
         )
     }
 

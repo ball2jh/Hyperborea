@@ -16,6 +16,9 @@ import com.nettarion.hyperborea.hardware.fitpro.session.FakeHidTransport
 import com.nettarion.hyperborea.hardware.fitpro.transport.HidTransportFactory
 import com.nettarion.hyperborea.hardware.fitpro.transport.HidTransportResult
 import com.nettarion.hyperborea.hardware.fitpro.v1.V1Codec
+import com.nettarion.hyperborea.hardware.fitpro.v2.V2FeatureId
+import java.nio.ByteBuffer
+import java.nio.ByteOrder
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.test.TestScope
@@ -571,6 +574,74 @@ class FitProAdapterTest {
 
         assertThat(adapter.deviceInfo.value).isNotNull()
         assertThat(adapter.deviceInfo.value!!.maxResistance).isEqualTo(30)
+    }
+
+    @Test
+    fun `V2 MCU-reported limits overlay onto deviceInfo with a type-derived name`() = runTest {
+        val adapter = createAdapter(this, productId = 3)
+        // The console declares its features, then reports its type and physical limits as events.
+        buildV2SupportedFeatures(
+            V2FeatureId.DEVICE_TYPE, V2FeatureId.TARGET_KPH, V2FeatureId.MAX_KPH,
+            V2FeatureId.MIN_GRADE_PERCENT, V2FeatureId.MAX_GRADE_PERCENT, V2FeatureId.WORKOUT_STATE,
+        ).forEach { transport.emitIncoming(it) }
+        transport.emitIncoming(buildV2Event(V2FeatureId.DEVICE_TYPE, 4f)) // treadmill
+        transport.emitIncoming(buildV2Event(V2FeatureId.MAX_KPH, 20f))
+        transport.emitIncoming(buildV2Event(V2FeatureId.MIN_GRADE_PERCENT, 0f))
+        transport.emitIncoming(buildV2Event(V2FeatureId.MAX_GRADE_PERCENT, 12f))
+
+        adapter.connect()
+        advanceUntilIdle()
+
+        val info = adapter.deviceInfo.value!!
+        assertThat(info.type).isEqualTo(DeviceType.TREADMILL)
+        assertThat(info.maxSpeed).isEqualTo(20f)
+        assertThat(info.minIncline).isEqualTo(0f)
+        assertThat(info.maxIncline).isEqualTo(12f)
+        // Uncatalogued device → type-derived name, not a hardcoded model name.
+        assertThat(info.name).isEqualTo("FitPro Treadmill")
+    }
+
+    @Test
+    fun `user config wins over V2 MCU-reported limits`() = runTest {
+        fakeDeviceConfigRepo.configs[-3] = DeviceInfo(
+            name = "My Treadmill",
+            type = DeviceType.TREADMILL,
+            supportedMetrics = setOf(Metric.SPEED, Metric.INCLINE),
+            maxResistance = 0, minResistance = 0,
+            minIncline = 0f, maxIncline = 10f,
+            maxPower = 1200, minPower = 0, powerStep = 1,
+            resistanceStep = 1.0f, inclineStep = 0.5f,
+            speedStep = 0.5f, maxSpeed = 15f,
+        )
+        val adapter = createAdapter(this, productId = 3)
+        // MCU reports a HIGHER max speed than the user's config — the user's value must still win.
+        buildV2SupportedFeatures(
+            V2FeatureId.DEVICE_TYPE, V2FeatureId.MAX_KPH, V2FeatureId.WORKOUT_STATE,
+        ).forEach { transport.emitIncoming(it) }
+        transport.emitIncoming(buildV2Event(V2FeatureId.DEVICE_TYPE, 4f))
+        transport.emitIncoming(buildV2Event(V2FeatureId.MAX_KPH, 30f))
+
+        adapter.connect()
+        advanceUntilIdle()
+
+        assertThat(adapter.deviceInfo.value!!.name).isEqualTo("My Treadmill")
+        assertThat(adapter.deviceInfo.value!!.maxSpeed).isEqualTo(15f)
+    }
+
+    /** Supported-features frames (one content frame + empty terminator) for a V2 console. */
+    private fun buildV2SupportedFeatures(vararg features: V2FeatureId): List<ByteArray> {
+        val frame = ByteArray(features.size * 2)
+        features.forEachIndexed { i, f -> frame[i * 2] = f.wireLo; frame[i * 2 + 1] = f.wireHi }
+        return listOf(
+            byteArrayOf(0x02, 0x21, frame.size.toByte(), *frame),
+            byteArrayOf(0x02, 0x21, 0), // end-of-list terminator
+        )
+    }
+
+    private fun buildV2Event(feature: V2FeatureId, value: Float): ByteArray {
+        val payload = ByteBuffer.allocate(6).order(ByteOrder.LITTLE_ENDIAN)
+            .put(feature.wireLo).put(feature.wireHi).putFloat(value).array()
+        return byteArrayOf(0x02, 0x25, payload.size.toByte(), *payload)
     }
 
 }

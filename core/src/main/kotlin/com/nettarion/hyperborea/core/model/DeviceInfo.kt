@@ -58,4 +58,13 @@ enum class DeviceType { BIKE, TREADMILL, ROWER, ELLIPTICAL }
 val DeviceType.isBeltBased: Boolean
     get() = this == DeviceType.TREADMILL
 
+/** Human-readable equipment-type label, e.g. for naming an uncatalogued device "FitPro Treadmill". */
+val DeviceType.displayName: String
+    get() = when (this) {
+        DeviceType.BIKE -> "Bike"
+        DeviceType.TREADMILL -> "Treadmill"
+        DeviceType.ROWER -> "Rower"
+        DeviceType.ELLIPTICAL -> "Elliptical"
+    }
+
 enum class Metric { POWER, CADENCE, SPEED, RESISTANCE, INCLINE, HEART_RATE, DISTANCE, CALORIES }

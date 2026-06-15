@@ -2,6 +2,7 @@ package com.nettarion.hyperborea.hardware.fitpro.v2
 
 import com.nettarion.hyperborea.core.AppLogger
 import com.nettarion.hyperborea.core.model.ConsoleKey
+import com.nettarion.hyperborea.core.model.DeviceCapabilities
 import com.nettarion.hyperborea.core.model.DeviceCommand
 import com.nettarion.hyperborea.core.model.DeviceIdentity
 import com.nettarion.hyperborea.core.model.DeviceInfo
@@ -100,6 +101,25 @@ class V2Session(
     private var lastSpeedKph: Float? = null
     private val gripHeartRate = GripHeartRateFilter()
 
+    // Equipment limits the console reports as subscribed events (see applyEvent's limit branches).
+    // Null until the MCU reports each; surfaced to the adapter via [deviceCapabilities] to overlay
+    // onto DeviceInfo — we read the device's own bounds instead of hardcoding per-model numbers.
+    private var capMaxSpeed: Float? = null
+    private var capMinIncline: Float? = null
+    private var capMaxIncline: Float? = null
+    private var capMaxResistance: Int? = null
+    private var capMaxPower: Int? = null
+
+    override val deviceCapabilities: DeviceCapabilities
+        get() = DeviceCapabilities(
+            maxSpeed = capMaxSpeed,
+            minIncline = capMinIncline,
+            maxIncline = capMaxIncline,
+            maxResistance = capMaxResistance,
+            maxPower = capMaxPower,
+            equipmentType = detectedDeviceType,
+        )
+
     override suspend fun start() {
         if (_sessionState.value is SessionState.Streaming || _sessionState.value is SessionState.Connecting) return
 
@@ -184,6 +204,11 @@ class V2Session(
         declaredFeatures = null
         lastKeyCode = 0
         lastSpeedKph = null
+        capMaxSpeed = null
+        capMinIncline = null
+        capMaxIncline = null
+        capMaxResistance = null
+        capMaxPower = null
         _exerciseData.value = null
         _deviceIdentity.value = null
         _degradedReason.value = null
@@ -617,7 +642,14 @@ class V2Session(
             V2FeatureId.DISTANCE -> accumulator.updateDistance(value / 1000f)
             V2FeatureId.CURRENT_CALORIES -> accumulator.updateCalories(value.toInt())
             V2FeatureId.RUNNING_TIME -> accumulator.updateElapsedTime(value.toLong())
-            V2FeatureId.TARGET_KPH -> accumulator.updateTargetSpeed(value)
+            V2FeatureId.TARGET_KPH -> {
+                accumulator.updateTargetSpeed(value)
+                // Belt machines don't report instantaneous speed (CURRENT_KPH is never sent on the
+                // V2 treadmill); the belt runs at the commanded TARGET_KPH, so that IS the actual
+                // speed — drive the displayed/broadcast speed from it. Bikes/ellipticals report a
+                // real CURRENT_KPH and keep TARGET_KPH as a pure target, so this is belt-only.
+                if (detectedDeviceType.isBeltBased) accumulator.updateSpeed(value)
+            }
             V2FeatureId.TARGET_GRADE -> accumulator.updateTargetIncline(value)
             V2FeatureId.SYSTEM_MODE -> { /* System on/standby/sleep — not the workout state, and not exercise data */ }
             // Write-only init configuration — never subscribed, but a console may echo writes back.
@@ -653,7 +685,17 @@ class V2Session(
                 if (mode == V2WorkoutMode.READY_TO_START) requestWorkoutStart("console reported READY_TO_START")
                 accumulator.updateWorkoutMode(v2WorkoutStateToV1Code(mode))
             }
-            V2FeatureId.MAX_RESISTANCE -> { /* Device capability, not exercise data */ }
+            // Equipment limits the MCU reports — captured into the session's capabilities (overlaid
+            // onto DeviceInfo by the adapter), not exercise data.
+            V2FeatureId.MAX_KPH -> capMaxSpeed = value
+            V2FeatureId.MIN_GRADE_PERCENT -> capMinIncline = value
+            V2FeatureId.MAX_GRADE_PERCENT -> capMaxIncline = value
+            V2FeatureId.MAX_RESISTANCE -> capMaxResistance = value.toInt()
+            V2FeatureId.MAX_WATTS -> capMaxPower = value.toInt()
+            // Reported limits we don't currently overlay onto DeviceInfo (no field for them) — read
+            // and ignore so the subscription doesn't generate "unhandled feature" noise.
+            V2FeatureId.MIN_KPH, V2FeatureId.MAX_RPM,
+            V2FeatureId.MAX_USER_WEIGHT_KG, V2FeatureId.MAX_GEAR -> { }
             V2FeatureId.GOAL_WATTS -> accumulator.updateTargetPower(value.toInt())
         }
     }

@@ -11,6 +11,8 @@ enum class V2FeatureId(val code: Int) {
     IDLE_SYSTEM_MODE_LOCK(103),
     /** Rider weight (kg) — written for the console's own calorie estimation. */
     USER_WEIGHT_KG(105),
+    /** Equipment's max rider weight (kg) — a reported limit. */
+    MAX_USER_WEIGHT_KG(106),
     /** Console keypad presses — key-code values shared with the V1 keypad field. */
     KEY_COOKED(109),
     /** Equipment lifetime usage, seconds. */
@@ -40,6 +42,17 @@ enum class V2FeatureId(val code: Int) {
     MAX_RESISTANCE(504),
     WATTS(522),
     GOAL_WATTS(523),
+    // Equipment LIMITS the MCU reports as subscribed events (they arrive in the same post-subscribe
+    // window as DEVICE_TYPE). These are the device's PHYSICAL bounds — we read them instead of
+    // hardcoding per-model bounds. NB: WORKOUT_MAX_KPH(308) / WORKOUT_MAX_GRADE_PERCENT(408) are
+    // deliberately NOT modelled — those are per-workout caps, not equipment limits.
+    MIN_KPH(303),
+    MAX_KPH(304),
+    MIN_GRADE_PERCENT(403),
+    MAX_GRADE_PERCENT(404),
+    MAX_RPM(328),
+    MAX_WATTS(528),
+    MAX_GEAR(323),
     /** The console workout state — its value is a [V2WorkoutMode] ordinal. This is the one to drive for start/pause/resume/stop. */
     WORKOUT_STATE(602),
     RUNNING_TIME(604),
@@ -63,6 +76,12 @@ enum class V2FeatureId(val code: Int) {
             CURRENT_KPH, RPM, CURRENT_GRADE, TARGET_RESISTANCE, MAX_RESISTANCE, WATTS,
             RUNNING_TIME, KEY_COOKED, REQUEST_DISCONNECT, TOTAL_IN_USE_SECONDS,
             TOTAL_MACHINE_DISTANCE,
+            // Belt machines report belt speed in the writable TARGET_KPH field and never populate
+            // CURRENT_KPH, so we subscribe to it to read actual treadmill speed.
+            TARGET_KPH,
+            // Equipment limits — the device reports its own bounds (see V2Session capture).
+            MIN_KPH, MAX_KPH, MIN_GRADE_PERCENT, MAX_GRADE_PERCENT, MAX_RPM, MAX_WATTS,
+            MAX_USER_WEIGHT_KG, MAX_GEAR,
         )
     }
 }

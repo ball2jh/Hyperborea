@@ -297,4 +297,14 @@ class DeviceDatabaseTest {
         val summary = DeviceDatabase.catalogSummary(0)
         assertThat(summary).isNull()
     }
+
+    @Test
+    fun `uncatalogued part number falls back instead of a hardcoded override`() {
+        // The T Series 9 (455916) is NOT in the generated catalog and has no hand-maintained
+        // override — its bounds/type come from the MCU at connect (see V2Session capabilities),
+        // not the catalog. The bare catalog lookup must return the generic fallback.
+        val info = DeviceDatabase.fromHandshake(modelNumber = 0, partNumber = 455916)
+        assertThat(info.name).isEqualTo(DeviceDatabase.FALLBACK_NAME)
+        assertThat(info.type).isEqualTo(DeviceType.BIKE)
+    }
 }

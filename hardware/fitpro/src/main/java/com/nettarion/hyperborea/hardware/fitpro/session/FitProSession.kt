@@ -1,6 +1,7 @@
 package com.nettarion.hyperborea.hardware.fitpro.session
 
 import com.nettarion.hyperborea.core.model.ConsoleKey
+import com.nettarion.hyperborea.core.model.DeviceCapabilities
 import com.nettarion.hyperborea.core.model.DeviceCommand
 import com.nettarion.hyperborea.core.model.DeviceIdentity
 import com.nettarion.hyperborea.core.model.DeviceType
@@ -26,6 +27,13 @@ interface FitProSession {
      * its [com.nettarion.hyperborea.core.adapter.HardwareAdapter.deviceInfo].
      */
     val detectedDeviceType: DeviceType
+
+    /**
+     * Equipment limits the MCU reported during bring-up (max speed, incline range, max resistance,
+     * max power), or null before [start] resolves them / when the console reports none. The adapter
+     * overlays these onto its public [com.nettarion.hyperborea.core.model.DeviceInfo] after [start].
+     */
+    val deviceCapabilities: DeviceCapabilities?
 
     suspend fun start()
     suspend fun stop()
