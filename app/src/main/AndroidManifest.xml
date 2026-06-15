@@ -82,9 +82,16 @@
         <activity
             android:name=".MainActivity"
             android:exported="true"
+            android:launchMode="singleTask"
             android:screenOrientation="landscape"
             android:theme="@style/Theme.Hyperborea"
             tools:ignore="DiscouragedApi">
+            <!-- singleTask: the equipment's USB re-enumerates every ~5-20s (motor-controller
+                 watchdog), and this activity handles USB_DEVICE_ATTACHED, so in the default
+                 (standard) launch mode each re-attach spawned a NEW MainActivity on top — a fresh
+                 NavHost reset to the dashboard, bouncing the user out of Settings mid-tap. As a
+                 single instance, a re-attach just delivers onNewIntent to the live activity
+                 (logs it, no navigation reset), so whatever screen the user is on is preserved. -->
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
