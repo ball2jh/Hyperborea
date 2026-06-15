@@ -277,7 +277,7 @@ class Orchestrator(
         // promotion when the user presses it. Other devices go straight to Running.
         if (deviceInfo.type == DeviceType.TREADMILL) {
             _state.value = OrchestratorState.AwaitingConsoleStart(CONSOLE_START_MESSAGE)
-            logger.i(TAG, "Treadmill armed in WARM_UP — awaiting physical Start key")
+            logger.i(TAG, "Treadmill armed — awaiting physical Start key")
         } else {
             enterRunning()
         }

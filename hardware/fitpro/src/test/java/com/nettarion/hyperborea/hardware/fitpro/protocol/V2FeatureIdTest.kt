@@ -59,6 +59,7 @@ class V2FeatureIdTest {
         assertThat(V2FeatureId.MAX_KPH.code).isEqualTo(304)
         assertThat(V2FeatureId.MAX_GRADE_PERCENT.code).isEqualTo(404)
         assertThat(V2FeatureId.MAX_WATTS.code).isEqualTo(528)
+        // Round-trips through the wire-byte encoding like every other feature.
         assertThat(V2FeatureId.fromWireBytes(V2FeatureId.MAX_KPH.wireLo, V2FeatureId.MAX_KPH.wireHi))
             .isEqualTo(V2FeatureId.MAX_KPH)
     }
@@ -82,6 +83,7 @@ class V2FeatureIdTest {
             V2FeatureId.MAX_RESISTANCE, V2FeatureId.MAX_WATTS,
         )
         assertThat(V2FeatureId.subscribable).doesNotContain(V2FeatureId.TARGET_GRADE)
+        assertThat(V2FeatureId.subscribable).doesNotContain(V2FeatureId.START_REQUESTED)
     }
 
     @Test

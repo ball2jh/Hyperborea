@@ -53,6 +53,13 @@ enum class V2FeatureId(val code: Int) {
     MAX_RPM(328),
     MAX_WATTS(528),
     MAX_GEAR(323),
+    /**
+     * Host→console "the user asked to start" acknowledgement. The stock service writes this TRUE
+     * when the MCU reports [V2WorkoutMode.READY_TO_START]; the MCU then drives ITSELF through
+     * `WARM_UP → RUNNING` (belt and all). Write-only for us; not subscribed. Preferred over
+     * host-writing the workout state directly — see [V2Session.requestWorkoutStart].
+     */
+    START_REQUESTED(612),
     /** The console workout state — its value is a [V2WorkoutMode] ordinal. This is the one to drive for start/pause/resume/stop. */
     WORKOUT_STATE(602),
     RUNNING_TIME(604),
@@ -77,7 +84,8 @@ enum class V2FeatureId(val code: Int) {
             RUNNING_TIME, KEY_COOKED, REQUEST_DISCONNECT, TOTAL_IN_USE_SECONDS,
             TOTAL_MACHINE_DISTANCE,
             // Belt machines report belt speed in the writable TARGET_KPH field and never populate
-            // CURRENT_KPH, so we subscribe to it to read actual treadmill speed.
+            // CURRENT_KPH, so we subscribe to it to read actual treadmill speed (see V2Session's
+            // TARGET_KPH handling). Bikes/ellipticals keep it as a pure target — harmless to watch.
             TARGET_KPH,
             // Equipment limits — the device reports its own bounds (see V2Session capture).
             MIN_KPH, MAX_KPH, MIN_GRADE_PERCENT, MAX_GRADE_PERCENT, MAX_RPM, MAX_WATTS,
