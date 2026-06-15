@@ -778,10 +778,54 @@ class V2SessionTest {
     }
 
     @Test
-    fun `physical speed incline and Stop keys are observe-only on a treadmill`() = runTest {
-        // The V2 MCU acts on its own keys (and reports the resulting state); the host must NOT
-        // translate them into target/state writes or it double-steps the belt. Keys are forwarded
-        // for UI/diagnostics only.
+    fun `console without START_REQUESTED is host-driven to RUNNING and the belt is commanded`() = runTest {
+        // Older firmware (e.g. the iFIT-LargeX / T Series 9, fw 1.19.x) rejects START_REQUESTED, so
+        // on the console's start signal the host drives WORKOUT_STATE WARM_UP → RUNNING and then
+        // commands the minimum belt speed (the firmware won't move the belt on its own).
+        val session = createSession(this)
+        emitSupportedFeatures(V2FeatureId.TARGET_KPH, V2FeatureId.WORKOUT_STATE)
+        session.start()
+        advanceUntilIdle()
+        val baseline = transport.writtenPackets.size
+
+        transport.emitIncoming(buildEventPacket(V2FeatureId.WORKOUT_STATE, V2WorkoutMode.READY_TO_START.raw))
+        runCurrent()                 // WARM_UP written, parked at the write gap
+        advanceTimeBy(200)
+        runCurrent()                 // gap elapsed: RUNNING written
+        transport.emitIncoming(buildEventPacket(V2FeatureId.WORKOUT_STATE, V2WorkoutMode.RUNNING.raw))
+        runCurrent()                 // confirm completes → initial belt speed write
+
+        val written = transport.writtenPackets.drop(baseline)
+        // Host-drove the workout state, did NOT write START_REQUESTED.
+        assertThat(written.mapNotNull { it.workoutStateWriteValue() })
+            .containsExactly(V2WorkoutMode.WARM_UP.raw, V2WorkoutMode.RUNNING.raw).inOrder()
+        assertThat(written.none { it.isFeatureWrite(V2FeatureId.START_REQUESTED) }).isTrue()
+        val speed = written.filter { it.isFeatureWrite(V2FeatureId.TARGET_KPH) }
+        assertThat(speed).hasSize(1)
+        assertThat(speed[0].featureWriteValue()).isEqualTo(0.5f)
+    }
+
+    @Test
+    fun `physical Start key host-drives the workout on a console without START_REQUESTED`() = runTest {
+        // Covers firmware that forwards the Start key without also reporting READY_TO_START.
+        val session = createSession(this)
+        emitSupportedFeatures(V2FeatureId.TARGET_KPH, V2FeatureId.WORKOUT_STATE)
+        session.start()
+        advanceUntilIdle()
+        val baseline = transport.writtenPackets.size
+
+        transport.emitIncoming(buildEventPacket(V2FeatureId.KEY_COOKED, 2f)) // START
+        runCurrent()
+        advanceTimeBy(200)
+        runCurrent()
+
+        val writes = transport.writtenPackets.drop(baseline).mapNotNull { it.workoutStateWriteValue() }
+        assertThat(writes).containsExactly(V2WorkoutMode.WARM_UP.raw, V2WorkoutMode.RUNNING.raw).inOrder()
+    }
+
+    @Test
+    fun `host-driven console routes speed incline and Stop keys while RUNNING`() = runTest {
+        // The console forwards keys but drives nothing itself, so the host answers them.
         val session = createSession(this)
         emitSupportedFeatures(V2FeatureId.TARGET_KPH, V2FeatureId.TARGET_GRADE, V2FeatureId.WORKOUT_STATE)
         session.start()
@@ -795,18 +839,39 @@ class V2SessionTest {
         transport.emitIncoming(buildEventPacket(V2FeatureId.KEY_COOKED, 0f)) // release
         transport.emitIncoming(buildEventPacket(V2FeatureId.KEY_COOKED, 5f)) // incline up
         runCurrent()
-        transport.emitIncoming(buildEventPacket(V2FeatureId.KEY_COOKED, 0f)) // release
-        transport.emitIncoming(buildEventPacket(V2FeatureId.KEY_COOKED, 1f)) // STOP
+
+        val writes = transport.writtenPackets.drop(baseline)
+        assertThat(writes.filter { it.isFeatureWrite(V2FeatureId.TARGET_KPH) }).hasSize(1)
+        assertThat(writes.filter { it.isFeatureWrite(V2FeatureId.TARGET_GRADE) }).hasSize(1)
+    }
+
+    @Test
+    fun `self-driving console that declares START_REQUESTED leaves keys observe-only`() = runTest {
+        // Newer firmware acts on its own keys; routing them too would double-step the belt.
+        val session = createSession(this)
+        emitSupportedFeatures(
+            V2FeatureId.TARGET_KPH, V2FeatureId.TARGET_GRADE,
+            V2FeatureId.START_REQUESTED, V2FeatureId.WORKOUT_STATE,
+        )
+        session.start()
+        advanceUntilIdle()
+        transport.emitIncoming(buildEventPacket(V2FeatureId.WORKOUT_STATE, V2WorkoutMode.RUNNING.raw))
+        runCurrent()
+        val baseline = transport.writtenPackets.size
+
+        transport.emitIncoming(buildEventPacket(V2FeatureId.KEY_COOKED, 3f)) // speed up
+        runCurrent()
+        transport.emitIncoming(buildEventPacket(V2FeatureId.KEY_COOKED, 0f))
+        transport.emitIncoming(buildEventPacket(V2FeatureId.KEY_COOKED, 5f)) // incline up
         runCurrent()
 
         val writes = transport.writtenPackets.drop(baseline)
         assertThat(writes.none { it.isFeatureWrite(V2FeatureId.TARGET_KPH) }).isTrue()
         assertThat(writes.none { it.isFeatureWrite(V2FeatureId.TARGET_GRADE) }).isTrue()
-        assertThat(writes.mapNotNull { it.workoutStateWriteValue() }).isEmpty()
     }
 
     @Test
-    fun `treadmill that never starts after START_REQUESTED flags then clears a degraded reason`() = runTest {
+    fun `start that never reaches RUNNING flags then clears a degraded reason`() = runTest {
         val session = createSession(this)
         emitSupportedFeatures(V2FeatureId.TARGET_KPH, V2FeatureId.WORKOUT_STATE)
         session.start()
@@ -827,40 +892,25 @@ class V2SessionTest {
     }
 
     @Test
-    fun `physical Start key acks with START_REQUESTED`() = runTest {
-        // Covers firmware that forwards the Start key without also reporting READY_TO_START.
+    fun `overlapping start triggers collapse to one drive and re-presses while RUNNING are ignored`() = runTest {
         val session = createSession(this)
         emitSupportedFeatures(V2FeatureId.TARGET_KPH, V2FeatureId.WORKOUT_STATE)
         session.start()
         advanceUntilIdle()
         val baseline = transport.writtenPackets.size
 
-        transport.emitIncoming(buildEventPacket(V2FeatureId.KEY_COOKED, 2f)) // START
-        runCurrent()
-
-        val writes = transport.writtenPackets.drop(baseline)
-        assertThat(writes.filter { it.isFeatureWrite(V2FeatureId.START_REQUESTED) }).hasSize(1)
-        assertThat(writes.mapNotNull { it.workoutStateWriteValue() }).isEmpty()
-    }
-
-    @Test
-    fun `overlapping start triggers collapse to one ack and re-presses while RUNNING are ignored`() = runTest {
-        val session = createSession(this)
-        emitSupportedFeatures(V2FeatureId.TARGET_KPH, V2FeatureId.WORKOUT_STATE)
-        session.start()
-        advanceUntilIdle()
-        val baseline = transport.writtenPackets.size
-
-        // Firmware that both reports READY_TO_START and forwards the key — one ack, not two.
+        // Firmware that both reports READY_TO_START and forwards the key — one drive, not two.
         transport.emitIncoming(buildEventPacket(V2FeatureId.WORKOUT_STATE, V2WorkoutMode.READY_TO_START.raw))
         transport.emitIncoming(buildEventPacket(V2FeatureId.KEY_COOKED, 2f))
+        runCurrent()
+        advanceTimeBy(200)
         runCurrent()
         transport.emitIncoming(buildEventPacket(V2FeatureId.WORKOUT_STATE, V2WorkoutMode.RUNNING.raw))
         runCurrent()
 
         assertThat(
-            transport.writtenPackets.drop(baseline).filter { it.isFeatureWrite(V2FeatureId.START_REQUESTED) },
-        ).hasSize(1)
+            transport.writtenPackets.drop(baseline).mapNotNull { it.workoutStateWriteValue() },
+        ).containsExactly(V2WorkoutMode.WARM_UP.raw, V2WorkoutMode.RUNNING.raw).inOrder()
 
         // Pressing Start again while RUNNING is a no-op.
         val afterRunning = transport.writtenPackets.size

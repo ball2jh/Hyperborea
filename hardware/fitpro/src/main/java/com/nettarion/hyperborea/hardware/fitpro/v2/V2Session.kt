@@ -394,7 +394,41 @@ class V2Session(
         logger.d(TAG, "Console keypad: code=$code${key?.let { " ($it)" } ?: ""}")
         key?.let { _consoleKeyPresses.tryEmit(it) }
         if (key == ConsoleKey.START) requestWorkoutStart("physical Start key")
+        if (key != null && detectedDeviceType == DeviceType.TREADMILL) routeTreadmillKey(key)
     }
+
+    /**
+     * Acts on host-routed treadmill keys for firmware that forwards keys but drives nothing itself —
+     * speed/incline ± and Stop only move the belt if the host answers them. This is the older
+     * firmware that also needs host-driven start (it doesn't declare START_REQUESTED). Newer
+     * firmware that declares START_REQUESTED self-drives the belt and acts on its own keys, so for
+     * it the keys are observe-only — routing them too would double-step. Gated on RUNNING so presses
+     * while parked can't pre-wind the speed target. START is handled separately (requestWorkoutStart).
+     */
+    private fun routeTreadmillKey(key: ConsoleKey) {
+        if (consoleDeclaresStartRequested) return
+        val mode = _workoutMode.value?.let { V2WorkoutMode.fromRaw(it) }
+        if (mode != V2WorkoutMode.RUNNING) return
+        val command = when (key) {
+            ConsoleKey.SPEED_UP -> DeviceCommand.AdjustSpeed(increase = true)
+            ConsoleKey.SPEED_DOWN -> DeviceCommand.AdjustSpeed(increase = false)
+            ConsoleKey.INCLINE_UP -> DeviceCommand.AdjustIncline(increase = true)
+            ConsoleKey.INCLINE_DOWN -> DeviceCommand.AdjustIncline(increase = false)
+            // A Stop press on a moving belt must halt it — PAUSED is what stops the belt on V2.
+            ConsoleKey.STOP -> DeviceCommand.PauseWorkout
+            else -> return
+        }
+        scope.launch { writeFeature(command) }
+    }
+
+    /**
+     * True when the console declares START_REQUESTED — newer firmware that self-drives the workout
+     * (and its own keys) on an ack. Older firmware (which rejects START_REQUESTED outright) needs
+     * the host to drive WORKOUT_STATE and to answer the speed/incline keys. Picks the start path
+     * ([requestWorkoutStart]) and whether physical keys are host-routed ([routeTreadmillKey]).
+     */
+    private val consoleDeclaresStartRequested: Boolean
+        get() = declaredFeatures?.contains(V2FeatureId.START_REQUESTED) == true
 
     /**
      * Acknowledges the user's physical Start so the console begins the workout. On V2 the MCU
@@ -417,22 +451,46 @@ class V2Session(
         if (from == V2WorkoutMode.RUNNING) return
         if (startRequestJob?.isActive == true) return
 
+        // Two start mechanisms, picked by what the console declares (WORKOUT_STATE is writable and
+        // is the equipment software's own workout driver; START_REQUESTED is an extra ack only some
+        // firmware implements):
+        //  - Declares START_REQUESTED → write it true and let the MCU self-drive (newer firmware).
+        //  - Doesn't (e.g. fw 1.19.x, which rejects START_REQUESTED outright) → host-drive
+        //    WORKOUT_STATE to RUNNING, then command the belt (the firmware won't move it on its own).
+        val acked = consoleDeclaresStartRequested
+
         startRequestJob = scope.launch {
-            logger.i(TAG, "Start requested ($trigger, console state=${from ?: "unreported"}) — acking with START_REQUESTED")
             try {
-                writeFeatureRaw(V2FeatureId.START_REQUESTED, START_REQUESTED_TRUE)
-                if (confirmWorkoutMode("self-drive to RUNNING after START_REQUESTED") { it == V2WorkoutMode.RUNNING }) {
-                    logger.i(TAG, "Console reached RUNNING (start acknowledged)")
-                    return@launch
+                if (acked) {
+                    logger.i(TAG, "Start requested ($trigger, from=${from ?: "?"}) — acking with START_REQUESTED")
+                    writeFeatureRaw(V2FeatureId.START_REQUESTED, START_REQUESTED_TRUE)
+                } else {
+                    logger.i(TAG, "Start requested ($trigger, from=${from ?: "?"}) — host-driving WORKOUT_STATE to RUNNING (console doesn't declare START_REQUESTED)")
+                    if (from != V2WorkoutMode.PAUSED) {
+                        writeWorkoutState(V2WorkoutMode.WARM_UP)
+                        delay(START_WRITE_GAP_MS)
+                    }
+                    writeWorkoutState(V2WorkoutMode.RUNNING)
                 }
-                // Stock has no host-driven fallback — a console that won't start here can't be
-                // forced. Surface it instead of hanging silently; cleared when RUNNING does arrive.
-                logger.w(TAG, "Console didn't begin the workout after START_REQUESTED")
-                _degradedReason.value = START_NOT_CONFIRMED_REASON
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Exception) {
-                logger.e(TAG, "START_REQUESTED write failed", e)
+                logger.e(TAG, "Start-request writes failed", e)
+                return@launch
+            }
+
+            if (confirmWorkoutMode("reach RUNNING after Start") { it == V2WorkoutMode.RUNNING }) {
+                logger.i(TAG, "Console reached RUNNING (${if (acked) "START_REQUESTED honored" else "host-driven"})")
+                if (!acked) {
+                    // "Belt go": command the minimum speed (or the last commanded one when resuming),
+                    // like the equipment's own software after its countdown. A host-driven console
+                    // won't move the belt itself, and its speed keys are host-routed too
+                    // (see routeTreadmillKey), so without this the workout runs over a dead belt.
+                    writeFeature(DeviceCommand.SetTargetSpeed(maxOf(lastSentSpeed, INITIAL_BELT_KPH)))
+                }
+            } else {
+                logger.w(TAG, "Console didn't reach RUNNING after start ($trigger)")
+                _degradedReason.value = START_NOT_CONFIRMED_REASON
             }
         }
     }
@@ -820,6 +878,11 @@ class V2Session(
         private const val BELT_HALT_SETTLE_MS = 200L
         // START_REQUESTED ack value — "the user asked to start" (the stock service writes true).
         private const val START_REQUESTED_TRUE = 1f
+        // Host-driven start: brief gap so the MCU lands in WARM_UP before the RUNNING write follows.
+        private const val START_WRITE_GAP_MS = 150L
+        // Belt speed commanded right after a confirmed host-driven Start — the documented V2 floor
+        // (values below 0.5 kph are rejected; see haltForTeardown).
+        private const val INITIAL_BELT_KPH = 0.5f
         // Surfaced when the console doesn't begin the workout after we ack the Start press.
         private const val START_NOT_CONFIRMED_REASON =
             "Pressed Start but the console didn't begin the workout — press Start again on the console"
