@@ -144,12 +144,15 @@ class V2Session(
             _deviceIdentity.value = queryProductInfo() ?: DeviceIdentity()
 
             configureSubscriptions(supported)
-            writeInitConfiguration(supported)
 
             // Equipment type: the console reports it directly as the DEVICE_TYPE feature's
             // initial event after subscribing; the supported-feature-set heuristic covers
             // consoles that don't implement it. transitionToWorkout() branches on this.
             detectedDeviceType = resolveDeviceType(supported)
+
+            // One-shot bring-up config (heartbeat + idle-mode lock). After the type is resolved,
+            // because the idle-lock value the firmware requires depends on whether it's a belt machine.
+            writeInitConfiguration(supported)
 
             // Bring the console up to the workout-active state the way the firmware expects.
             transitionToWorkout()
@@ -465,12 +468,19 @@ class V2Session(
                     logger.i(TAG, "Start requested ($trigger, from=${from ?: "?"}) — acking with START_REQUESTED")
                     writeFeatureRaw(V2FeatureId.START_REQUESTED, START_REQUESTED_TRUE)
                 } else {
-                    logger.i(TAG, "Start requested ($trigger, from=${from ?: "?"}) — host-driving WORKOUT_STATE to RUNNING (console doesn't declare START_REQUESTED)")
-                    if (from != V2WorkoutMode.PAUSED) {
-                        writeWorkoutState(V2WorkoutMode.WARM_UP)
-                        delay(START_WRITE_GAP_MS)
-                    }
+                    logger.i(TAG, "Start requested ($trigger, from=${from ?: "?"}) — host-driving WORKOUT_STATE=RUNNING (console doesn't declare START_REQUESTED)")
+                    // The stock manual-run sequence: write the pre-workout config, then go straight to
+                    // RUNNING (no WARM_UP — that step is rejected from idle on this firmware), then
+                    // command the belt speed/incline right after the state write (as the stock does).
+                    // Skip the config when resuming from PAUSED.
+                    if (from != V2WorkoutMode.PAUSED) writePreWorkoutConfig()
                     writeWorkoutState(V2WorkoutMode.RUNNING)
+                    // "Belt go": minimum speed (or the last commanded when resuming) — a host-driven
+                    // console won't move the belt itself, and its speed keys are host-routed too.
+                    writeFeature(DeviceCommand.SetTargetSpeed(maxOf(lastSentSpeed, INITIAL_BELT_KPH)))
+                    if (V2FeatureId.TARGET_GRADE in (declaredFeatures ?: emptySet())) {
+                        writeFeature(DeviceCommand.SetIncline(lastSentGrade))
+                    }
                 }
             } catch (e: CancellationException) {
                 throw e
@@ -481,13 +491,6 @@ class V2Session(
 
             if (confirmWorkoutMode("reach RUNNING after Start") { it == V2WorkoutMode.RUNNING }) {
                 logger.i(TAG, "Console reached RUNNING (${if (acked) "START_REQUESTED honored" else "host-driven"})")
-                if (!acked) {
-                    // "Belt go": command the minimum speed (or the last commanded one when resuming),
-                    // like the equipment's own software after its countdown. A host-driven console
-                    // won't move the belt itself, and its speed keys are host-routed too
-                    // (see routeTreadmillKey), so without this the workout runs over a dead belt.
-                    writeFeature(DeviceCommand.SetTargetSpeed(maxOf(lastSentSpeed, INITIAL_BELT_KPH)))
-                }
             } else {
                 logger.w(TAG, "Console didn't reach RUNNING after start ($trigger)")
                 _degradedReason.value = START_NOT_CONFIRMED_REASON
@@ -557,9 +560,42 @@ class V2Session(
             ))
         }
         if (V2FeatureId.IDLE_SYSTEM_MODE_LOCK in supported) {
+            // Stock rule: lock = !(supportsStartRequested && beltMachine). A belt console that
+            // doesn't implement START_REQUESTED needs the lock LOCKED(1) or it rejects the host
+            // WORKOUT_STATE writes that start the belt; we previously wrote 0 (rejected). Scoped to
+            // belt machines so bikes (which work today) are left at the prior unlocked value.
+            val lock = if (detectedDeviceType.isBeltBased && !consoleDeclaresStartRequested) {
+                IDLE_MODE_LOCKED
+            } else {
+                IDLE_MODE_UNLOCKED
+            }
+            logger.i(TAG, "Bring-up: IDLE_SYSTEM_MODE_LOCK=${if (lock == IDLE_MODE_LOCKED) "locked" else "unlocked"}")
             transport.write(V2Codec.encode(
-                V2Message.Outgoing.WriteFeature(V2FeatureId.IDLE_SYSTEM_MODE_LOCK, IDLE_MODE_UNLOCKED),
+                V2Message.Outgoing.WriteFeature(V2FeatureId.IDLE_SYSTEM_MODE_LOCK, lock),
             ))
+        }
+    }
+
+    /**
+     * The stock app's pre-workout config block, written just before the workout-state transition on
+     * a host-driven (no-START_REQUESTED) treadmill: display units + warm-up/cool-down/pause timeouts
+     * + a goal time (the stock manual-run defaults). This firmware refuses the WORKOUT_STATE=RUNNING
+     * write until these are set. Each is a single write, gated on the console declaring it; rider
+     * weight is already pushed separately (SetUserWeight) by the orchestrator.
+     */
+    private suspend fun writePreWorkoutConfig() {
+        val declared = declaredFeatures ?: emptySet()
+        val config = listOf(
+            V2FeatureId.DISPLAY_UNITS to DISPLAY_UNITS_METRIC,
+            V2FeatureId.WARM_UP_TIMEOUT to WARM_UP_TIMEOUT_S,
+            V2FeatureId.COOL_DOWN_TIMEOUT to COOL_DOWN_TIMEOUT_S,
+            V2FeatureId.PAUSE_TIMEOUT to PAUSE_TIMEOUT_S,
+            V2FeatureId.GOAL_TIME to GOAL_TIME_S,
+        )
+        val sent = config.filter { (feature, _) -> feature in declared }
+        logger.i(TAG, "Pre-workout config: ${sent.joinToString { "${it.first}=${it.second}" }}")
+        for ((feature, value) in sent) {
+            writeFeatureRaw(feature, value)
         }
     }
 
@@ -688,7 +724,8 @@ class V2Session(
             V2FeatureId.SYSTEM_MODE -> { /* System on/standby/sleep — not the workout state, and not exercise data */ }
             // Write-only — never subscribed, but a console may echo writes back.
             V2FeatureId.HEART_BEAT_INTERVAL, V2FeatureId.IDLE_SYSTEM_MODE_LOCK,
-            V2FeatureId.START_REQUESTED -> { }
+            V2FeatureId.START_REQUESTED, V2FeatureId.DISPLAY_UNITS, V2FeatureId.GOAL_TIME,
+            V2FeatureId.WARM_UP_TIMEOUT, V2FeatureId.COOL_DOWN_TIMEOUT, V2FeatureId.PAUSE_TIMEOUT -> { }
             // Translated to V1 [com.nettarion.hyperborea.hardware.fitpro.v1.WorkoutMode] numbering
             // when pushed to the accumulator, so the orchestrator's workout-mode monitor (which
             // uses V1 codes for DMK / IDLE / RUNNING) reacts uniformly to V1 and V2 sessions.
@@ -878,9 +915,7 @@ class V2Session(
         private const val BELT_HALT_SETTLE_MS = 200L
         // START_REQUESTED ack value — "the user asked to start" (the stock service writes true).
         private const val START_REQUESTED_TRUE = 1f
-        // Host-driven start: brief gap so the MCU lands in WARM_UP before the RUNNING write follows.
-        private const val START_WRITE_GAP_MS = 150L
-        // Belt speed commanded right after a confirmed host-driven Start — the documented V2 floor
+        // Belt speed commanded right after the host-driven RUNNING write — the documented V2 floor
         // (values below 0.5 kph are rejected; see haltForTeardown).
         private const val INITIAL_BELT_KPH = 0.5f
         // Surfaced when the console doesn't begin the workout after we ack the Start press.
@@ -889,6 +924,14 @@ class V2Session(
         // Init configuration values — mirror the stock service's one-shot connect writes.
         private const val HEART_BEAT_INTERVAL_MS = 720f
         private const val IDLE_MODE_UNLOCKED = 0f
+        private const val IDLE_MODE_LOCKED = 1f
+        // Stock pre-workout config (manual free-run defaults): metric units, warm-up/cool-down/pause
+        // timeouts in seconds, and a 3-hour goal time. Written before the host-driven RUNNING write.
+        private const val DISPLAY_UNITS_METRIC = 1f
+        private const val WARM_UP_TIMEOUT_S = 180f
+        private const val COOL_DOWN_TIMEOUT_S = 600f
+        private const val PAUSE_TIMEOUT_S = 600f
+        private const val GOAL_TIME_S = 10_800f
         private const val MAX_SUBSCRIBE_BATCH = 8
         // How long to wait for the console to confirm a WORKOUT_STATE transition before continuing degraded.
         private const val STATE_CONFIRM_TIMEOUT_MS = 5_000L

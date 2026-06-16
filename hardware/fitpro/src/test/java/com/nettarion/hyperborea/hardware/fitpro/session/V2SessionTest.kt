@@ -187,9 +187,8 @@ class V2SessionTest {
     }
 
     @Test
-    fun `init writes heartbeat interval and idle unlock when the console declares them`() = runTest {
-        // Mirrors the stock service's one-shot connect configuration (HEART_BEAT_INTERVAL=720,
-        // IDLE_SYSTEM_MODE_LOCK=UNLOCKED) — written once, only when declared.
+    fun `init writes heartbeat once and idle lock unlocked for a non-belt console`() = runTest {
+        // HEART_BEAT_INTERVAL=720 once; idle-lock unlocked(0) for a bike (resistance present).
         val session = createSession(this)
         emitSupportedFeatures(
             V2FeatureId.HEART_BEAT_INTERVAL, V2FeatureId.IDLE_SYSTEM_MODE_LOCK,
@@ -202,6 +201,40 @@ class V2SessionTest {
         val idleLock = transport.writtenPackets.filter { it.isFeatureWrite(V2FeatureId.IDLE_SYSTEM_MODE_LOCK) }
         assertThat(heartbeat).hasSize(1)
         assertThat(heartbeat[0].featureWriteValue()).isEqualTo(720f)
+        assertThat(idleLock).hasSize(1)
+        assertThat(idleLock[0].featureWriteValue()).isEqualTo(0f)
+    }
+
+    @Test
+    fun `init locks idle mode for a belt console that doesn't declare START_REQUESTED`() = runTest {
+        // The stock rule: a belt machine without START_REQUESTED needs IDLE_SYSTEM_MODE_LOCK=locked(1),
+        // or it rejects the host WORKOUT_STATE writes that start the belt. (Treadmill = belt speed +
+        // grade, no flywheel resistance, no START_REQUESTED.)
+        val session = createSession(this)
+        emitSupportedFeatures(
+            V2FeatureId.IDLE_SYSTEM_MODE_LOCK, V2FeatureId.TARGET_KPH, V2FeatureId.TARGET_GRADE,
+            V2FeatureId.WORKOUT_STATE,
+        )
+        session.start()
+        advanceUntilIdle()
+
+        assertThat(session.detectedDeviceType).isEqualTo(DeviceType.TREADMILL)
+        val idleLock = transport.writtenPackets.filter { it.isFeatureWrite(V2FeatureId.IDLE_SYSTEM_MODE_LOCK) }
+        assertThat(idleLock).hasSize(1)
+        assertThat(idleLock[0].featureWriteValue()).isEqualTo(1f)
+    }
+
+    @Test
+    fun `init leaves idle mode unlocked for a belt console that declares START_REQUESTED`() = runTest {
+        val session = createSession(this)
+        emitSupportedFeatures(
+            V2FeatureId.IDLE_SYSTEM_MODE_LOCK, V2FeatureId.TARGET_KPH, V2FeatureId.TARGET_GRADE,
+            V2FeatureId.START_REQUESTED, V2FeatureId.WORKOUT_STATE,
+        )
+        session.start()
+        advanceUntilIdle()
+
+        val idleLock = transport.writtenPackets.filter { it.isFeatureWrite(V2FeatureId.IDLE_SYSTEM_MODE_LOCK) }
         assertThat(idleLock).hasSize(1)
         assertThat(idleLock[0].featureWriteValue()).isEqualTo(0f)
     }
@@ -778,10 +811,10 @@ class V2SessionTest {
     }
 
     @Test
-    fun `console without START_REQUESTED is host-driven to RUNNING and the belt is commanded`() = runTest {
-        // Older firmware (e.g. the iFIT-LargeX / T Series 9, fw 1.19.x) rejects START_REQUESTED, so
-        // on the console's start signal the host drives WORKOUT_STATE WARM_UP → RUNNING and then
-        // commands the minimum belt speed (the firmware won't move the belt on its own).
+    fun `console without START_REQUESTED is host-driven straight to RUNNING and the belt is commanded`() = runTest {
+        // Older firmware (iFIT-LargeX / T Series 9, fw 1.19.x) rejects START_REQUESTED, so on the
+        // console's start signal the host writes WORKOUT_STATE=RUNNING directly — the stock manual-run
+        // sequence (no WARM_UP, which this firmware rejects from idle) — then commands the belt speed.
         val session = createSession(this)
         emitSupportedFeatures(V2FeatureId.TARGET_KPH, V2FeatureId.WORKOUT_STATE)
         session.start()
@@ -789,20 +822,48 @@ class V2SessionTest {
         val baseline = transport.writtenPackets.size
 
         transport.emitIncoming(buildEventPacket(V2FeatureId.WORKOUT_STATE, V2WorkoutMode.READY_TO_START.raw))
-        runCurrent()                 // WARM_UP written, parked at the write gap
-        advanceTimeBy(200)
-        runCurrent()                 // gap elapsed: RUNNING written
+        runCurrent()                 // config (none declared) + RUNNING + belt speed written
         transport.emitIncoming(buildEventPacket(V2FeatureId.WORKOUT_STATE, V2WorkoutMode.RUNNING.raw))
-        runCurrent()                 // confirm completes → initial belt speed write
+        runCurrent()                 // confirm completes
 
         val written = transport.writtenPackets.drop(baseline)
-        // Host-drove the workout state, did NOT write START_REQUESTED.
-        assertThat(written.mapNotNull { it.workoutStateWriteValue() })
-            .containsExactly(V2WorkoutMode.WARM_UP.raw, V2WorkoutMode.RUNNING.raw).inOrder()
+        // Straight to RUNNING (no WARM_UP), and never START_REQUESTED.
+        assertThat(written.mapNotNull { it.workoutStateWriteValue() }).containsExactly(V2WorkoutMode.RUNNING.raw)
         assertThat(written.none { it.isFeatureWrite(V2FeatureId.START_REQUESTED) }).isTrue()
         val speed = written.filter { it.isFeatureWrite(V2FeatureId.TARGET_KPH) }
         assertThat(speed).hasSize(1)
         assertThat(speed[0].featureWriteValue()).isEqualTo(0.5f)
+    }
+
+    @Test
+    fun `host-driven start writes the stock pre-workout config before RUNNING`() = runTest {
+        // When the console declares the stock config features, the host writes them (units, timeouts,
+        // goal) before the WORKOUT_STATE=RUNNING transition — this firmware refuses RUNNING otherwise.
+        val session = createSession(this)
+        emitSupportedFeatures(
+            V2FeatureId.TARGET_KPH, V2FeatureId.WORKOUT_STATE, V2FeatureId.DISPLAY_UNITS,
+            V2FeatureId.WARM_UP_TIMEOUT, V2FeatureId.COOL_DOWN_TIMEOUT, V2FeatureId.PAUSE_TIMEOUT,
+            V2FeatureId.GOAL_TIME,
+        )
+        session.start()
+        advanceUntilIdle()
+        val baseline = transport.writtenPackets.size
+
+        transport.emitIncoming(buildEventPacket(V2FeatureId.WORKOUT_STATE, V2WorkoutMode.READY_TO_START.raw))
+        runCurrent()
+
+        val writes = transport.writtenPackets.drop(baseline)
+        // All five config features written, and before the WORKOUT_STATE=RUNNING write.
+        for (cfg in listOf(
+            V2FeatureId.DISPLAY_UNITS, V2FeatureId.WARM_UP_TIMEOUT, V2FeatureId.COOL_DOWN_TIMEOUT,
+            V2FeatureId.PAUSE_TIMEOUT, V2FeatureId.GOAL_TIME,
+        )) {
+            val cfgIdx = writes.indexOfFirst { it.isFeatureWrite(cfg) }
+            val runIdx = writes.indexOfFirst { it.workoutStateWriteValue() == V2WorkoutMode.RUNNING.raw }
+            assertThat(cfgIdx).isAtLeast(0)
+            assertThat(cfgIdx).isLessThan(runIdx)
+        }
+        assertThat(writes.first { it.isFeatureWrite(V2FeatureId.GOAL_TIME) }.featureWriteValue()).isEqualTo(10_800f)
     }
 
     @Test
@@ -816,11 +877,9 @@ class V2SessionTest {
 
         transport.emitIncoming(buildEventPacket(V2FeatureId.KEY_COOKED, 2f)) // START
         runCurrent()
-        advanceTimeBy(200)
-        runCurrent()
 
         val writes = transport.writtenPackets.drop(baseline).mapNotNull { it.workoutStateWriteValue() }
-        assertThat(writes).containsExactly(V2WorkoutMode.WARM_UP.raw, V2WorkoutMode.RUNNING.raw).inOrder()
+        assertThat(writes).containsExactly(V2WorkoutMode.RUNNING.raw)
     }
 
     @Test
@@ -903,14 +962,12 @@ class V2SessionTest {
         transport.emitIncoming(buildEventPacket(V2FeatureId.WORKOUT_STATE, V2WorkoutMode.READY_TO_START.raw))
         transport.emitIncoming(buildEventPacket(V2FeatureId.KEY_COOKED, 2f))
         runCurrent()
-        advanceTimeBy(200)
-        runCurrent()
         transport.emitIncoming(buildEventPacket(V2FeatureId.WORKOUT_STATE, V2WorkoutMode.RUNNING.raw))
         runCurrent()
 
         assertThat(
             transport.writtenPackets.drop(baseline).mapNotNull { it.workoutStateWriteValue() },
-        ).containsExactly(V2WorkoutMode.WARM_UP.raw, V2WorkoutMode.RUNNING.raw).inOrder()
+        ).containsExactly(V2WorkoutMode.RUNNING.raw)
 
         // Pressing Start again while RUNNING is a no-op.
         val afterRunning = transport.writtenPackets.size

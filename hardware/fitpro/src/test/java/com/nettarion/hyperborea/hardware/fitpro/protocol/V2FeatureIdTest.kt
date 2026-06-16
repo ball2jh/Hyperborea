@@ -65,6 +65,20 @@ class V2FeatureIdTest {
     }
 
     @Test
+    fun `pre-workout config feature wire codes`() {
+        assertThat(V2FeatureId.DISPLAY_UNITS.code).isEqualTo(140)
+        assertThat(V2FeatureId.GOAL_TIME.code).isEqualTo(610)
+        assertThat(V2FeatureId.WARM_UP_TIMEOUT.code).isEqualTo(615)
+        assertThat(V2FeatureId.COOL_DOWN_TIMEOUT.code).isEqualTo(617)
+        assertThat(V2FeatureId.PAUSE_TIMEOUT.code).isEqualTo(619)
+        // Write-only — never subscribed.
+        assertThat(V2FeatureId.subscribable).containsNoneOf(
+            V2FeatureId.DISPLAY_UNITS, V2FeatureId.GOAL_TIME, V2FeatureId.WARM_UP_TIMEOUT,
+            V2FeatureId.COOL_DOWN_TIMEOUT, V2FeatureId.PAUSE_TIMEOUT,
+        )
+    }
+
+    @Test
     fun `per-workout caps are not modelled`() {
         // WORKOUT_MAX_KPH(308) / WORKOUT_MAX_GRADE_PERCENT(408) are per-workout caps, not equipment
         // limits — deliberately excluded so they're never mistaken for the device's physical bounds.

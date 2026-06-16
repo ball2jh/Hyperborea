@@ -5,12 +5,16 @@ enum class V2FeatureId(val code: Int) {
     DEVICE_TYPE(10),
     SYSTEM_MODE(102),
     /**
-     * "Idle mode lockout" — written UNLOCKED (0) once at connect, mirroring the stock service's
-     * bring-up (FitPro2Console). Write-only for us; not subscribed.
+     * "Idle mode lockout" — written once at connect, mirroring the stock bring-up rule
+     * `locked = !(supportsStartRequested && beltMachine)`. A belt console that doesn't implement
+     * START_REQUESTED needs this LOCKED (1) before it will accept host WORKOUT_STATE writes — writing
+     * 0 there is rejected. Write-only for us; not subscribed. See [V2Session.writeInitConfiguration].
      */
     IDLE_SYSTEM_MODE_LOCK(103),
     /** Rider weight (kg) — written for the console's own calorie estimation. */
     USER_WEIGHT_KG(105),
+    /** Display units (0 = imperial, 1 = metric) — part of the stock pre-workout config. Write-only. */
+    DISPLAY_UNITS(140),
     /** Equipment's max rider weight (kg) — a reported limit. */
     MAX_USER_WEIGHT_KG(106),
     /** Console keypad presses — key-code values shared with the V1 keypad field. */
@@ -53,6 +57,13 @@ enum class V2FeatureId(val code: Int) {
     MAX_RPM(328),
     MAX_WATTS(528),
     MAX_GEAR(323),
+    // Pre-workout config the stock app writes before a workout-state transition (seconds, as float).
+    // Write-only; not subscribed. The console declares these; without them (and the idle-mode lock)
+    // it refuses the WORKOUT_STATE write. See V2Session.writePreWorkoutConfig.
+    GOAL_TIME(610),
+    WARM_UP_TIMEOUT(615),
+    COOL_DOWN_TIMEOUT(617),
+    PAUSE_TIMEOUT(619),
     /**
      * Host→console "the user asked to start" acknowledgement. The stock service writes this TRUE
      * when the MCU reports [V2WorkoutMode.READY_TO_START]; the MCU then drives ITSELF through
