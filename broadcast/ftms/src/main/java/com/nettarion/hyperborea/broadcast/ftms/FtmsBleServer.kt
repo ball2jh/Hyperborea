@@ -53,6 +53,10 @@ class FtmsBleServer(
     private var lastTrainingStatus: Byte = 0x01 // Idle
     @Volatile private var latestData: ExerciseData = ExerciseData.ZERO
     private var tickerJob: Job? = null
+    // The adapter name we replaced and the one we set — so stop() can put the device's global
+    // Bluetooth identity back instead of leaving the console permanently renamed.
+    private var originalAdapterName: String? = null
+    private var advertisedName: String? = null
 
     // Service addition synchronization
     private val serviceAddedChannel = Channel<Unit>(Channel.UNLIMITED)
@@ -65,6 +69,8 @@ class FtmsBleServer(
         // Drain any stale events from previous start attempts
         while (serviceAddedChannel.tryReceive().isSuccess) {}
 
+        originalAdapterName = bluetoothAdapter.name
+        advertisedName = deviceName
         bluetoothAdapter.name = deviceName
 
         val gattCallback = FtmsGattCallback(
@@ -81,7 +87,7 @@ class FtmsBleServer(
             },
             onClientDisconnected = {
                 connectedDevice = null
-                revCounter.reset()
+                resetRevCounter()
                 onClientChange(emptySet())
             },
             onCommand = onCommand,
@@ -137,9 +143,38 @@ class FtmsBleServer(
         gattServer = null
         callback = null
         connectedDevice = null
-        revCounter.reset()
+        resetRevCounter()
         lastTrainingStatus = 0x01
         latestData = ExerciseData.ZERO
+        restoreAdapterName()
+    }
+
+    /**
+     * [RevolutionCounter] is single-threaded by contract; this and [emitNotifications] share the
+     * same monitor so a reset from a BLE binder thread can't tear counters mid-encode.
+     */
+    @Synchronized
+    private fun resetRevCounter() {
+        revCounter.reset()
+    }
+
+    /**
+     * Puts the device-global Bluetooth name back the way we found it — but only if it still holds
+     * the name we set (if something else renamed the adapter since, leave it alone).
+     */
+    @SuppressLint("MissingPermission") // Permission verified during start()
+    private fun restoreAdapterName() {
+        val original = originalAdapterName ?: return
+        originalAdapterName = null
+        val advertised = advertisedName
+        advertisedName = null
+        try {
+            if (original != advertised && bluetoothAdapter.name == advertised) {
+                bluetoothAdapter.name = original
+            }
+        } catch (e: Exception) {
+            logger.w(TAG, "Couldn't restore Bluetooth adapter name: ${e.message}")
+        }
     }
 
     fun broadcastData(data: ExerciseData) {

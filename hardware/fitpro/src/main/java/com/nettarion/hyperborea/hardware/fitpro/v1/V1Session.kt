@@ -66,6 +66,7 @@ class V1Session(
     @Volatile private var pendingCalibration: CompletableDeferred<Unit>? = null
     private var lastLogTimeMs = 0L
     private var consecutivePollErrors = 0
+    private var securityBlockReverifies = 0
     private var lastSentGrade = 0f
     private var lastSentSpeed = 0f
     private var lastKeyCode = -1 // for KEY_OBJECT press-edge detection
@@ -738,13 +739,25 @@ class V1Session(
         }
         if (decoded is V1Message.Incoming.DataResponse) {
             if (decoded.status == V1Message.STATUS_SECURITY_BLOCK) {
-                logger.w(TAG, "Security block — re-verifying")
                 if (writeFields.isNotEmpty()) {
                     pendingWriteMutex.withLock {
                         pendingWriteFields = writeFields + pendingWriteFields
                     }
                 }
-                verifySecurity()
+                // Capped: a controller that stays blocked despite accepting re-verification would
+                // otherwise be re-verified every poll (~100 ms) forever. After the cap, surface a
+                // degraded reason and keep polling plainly — a later DONE resets the counter.
+                securityBlockReverifies++
+                when {
+                    securityBlockReverifies <= MAX_SECURITY_REVERIFY_ATTEMPTS -> {
+                        logger.w(TAG, "Security block — re-verifying ($securityBlockReverifies/$MAX_SECURITY_REVERIFY_ATTEMPTS)")
+                        verifySecurity()
+                    }
+                    securityBlockReverifies == MAX_SECURITY_REVERIFY_ATTEMPTS + 1 -> {
+                        logger.e(TAG, "Security block persists after $MAX_SECURITY_REVERIFY_ATTEMPTS re-verifications — giving up re-verifying")
+                        _degradedReason.value = SECURITY_DEGRADED_MESSAGE
+                    }
+                }
                 return
             }
             if (decoded.status != V1Message.STATUS_DONE) {
@@ -774,6 +787,10 @@ class V1Session(
             handleKeyObject(decoded.keyObject)
             estimatePowerIfNeeded()
             consecutivePollErrors = 0
+            if (securityBlockReverifies > 0) {
+                securityBlockReverifies = 0
+                if (_degradedReason.value == SECURITY_DEGRADED_MESSAGE) _degradedReason.value = null
+            }
             _exerciseData.value = accumulator.snapshot()
 
             val now = System.currentTimeMillis()
@@ -979,6 +996,9 @@ class V1Session(
         // doesn't, fail/degrade gracefully instead of hanging the session.
         private const val RESPONSE_TIMEOUT_MS = 1000L
         private const val MAX_CONSECUTIVE_POLL_ERRORS = 10
+        private const val MAX_SECURITY_REVERIFY_ATTEMPTS = 5
+        private const val SECURITY_DEGRADED_MESSAGE =
+            "The console keeps rejecting the security handshake — live data may be unavailable"
         private const val CALIBRATION_POLL_MS = 4000L // 4-second poll interval during calibration
         private const val MAX_CALIBRATION_ATTEMPTS = 60 // 4-minute timeout at 4s intervals
 

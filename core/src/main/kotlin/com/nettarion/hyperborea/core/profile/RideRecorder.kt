@@ -7,6 +7,7 @@ import com.nettarion.hyperborea.core.model.WorkoutSample
 
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -33,9 +34,8 @@ class RideRecorder(
     fun start(dataSource: Flow<ExerciseData>) {
         if (collectJob != null) return
         state = AccumulationState()
-        state.startedAtMs = System.currentTimeMillis()
         _lastSavedRideId.value = null
-        logger.i(TAG, "Recording started")
+        logger.i(TAG, "Recorder armed — ride opens on first activity")
 
         collectJob = scope.launch {
             dataSource.collect { data ->
@@ -45,7 +45,9 @@ class RideRecorder(
     }
 
     suspend fun stop(save: Boolean = true) {
-        collectJob?.cancel()
+        // Join, don't just cancel: accumulate() runs on the collector coroutine and shares [state]
+        // with the save below — after the join nothing else mutates it.
+        collectJob?.cancelAndJoin()
         collectJob = null
 
         if (!save) {
@@ -59,9 +61,8 @@ class RideRecorder(
         saveAndReset(flushPending = true)
     }
 
-    private fun accumulate(data: ExerciseData) {
+    private suspend fun accumulate(data: ExerciseData) {
         // Always update cumulative counters (bike totals)
-        state.sampleCount++
         state.lastElapsedTime = data.elapsedTime
         data.distance?.let { state.lastDistance = it }
         data.calories?.let { state.lastCalories = it }
@@ -72,28 +73,22 @@ class RideRecorder(
         state.lastSampleSecond = currentSecond
 
         if (isIdle(data)) {
+            // No ride in progress (fresh start, or parked after an auto-stop): stay dormant until
+            // the rider produces output — the next active second opens a new ride.
+            if (state.startedAtMs == 0L) return
+
             state.consecutiveIdleSeconds++
 
             if (state.consecutiveIdleSeconds >= AUTO_STOP_SECONDS) {
-                triggerAutoStop()
+                autoStop()
                 return
             }
 
             // Buffer the sample — don't accumulate into main state yet
-            state.pendingSamples.add(
-                WorkoutSample(
-                    timestampSeconds = currentSecond,
-                    power = data.power,
-                    cadence = data.cadence,
-                    speedKph = data.speed,
-                    heartRate = data.heartRate,
-                    resistance = data.resistance,
-                    incline = data.incline,
-                    calories = data.calories,
-                    distanceKm = data.distance,
-                ),
-            )
+            state.pendingSamples.add(buildSample(data))
         } else {
+            if (state.startedAtMs == 0L) openRide(data)
+
             // Active second — resolve any pending idle buffer
             if (state.consecutiveIdleSeconds > 0) {
                 if (state.consecutiveIdleSeconds < IDLE_TRIM_THRESHOLD_SECONDS) {
@@ -136,19 +131,37 @@ class RideRecorder(
             state.prevDistance = currentDistance
         }
 
-        val sample = WorkoutSample(
-            timestampSeconds = data.elapsedTime,
-            power = data.power,
-            cadence = data.cadence,
-            speedKph = data.speed,
-            heartRate = data.heartRate,
-            resistance = data.resistance,
-            incline = data.incline,
-            calories = data.calories,
-            distanceKm = data.distance,
-        )
-        accumulateSecondFromSample(sample)
+        accumulateSecondFromSample(buildSample(data))
     }
+
+    /**
+     * Opens a new ride on the first active (non-idle) second. The first ride of a session counts
+     * from the hardware's own zero; a ride opened after an auto-stop rebases instead — the
+     * hardware's elapsed/distance/calorie counters are cumulative for the whole console session,
+     * so without new baselines a "second wind" ride would inherit the earlier ride's totals.
+     */
+    private fun openRide(data: ExerciseData) {
+        state.startedAtMs = System.currentTimeMillis()
+        if (state.rebaseOnOpen) {
+            state.baseElapsedSeconds = (data.elapsedTime - 1).coerceAtLeast(0)
+            state.baseDistanceKm = data.distance ?: 0f
+            state.baseCalories = data.calories ?: 0
+        }
+        logger.i(TAG, "Recording started (elapsed baseline ${state.baseElapsedSeconds}s)")
+    }
+
+    /** Builds a sample with the session-cumulative counters rebased to this ride's baselines. */
+    private fun buildSample(data: ExerciseData) = WorkoutSample(
+        timestampSeconds = data.elapsedTime - state.baseElapsedSeconds,
+        power = data.power,
+        cadence = data.cadence,
+        speedKph = data.speed,
+        heartRate = data.heartRate,
+        resistance = data.resistance,
+        incline = data.incline,
+        calories = data.calories?.let { (it - state.baseCalories).coerceAtLeast(0) },
+        distanceKm = data.distance?.let { (it - state.baseDistanceKm).coerceAtLeast(0f) },
+    )
 
     private fun accumulateSecondFromSample(sample: WorkoutSample) {
         sample.power?.let { p ->
@@ -206,13 +219,19 @@ class RideRecorder(
         state.pendingSamples.clear()
     }
 
-    private fun triggerAutoStop() {
-        collectJob?.cancel()
-        collectJob = null
+    /**
+     * Saves and closes the current ride after [AUTO_STOP_SECONDS] of continuous idle — but keeps
+     * collecting: the reset state parks with no ride open, and the next active second opens a fresh
+     * ride (a rider's "second wind" gets its own recording instead of being lost). Runs inline on
+     * the collector coroutine, so it can't race later samples.
+     */
+    private suspend fun autoStop() {
         state.totalTrimmedSeconds += state.consecutiveIdleSeconds
         state.pendingSamples.clear()
-        logger.i(TAG, "Auto-stop: ${AUTO_STOP_SECONDS}s idle")
-        scope.launch { saveAndReset() }
+        logger.i(TAG, "Auto-stop: ${AUTO_STOP_SECONDS}s idle — saving; a new ride opens on next activity")
+        saveAndReset()
+        // The fresh state opens mid-session: rebase the cumulative hardware counters at ride open.
+        state.rebaseOnOpen = true
     }
 
     private suspend fun saveAndReset(flushPending: Boolean = false) = saveMutex.withLock {
@@ -223,7 +242,7 @@ class RideRecorder(
             state.consecutiveIdleSeconds = 0
         }
 
-        val durationSeconds = state.lastElapsedTime - state.totalTrimmedSeconds
+        val durationSeconds = state.lastElapsedTime - state.baseElapsedSeconds - state.totalTrimmedSeconds
         if (durationSeconds < MIN_DURATION_SECONDS) {
             logger.i(TAG, "Recording discarded (${durationSeconds}s < ${MIN_DURATION_SECONDS}s)")
             state = AccumulationState()
@@ -263,8 +282,8 @@ class RideRecorder(
             profileId = profileId,
             startedAt = state.startedAtMs,
             durationSeconds = durationSeconds,
-            distanceKm = state.lastDistance,
-            calories = state.lastCalories,
+            distanceKm = (state.lastDistance - state.baseDistanceKm).coerceAtLeast(0f),
+            calories = (state.lastCalories - state.baseCalories).coerceAtLeast(0),
             avgPower = if (state.powerSamples > 0) (state.powerSum / state.powerSamples).toInt() else null,
             maxPower = if (state.powerSamples > 0) state.maxPower else null,
             avgCadence = if (state.cadenceSamples > 0) (state.cadenceSum / state.cadenceSamples).toInt() else null,
@@ -285,14 +304,20 @@ class RideRecorder(
 
         val savedSamples = state.samples.toList()
         val savedId = profileRepository.saveRideSummary(summary, savedSamples)
-        logger.i(TAG, "Recording saved: id=$savedId, ${durationSeconds}s, ${state.lastDistance}km, ${state.lastCalories}cal, ${savedSamples.size} samples")
+        logger.i(TAG, "Recording saved: id=$savedId, ${durationSeconds}s, ${summary.distanceKm}km, ${summary.calories}cal, ${savedSamples.size} samples")
         state = AccumulationState()
         _lastSavedRideId.value = savedId
     }
 
     private class AccumulationState {
+        /** 0 = no ride open; stamped by [openRide] on the first active second. */
         var startedAtMs = 0L
-        var sampleCount = 0L
+
+        // Ride-start baselines for the hardware's session-cumulative counters (see openRide)
+        var rebaseOnOpen = false
+        var baseElapsedSeconds = 0L
+        var baseDistanceKm = 0f
+        var baseCalories = 0
 
         var powerSum = 0L
         var maxPower = 0

@@ -186,6 +186,10 @@ class Orchestrator(
                 startInternal()
             } catch (e: Exception) {
                 logger.e(TAG, "Unexpected error during start", e)
+                // Bring-up launches jobs before it can throw (command pipeline, monitors) — cancel
+                // whatever partially started, or they'd leak in the Error state until a stop() that
+                // may never come.
+                cancelWorkoutJobs()
                 _state.value = OrchestratorState.Error("Unexpected: ${e.message}", e)
             }
         }
@@ -368,13 +372,21 @@ class Orchestrator(
                             }
                         }
 
+                        // elapsedTime is cumulative for the whole workout: a reconnected session is
+                        // seeded with the preserved value and reports it back *included* in its own
+                        // elapsed. So ASSIGN the last-seen value — adding would double-count the
+                        // preserved portion on every dropout after the first. Captured once per
+                        // episode, before the retry loop: disconnect() clears exerciseData, so later
+                        // attempts would read null. A null/zero read keeps the previous preserved
+                        // value (the adapter may already have cleared its data by the time we run).
+                        val lastSeen = hardwareAdapter.exerciseData.value
+                        if (lastSeen != null && lastSeen.elapsedTime > 0) {
+                            preservedElapsedSeconds = lastSeen.elapsedTime
+                        }
+
                         var reconnected = false
                         for (attempt in 1..hardwareRetryPolicy.maxAttempts) {
                             delay(hardwareRetryPolicy.delayForAttempt(attempt))
-                            val current = hardwareAdapter.exerciseData.value
-                            if (current != null && current.elapsedTime > 0) {
-                                preservedElapsedSeconds += current.elapsedTime
-                            }
                             hardwareAdapter.disconnect()
                             hardwareAdapter.setInitialElapsedTime(preservedElapsedSeconds)
                             hardwareAdapter.connect()
@@ -541,15 +553,8 @@ class Orchestrator(
 
             rideRecorder.stop(save = saveRide)
 
-            commandPipelineJob?.cancel()
-            commandPipelineJob = null
+            cancelWorkoutJobs()
             broadcastManager.disconnectDataSource()
-
-            hardwareMonitorJob?.cancel()
-            hardwareMonitorJob = null
-            workoutModeMonitorJob?.cancel()
-            workoutModeMonitorJob = null
-            isReconnecting = false
 
             // Turn off fan if it was managed by Hyperborea
             if (userPreferences.fanMode.value != FanMode.OFF) {
@@ -571,21 +576,25 @@ class Orchestrator(
         preservedElapsedSeconds = 0L
         rideRecorder.stop()
 
-        commandPipelineJob?.cancel()
-        commandPipelineJob = null
+        cancelWorkoutJobs()
         broadcastManager.disconnectDataSource()
-
-        hardwareMonitorJob?.cancel()
-        hardwareMonitorJob = null
-        workoutModeMonitorJob?.cancel()
-        workoutModeMonitorJob = null
-        isReconnecting = false
 
         try { sensorAdapter?.disconnect() }
         catch (e: Exception) { logger.w(TAG, "Sensor disconnect failed: ${e.message}") }
 
         _state.value = OrchestratorState.Error(reason)
         logger.i(TAG, "Orchestrator stopped: $reason")
+    }
+
+    /** Cancels the per-workout jobs launched by [startInternal]. Safe on partially-started bring-up. */
+    private fun cancelWorkoutJobs() {
+        commandPipelineJob?.cancel()
+        commandPipelineJob = null
+        hardwareMonitorJob?.cancel()
+        hardwareMonitorJob = null
+        workoutModeMonitorJob?.cancel()
+        workoutModeMonitorJob = null
+        isReconnecting = false
     }
 
     private suspend fun refreshAndAwait() {

@@ -358,6 +358,50 @@ class RideRecorderTest {
     }
 
     @Test
+    fun `second wind after auto-stop records a new rebased ride`() = runTest {
+        val repo = FakeProfileRepository(activeProfileId = 1L)
+        val logger = TestAppLogger()
+        val scope = CoroutineScope(UnconfinedTestDispatcher(testScheduler))
+        val recorder = RideRecorder(repo, logger, scope)
+
+        val dataFlow = MutableSharedFlow<ExerciseData>()
+        recorder.start(dataFlow)
+
+        // Ride 1: 120s active, distance/calories accumulate
+        for (sec in 1L..120L) {
+            dataFlow.emit(buildExerciseData(power = 150, elapsedTime = sec, distance = sec * 0.01f, calories = (sec / 10).toInt()))
+        }
+        // 300s idle — auto-stop saves ride 1 but keeps collecting
+        for (sec in 121L..420L) {
+            dataFlow.emit(buildExerciseData(elapsedTime = sec, distance = 1.2f, calories = 12))
+        }
+        assertThat(repo.savedSummaries).hasSize(1)
+        assertThat(repo.savedSummaries[0].durationSeconds).isEqualTo(120)
+
+        // Second wind: 90s active — must be recorded as a NEW ride
+        for (sec in 421L..510L) {
+            dataFlow.emit(
+                buildExerciseData(
+                    power = 200,
+                    elapsedTime = sec,
+                    distance = 1.2f + (sec - 420) * 0.01f,
+                    calories = 12 + ((sec - 420) / 10).toInt(),
+                ),
+            )
+        }
+        recorder.stop()
+
+        assertThat(repo.savedSummaries).hasSize(2)
+        val second = repo.savedSummaries[1]
+        // Hardware counters are session-cumulative — ride 2 must be rebased, not inherit ride 1's totals
+        assertThat(second.durationSeconds).isEqualTo(90) // 510 - 420 baseline
+        assertThat(second.distanceKm).isWithin(0.001f).of(0.89f) // 2.1 - 1.21 at ride-open
+        assertThat(second.avgPower).isEqualTo(200)
+        assertThat(repo.lastSavedSamples).hasSize(90)
+        assertThat(repo.lastSavedSamples!!.first().timestampSeconds).isEqualTo(1L) // rebased timeline
+    }
+
+    @Test
     fun `auto-stop discards when active duration below minimum`() = runTest {
         val repo = FakeProfileRepository(activeProfileId = 1L)
         val logger = TestAppLogger()

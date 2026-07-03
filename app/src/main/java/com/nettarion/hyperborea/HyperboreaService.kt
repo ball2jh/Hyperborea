@@ -94,13 +94,17 @@ class HyperboreaService : Service() {
         overlayManager.destroy()
         stateObserverJob?.cancel()
         orchestrator.stopProbing()
+        // Deliberately blocks the main thread: orchestrator.stop() is what halts a treadmill belt,
+        // and once onDestroy returns the process may die before an async teardown finishes. Both
+        // stops run concurrently under ONE bounded budget so the worst case stays well inside the
+        // ANR window (it was 2×3 s sequential before).
         runBlocking {
             withTimeoutOrNull(STOP_TIMEOUT_MS) {
-                orchestrator.stop()
-            } ?: logger.w(TAG, "Orchestrator stop timed out in onDestroy")
-            withTimeoutOrNull(STOP_TIMEOUT_MS) {
-                broadcastManager.stop()
-            } ?: logger.w(TAG, "BroadcastManager stop timed out in onDestroy")
+                val orchestratorStop = launch { orchestrator.stop() }
+                val broadcastStop = launch { broadcastManager.stop() }
+                orchestratorStop.join()
+                broadcastStop.join()
+            } ?: logger.w(TAG, "Teardown timed out in onDestroy")
         }
         logger.i(TAG, "Service destroyed")
         super.onDestroy()

@@ -28,6 +28,7 @@ import com.nettarion.hyperborea.core.system.SystemSnapshot
 import com.google.common.truth.Truth.assertThat
 import com.nettarion.hyperborea.core.test.TestAppLogger
 import com.nettarion.hyperborea.core.test.buildDeviceInfo
+import com.nettarion.hyperborea.core.test.buildExerciseData
 import com.nettarion.hyperborea.core.test.buildSystemSnapshot
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.ExperimentalCoroutinesApi
@@ -362,6 +363,26 @@ class OrchestratorTest {
 
         assertThat(env.orchestrator.state.value).isInstanceOf(OrchestratorState.Error::class.java)
         assertThat((env.orchestrator.state.value as OrchestratorState.Error).message).contains("reconnect failed")
+    }
+
+    @Test
+    fun `second dropout seeds last-seen elapsed without double-counting`() = runTest {
+        val env = TestEnv(this)
+        env.orchestrator.start()
+
+        // Ride reaches 600s cumulative, then dropout #1
+        env.hardware.exerciseData.value = buildExerciseData(power = 100, elapsedTime = 600)
+        env.hardware.mutableState.value = AdapterState.Error("USB glitch")
+        advanceUntilIdle()
+        assertThat(env.hardware.initialElapsedCalls.last()).isEqualTo(600)
+
+        // Reconnected session reports cumulative elapsed (seed included); rides to 900, dropout #2
+        env.hardware.exerciseData.value = buildExerciseData(power = 100, elapsedTime = 900)
+        env.hardware.mutableState.value = AdapterState.Error("USB glitch again")
+        advanceUntilIdle()
+
+        // Seed must be the last-seen cumulative elapsed (900) — not 600 + 900
+        assertThat(env.hardware.initialElapsedCalls.last()).isEqualTo(900)
     }
 
     // --- Prerequisite timeout ---
@@ -872,6 +893,9 @@ class OrchestratorTest {
 
         override suspend fun disconnect() {
             disconnectCalled = true
+            // FitProAdapter clears its exercise data on disconnect — mirror that here so the
+            // reconnect path can't re-read stale pre-dropout data.
+            exerciseData.value = null
             mutableState.value = AdapterState.Inactive
         }
 
@@ -880,7 +904,10 @@ class OrchestratorTest {
             receivedCommands.add(command)
         }
 
-        override fun setInitialElapsedTime(seconds: Long) {}
+        val initialElapsedCalls = mutableListOf<Long>()
+        override fun setInitialElapsedTime(seconds: Long) {
+            initialElapsedCalls.add(seconds)
+        }
         override suspend fun refreshDeviceInfo() {}
     }
 
