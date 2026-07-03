@@ -1,6 +1,8 @@
 # Changelog
 
 ## [Unreleased]
+
+## [1.2.24] - 2026-07-03
 - **The workout clock no longer jumps forward after repeated USB dropouts.** The equipment's USB link power-cycles periodically; the app reconnects and preserves the elapsed time across the gap — but a second dropout in the same ride added the already-preserved time again, so the clock (and the recorded ride duration) leapt ahead by everything ridden before the first dropout. The preserved time is now carried correctly no matter how many dropouts a ride survives.
 - **Riding again after a long break is recorded as a new ride.** Five minutes of idling auto-saves the ride — but recording then shut off entirely, so a "second wind" after a coffee break was never captured. The recorder now stays armed: the saved ride closes, and the next pedal stroke opens a fresh one with its own time, distance, and calories.
 - **Multiple Bluetooth apps can now connect at once without breaking each other.** A second central connecting (or a stale connection dropping) used to wipe the live client's subscriptions mid-ride. Subscriptions are now tracked per device, notifications go to every subscribed client, and a late joiner immediately receives the current training status.
