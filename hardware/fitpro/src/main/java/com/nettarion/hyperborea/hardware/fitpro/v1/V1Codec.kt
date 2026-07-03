@@ -5,16 +5,18 @@ import java.nio.ByteOrder
 
 object V1Codec {
 
-    private const val CMD_READ_WRITE_DATA: Byte = 0x02
-    private const val CMD_CONNECT: Byte = 0x04
-    private const val CMD_DISCONNECT: Byte = 0x05
-    private const val CMD_DEVICE_INFO: Byte = 0x81.toByte()
-    private const val CMD_SYSTEM_INFO: Byte = 0x82.toByte()
-    private const val CMD_VERSION_INFO: Byte = 0x84.toByte()
-    private const val CMD_VERIFY_SECURITY: Byte = 0x90.toByte()
-    private const val CMD_SUPPORTED_DEVICES: Byte = 0x80.toByte()
-    private const val CMD_SUPPORTED_COMMANDS: Byte = 0x88.toByte()
-    private const val CMD_CALIBRATE: Byte = 0x06
+    // Wire bytes derived from the single opcode source in V1Message.companion — an edit there
+    // can't silently diverge from what this codec puts on the wire.
+    private val CMD_READ_WRITE_DATA: Byte = V1Message.CMD_READ_WRITE_DATA.toByte()
+    private val CMD_CONNECT: Byte = V1Message.CMD_CONNECT.toByte()
+    private val CMD_DISCONNECT: Byte = V1Message.CMD_DISCONNECT.toByte()
+    private val CMD_DEVICE_INFO: Byte = V1Message.CMD_DEVICE_INFO.toByte()
+    private val CMD_SYSTEM_INFO: Byte = V1Message.CMD_SYSTEM_INFO.toByte()
+    private val CMD_VERSION_INFO: Byte = V1Message.CMD_VERSION_INFO.toByte()
+    private val CMD_VERIFY_SECURITY: Byte = V1Message.CMD_VERIFY_SECURITY.toByte()
+    private val CMD_SUPPORTED_DEVICES: Byte = V1Message.CMD_SUPPORTED_DEVICES.toByte()
+    private val CMD_SUPPORTED_COMMANDS: Byte = V1Message.CMD_SUPPORTED_COMMANDS.toByte()
+    private val CMD_CALIBRATE: Byte = V1Message.CMD_CALIBRATE.toByte()
 
     private const val HEADER_SIZE = 4 // device, length, command, status/payload[0]
 

@@ -38,14 +38,23 @@ object DeviceDatabase {
         return if (curveIdx < 0) null else curveIdx
     }
 
-    /** Maps a SUPPORTED_DEVICES equipment device ID to a DeviceType. */
-    fun deviceTypeFromEquipmentId(equipmentId: Int): DeviceType = when (equipmentId) {
-        4, 5 -> DeviceType.TREADMILL
-        6, 9, 19 -> DeviceType.ELLIPTICAL
-        7, 8 -> DeviceType.BIKE
+    /**
+     * Maps an ICON equipment-type code to a DeviceType, or null for codes outside the
+     * exercise-equipment range (wearables, controllers, weight machines…). The same code space is
+     * used by the V1 SUPPORTED_DEVICES ids (see `V1Message.DEVICE_*`) and the V2 device-type
+     * feature — this is the single mapping for both protocols.
+     */
+    fun deviceTypeFromEquipmentIdOrNull(equipmentId: Int): DeviceType? = when (equipmentId) {
+        4, 5 -> DeviceType.TREADMILL      // treadmill, incline trainer — both belt-based
+        6, 9, 19 -> DeviceType.ELLIPTICAL // elliptical variants and striders
+        7, 8 -> DeviceType.BIKE           // exercise bike, spin bike
         20 -> DeviceType.ROWER
-        else -> DeviceType.BIKE
+        else -> null
     }
+
+    /** Maps a SUPPORTED_DEVICES equipment device ID to a DeviceType, defaulting unknown codes to BIKE. */
+    fun deviceTypeFromEquipmentId(equipmentId: Int): DeviceType =
+        deviceTypeFromEquipmentIdOrNull(equipmentId) ?: DeviceType.BIKE
 
     /** Returns type-derived defaults for overlaying after equipment type is known. */
     fun defaultsForType(type: DeviceType): DeviceInfo = DeviceInfo(

@@ -118,12 +118,20 @@ sealed interface V1Message {
         const val STATUS_IN_PROGRESS = 0x03
         const val STATUS_SECURITY_BLOCK = 0x08
 
-        // Request command opcodes, as reported in a SupportedCommandsResponse. Used to gate the
+        // Request command opcodes — the single source for the V1 command set. V1Codec derives its
+        // wire bytes from these. Also matched against a SupportedCommandsResponse to gate the
         // optional handshake steps: a controller that doesn't list a command will wedge the USB
         // link if it's sent one anyway (observed on the NordicTrack S15i spin bike, which omits
-        // SystemInfo). These match the CMD_* bytes in V1Codec.
+        // SystemInfo).
+        const val CMD_READ_WRITE_DATA = 0x02
+        const val CMD_CONNECT = 0x04
+        const val CMD_DISCONNECT = 0x05
+        const val CMD_CALIBRATE = 0x06
+        const val CMD_SUPPORTED_DEVICES = 0x80
+        const val CMD_DEVICE_INFO = 0x81
         const val CMD_SYSTEM_INFO = 0x82
         const val CMD_VERSION_INFO = 0x84
+        const val CMD_SUPPORTED_COMMANDS = 0x88
         const val CMD_VERIFY_SECURITY = 0x90
     }
 }

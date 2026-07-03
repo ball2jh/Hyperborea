@@ -9,6 +9,7 @@ import com.nettarion.hyperborea.core.model.DeviceInfo
 import com.nettarion.hyperborea.core.model.DeviceType
 import com.nettarion.hyperborea.core.model.ExerciseData
 import com.nettarion.hyperborea.core.model.isBeltBased
+import com.nettarion.hyperborea.hardware.fitpro.session.DeviceDatabase
 import com.nettarion.hyperborea.hardware.fitpro.session.ExerciseDataAccumulator
 import com.nettarion.hyperborea.hardware.fitpro.session.FitProSession
 import com.nettarion.hyperborea.hardware.fitpro.session.FitProKeypad
@@ -841,17 +842,13 @@ class V2Session(
     }
 
     /**
-     * Equipment-type codes the console reports in the [V2FeatureId.DEVICE_TYPE] feature, mapped
-     * to our coarser model. Codes outside the exercise-equipment range (wearables, controllers,
-     * weight machines…) return null and defer to the feature heuristic.
+     * Equipment-type codes the console reports in the [V2FeatureId.DEVICE_TYPE] feature share the
+     * ICON code space with V1 — [DeviceDatabase] holds the single mapping. Codes outside the
+     * exercise-equipment range (wearables, controllers, weight machines…) return null and defer
+     * to the feature heuristic.
      */
-    private fun mapReportedDeviceType(raw: Float): DeviceType? = when (raw.toInt()) {
-        4, 5 -> DeviceType.TREADMILL      // treadmill, incline trainer — both belt-based
-        6, 9, 19 -> DeviceType.ELLIPTICAL // elliptical variants and striders
-        7, 8 -> DeviceType.BIKE           // exercise bike, spin bike
-        20 -> DeviceType.ROWER
-        else -> null
-    }
+    private fun mapReportedDeviceType(raw: Float): DeviceType? =
+        DeviceDatabase.deviceTypeFromEquipmentIdOrNull(raw.toInt())
 
     /**
      * Heuristic fallback for consoles that don't implement the device-type feature: infer from
