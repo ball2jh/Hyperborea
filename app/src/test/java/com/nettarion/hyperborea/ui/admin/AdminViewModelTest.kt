@@ -10,7 +10,6 @@ import com.nettarion.hyperborea.core.LogStore
 import com.nettarion.hyperborea.core.adapter.AdapterState
 import com.nettarion.hyperborea.core.adapter.BroadcastId
 import com.nettarion.hyperborea.core.adapter.HardwareAdapter
-import com.nettarion.hyperborea.core.model.ConsoleKey
 import com.nettarion.hyperborea.core.model.DeviceCommand
 import com.nettarion.hyperborea.core.model.DeviceIdentity
 import com.nettarion.hyperborea.core.model.DeviceInfo
@@ -84,7 +83,6 @@ class AdminViewModelTest {
         override val exerciseData = MutableStateFlow<ExerciseData?>(null)
         override val deviceInfo = MutableStateFlow<DeviceInfo?>(null)
         override val deviceIdentity = MutableStateFlow<DeviceIdentity?>(null)
-        override val consoleKeyPresses: Flow<ConsoleKey> = emptyFlow()
         override val degradedReason = MutableStateFlow<String?>(null)
         override val prerequisites: List<Prerequisite> = emptyList()
         override fun canOperate(snapshot: SystemSnapshot): Boolean = true

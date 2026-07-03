@@ -84,10 +84,14 @@ class Orchestrator(
     private var workoutModeMonitorJob: Job? = null
     private var probeJob: Job? = null
 
-    private val hardwareRetryPolicy = RetryPolicy(maxAttempts = 5, initialDelayMs = 2000, maxDelayMs = 15000)
+    private val reconnector = HardwareReconnector(
+        hardwareAdapter,
+        RetryPolicy(maxAttempts = 5, initialDelayMs = 2000, maxDelayMs = 15000),
+        logger,
+    )
+    private val workoutModeInterpreter = WorkoutModeInterpreter(logger)
     @Volatile
     private var isReconnecting = false
-    private var preservedElapsedSeconds: Long = 0L
 
     /**
      * Best-effort, *passive* pre-identification of the hardware while idle. Only proceeds when every
@@ -286,66 +290,34 @@ class Orchestrator(
             enterRunning()
         }
 
-        // Workout-mode monitor:
-        //  - WORKOUT_MODE_RUNNING from AwaitingConsoleStart → promote to Running (user pressed the
-        //    physical Start key; the MCU completed the WARM_UP → RUNNING transition).
-        //  - WORKOUT_MODE_DMK from Running → Paused (safety key removed).
-        //  - WORKOUT_MODE_IDLE from Paused → Running (safety key re-inserted) OR from
-        //    Running/AwaitingConsoleStart → tear the workout down (user pressed the physical Stop
-        //    key; symmetrical with app-side Stop).
-        // Whether the console has confirmed leaving idle since this session armed. Some belt
-        // machines refuse the app's WARM_UP write outright and keep reporting idle until the
-        // physical Start key is pressed — for those, an idle report while armed is the normal
-        // parked state, not the user pressing Stop.
-        var consoleLeftIdle = false
+        // Workout-mode monitor: WorkoutModeInterpreter decides what a polled WORKOUT_MODE means
+        // in the current state (promote / pause / resume / stop / nothing); this loop executes it.
+        workoutModeInterpreter.reset()
         workoutModeMonitorJob = scope.launch {
             hardwareAdapter.exerciseData.filterNotNull()
                 .collect { data ->
-                    if (data.workoutMode != null &&
-                        data.workoutMode != WORKOUT_MODE_IDLE && data.workoutMode != WORKOUT_MODE_UNKNOWN) {
-                        consoleLeftIdle = true
-                    }
-                    when (data.workoutMode) {
-                        WORKOUT_MODE_RUNNING -> {
-                            if (_state.value is OrchestratorState.AwaitingConsoleStart) {
-                                logger.i(TAG, "Console Start pressed — entering Running")
-                                enterRunning()
-                            }
+                    when (val action = workoutModeInterpreter.interpret(data.workoutMode, _state.value)) {
+                        is WorkoutModeInterpreter.Action.PromoteToRunning -> {
+                            logger.i(TAG, "Console Start pressed — entering Running")
+                            enterRunning()
                         }
-                        WORKOUT_MODE_DMK -> {
-                            if (_state.value is OrchestratorState.Running) {
-                                logger.w(TAG, "Safety key removed — pausing")
-                                _state.value = OrchestratorState.Paused
-                            }
-                            // From AwaitingConsoleStart: ignore — the console's own
-                            // "INSERT SAFETY KEY" hardware indicator covers this case.
+                        is WorkoutModeInterpreter.Action.PauseForSafetyKey -> {
+                            logger.w(TAG, "Safety key removed — pausing")
+                            _state.value = OrchestratorState.Paused
                         }
-                        WORKOUT_MODE_IDLE -> {
-                            val current = _state.value
-                            when (current) {
-                                is OrchestratorState.Paused -> {
-                                    logger.i(TAG, "Safety key re-inserted — resuming")
-                                    hardwareAdapter.sendCommand(DeviceCommand.ResumeWorkout)
-                                    _state.value = OrchestratorState.Running(degraded = hardwareAdapter.degradedReason.value)
-                                }
-                                is OrchestratorState.Running, is OrchestratorState.AwaitingConsoleStart -> {
-                                    if (current is OrchestratorState.AwaitingConsoleStart && !consoleLeftIdle) {
-                                        // Armed but the console never confirmed leaving idle —
-                                        // it's still parked, not stopping. Stay armed.
-                                        logger.d(TAG, "Idle report while armed (console never left idle) — staying armed")
-                                    } else {
-                                        // User pressed the physical Stop key. The Dashboard's
-                                        // save-ride dialog gates on elapsed ≥ 60 s, so calling stop()
-                                        // with saveRide=false from AwaitingConsoleStart (elapsed=0)
-                                        // is a clean silent teardown.
-                                        val wasRunning = current is OrchestratorState.Running
-                                        logger.i(TAG, "Console returned to IDLE — stopping workout (running=$wasRunning)")
-                                        scope.launch { stop(saveRide = wasRunning) }
-                                    }
-                                }
-                                else -> {}
-                            }
+                        is WorkoutModeInterpreter.Action.ResumeFromSafetyKey -> {
+                            logger.i(TAG, "Safety key re-inserted — resuming")
+                            hardwareAdapter.sendCommand(DeviceCommand.ResumeWorkout)
+                            _state.value = OrchestratorState.Running(degraded = hardwareAdapter.degradedReason.value)
                         }
+                        is WorkoutModeInterpreter.Action.StopWorkout -> {
+                            // User pressed the physical Stop key. The Dashboard's save-ride dialog
+                            // gates on elapsed ≥ 60 s, so calling stop() with saveRide=false from
+                            // AwaitingConsoleStart (elapsed=0) is a clean silent teardown.
+                            logger.i(TAG, "Console returned to IDLE — stopping workout (running=${action.wasRunning})")
+                            scope.launch { stop(saveRide = action.wasRunning) }
+                        }
+                        is WorkoutModeInterpreter.Action.None -> {}
                     }
                 }
         }
@@ -372,52 +344,31 @@ class Orchestrator(
                             }
                         }
 
-                        // elapsedTime is cumulative for the whole workout: a reconnected session is
-                        // seeded with the preserved value and reports it back *included* in its own
-                        // elapsed. So ASSIGN the last-seen value — adding would double-count the
-                        // preserved portion on every dropout after the first. Captured once per
-                        // episode, before the retry loop: disconnect() clears exerciseData, so later
-                        // attempts would read null. A null/zero read keeps the previous preserved
-                        // value (the adapter may already have cleared its data by the time we run).
-                        val lastSeen = hardwareAdapter.exerciseData.value
-                        if (lastSeen != null && lastSeen.elapsedTime > 0) {
-                            preservedElapsedSeconds = lastSeen.elapsedTime
-                        }
+                        val reconnected = reconnector.reconnect(
+                            shouldContinue = { _state.value.isWorkoutActive() },
+                        )
 
-                        var reconnected = false
-                        for (attempt in 1..hardwareRetryPolicy.maxAttempts) {
-                            delay(hardwareRetryPolicy.delayForAttempt(attempt))
-                            hardwareAdapter.disconnect()
-                            hardwareAdapter.setInitialElapsedTime(preservedElapsedSeconds)
-                            hardwareAdapter.connect()
-                            ensureActive()
-                            if (!_state.value.isWorkoutActive()) return@collect
-                            if (hardwareAdapter.state.value is AdapterState.Active) {
-                                logger.i(TAG, "Hardware reconnected on attempt $attempt")
-                                mutex.withLock {
-                                    if (_state.value.isWorkoutActive()) {
-                                        // Re-derive the state from device type + current
-                                        // WORKOUT_MODE so a treadmill that's still WARM_UP lands
-                                        // back in AwaitingConsoleStart, not Running.
-                                        val newType = hardwareAdapter.deviceInfo.value?.type
-                                        val mode = hardwareAdapter.exerciseData.value?.workoutMode
-                                            ?: WORKOUT_MODE_IDLE
-                                        _state.value = if (newType == DeviceType.TREADMILL && mode != WORKOUT_MODE_RUNNING) {
-                                            OrchestratorState.AwaitingConsoleStart(CONSOLE_START_MESSAGE)
-                                        } else {
-                                            OrchestratorState.Running(degraded = hardwareAdapter.degradedReason.value)
-                                        }
+                        if (reconnected) {
+                            mutex.withLock {
+                                if (_state.value.isWorkoutActive()) {
+                                    // Re-derive the state from device type + current
+                                    // WORKOUT_MODE so a treadmill that's still WARM_UP lands
+                                    // back in AwaitingConsoleStart, not Running.
+                                    val newType = hardwareAdapter.deviceInfo.value?.type
+                                    val mode = hardwareAdapter.exerciseData.value?.workoutMode
+                                        ?: WorkoutModeInterpreter.WORKOUT_MODE_IDLE
+                                    _state.value = if (newType == DeviceType.TREADMILL &&
+                                        mode != WorkoutModeInterpreter.WORKOUT_MODE_RUNNING) {
+                                        OrchestratorState.AwaitingConsoleStart(CONSOLE_START_MESSAGE)
+                                    } else {
+                                        OrchestratorState.Running(degraded = hardwareAdapter.degradedReason.value)
                                     }
                                 }
-                                reconnected = true
-                                break
                             }
-                        }
-
-                        if (!reconnected && isActive) {
+                        } else if (isActive && _state.value.isWorkoutActive()) {
                             mutex.withLock {
                                 if (_state.value is OrchestratorState.Running) {
-                                    stopInternal("Hardware reconnect failed after ${hardwareRetryPolicy.maxAttempts} attempts")
+                                    stopInternal("Hardware reconnect failed after ${reconnector.maxAttempts} attempts")
                                 }
                             }
                         }
@@ -549,41 +500,42 @@ class Orchestrator(
             }
 
             _state.value = OrchestratorState.Stopping
-            preservedElapsedSeconds = 0L
-
-            rideRecorder.stop(save = saveRide)
-
-            cancelWorkoutJobs()
-            broadcastManager.disconnectDataSource()
-
-            // Turn off fan if it was managed by Hyperborea
-            if (userPreferences.fanMode.value != FanMode.OFF) {
-                try { hardwareAdapter.sendCommand(DeviceCommand.SetFanSpeed(0)) }
-                catch (e: Exception) { logger.w(TAG, "Failed to turn off fan: ${e.message}") }
-            }
-
-            hardwareAdapter.disconnect()
-
-            try { sensorAdapter?.disconnect() }
-            catch (e: Exception) { logger.w(TAG, "Sensor disconnect failed: ${e.message}") }
-
+            teardown(saveRide = saveRide, turnOffFan = true)
             _state.value = OrchestratorState.Idle
             logger.i(TAG, "Orchestrator stopped")
         }
     }
 
+    /** Failure-path stop (e.g. reconnect exhausted): tears down and lands in [OrchestratorState.Error]. */
     private suspend fun stopInternal(reason: String) = withContext(NonCancellable) {
-        preservedElapsedSeconds = 0L
-        rideRecorder.stop()
+        // No fan-off attempt: this path runs when the hardware link is already dead, so the
+        // command has nowhere to go.
+        teardown(saveRide = true, turnOffFan = false)
+        _state.value = OrchestratorState.Error(reason)
+        logger.i(TAG, "Orchestrator stopped: $reason")
+    }
+
+    /**
+     * The single teardown sequence shared by [stop] (user stop → Idle) and [stopInternal]
+     * (failure → Error); the flags encode their deliberate differences. Callers set the final
+     * [_state] themselves.
+     */
+    private suspend fun teardown(saveRide: Boolean, turnOffFan: Boolean) {
+        reconnector.reset()
+        rideRecorder.stop(save = saveRide)
 
         cancelWorkoutJobs()
         broadcastManager.disconnectDataSource()
 
+        if (turnOffFan && userPreferences.fanMode.value != FanMode.OFF) {
+            try { hardwareAdapter.sendCommand(DeviceCommand.SetFanSpeed(0)) }
+            catch (e: Exception) { logger.w(TAG, "Failed to turn off fan: ${e.message}") }
+        }
+
+        hardwareAdapter.disconnect()
+
         try { sensorAdapter?.disconnect() }
         catch (e: Exception) { logger.w(TAG, "Sensor disconnect failed: ${e.message}") }
-
-        _state.value = OrchestratorState.Error(reason)
-        logger.i(TAG, "Orchestrator stopped: $reason")
     }
 
     /** Cancels the per-workout jobs launched by [startInternal]. Safe on partially-started bring-up. */
@@ -613,10 +565,6 @@ class Orchestrator(
         const val PROBE_TIMEOUT_MS = 10_000L
         const val PREREQUISITE_TIMEOUT_MS = 10_000L
         const val REFRESH_TIMEOUT_MS = 5_000L
-        const val WORKOUT_MODE_UNKNOWN = 0
-        const val WORKOUT_MODE_IDLE = 1
-        const val WORKOUT_MODE_RUNNING = 2
-        const val WORKOUT_MODE_DMK = 8
 
         const val CONSOLE_START_MESSAGE = "Press START on the console to begin"
     }

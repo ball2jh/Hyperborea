@@ -1,7 +1,6 @@
 package com.nettarion.hyperborea.hardware.fitpro.v1
 
 import com.nettarion.hyperborea.core.AppLogger
-import com.nettarion.hyperborea.core.model.ConsoleKey
 import com.nettarion.hyperborea.core.model.DeviceCapabilities
 import com.nettarion.hyperborea.core.model.DeviceCommand
 import com.nettarion.hyperborea.core.model.DeviceIdentity
@@ -22,13 +21,9 @@ import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
-import kotlinx.coroutines.channels.BufferOverflow
 import kotlinx.coroutines.delay
-import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
-import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.StateFlow
-import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
@@ -52,10 +47,6 @@ class V1Session(
 
     private val _sessionState = MutableStateFlow<SessionState>(SessionState.Disconnected)
     override val sessionState: StateFlow<SessionState> = _sessionState.asStateFlow()
-
-    private val _consoleKeyPresses =
-        MutableSharedFlow<ConsoleKey>(extraBufferCapacity = 8, onBufferOverflow = BufferOverflow.DROP_OLDEST)
-    override val consoleKeyPresses: SharedFlow<ConsoleKey> = _consoleKeyPresses.asSharedFlow()
 
     private val _degradedReason = MutableStateFlow<String?>(null)
     override val degradedReason: StateFlow<String?> = _degradedReason.asStateFlow()
@@ -849,20 +840,22 @@ class V1Session(
                     accumulator.updateWorkoutMode(mode)
                 }
                 V1DataField.VERTICAL_METER_GAIN -> accumulator.updateVerticalGain(value)
-                V1DataField.VERTICAL_METER_NET -> accumulator.updateVerticalNet(value)
-                V1DataField.AVERAGE_WATTS -> accumulator.updateAverageWatts(value.toInt())
-                V1DataField.AVERAGE_GRADE -> accumulator.updateAverageIncline(value)
-                V1DataField.LAP_TIME -> accumulator.updateLapTime(value.toLong())
-                V1DataField.RECOVERABLE_PAUSED_TIME -> accumulator.updatePausedTime(value.toLong())
-                V1DataField.START_REQUESTED -> accumulator.updateStartRequested(value.toInt() != 0)
-                V1DataField.GOAL_TIME -> accumulator.updateGoalTime(value.toLong())
                 V1DataField.STROKES -> accumulator.updateStrokeCount(value.toInt())
                 V1DataField.STROKES_PER_MINUTE -> accumulator.updateStrokeRate(value.toInt())
-                V1DataField.FIVE_HUNDRED_SPLIT -> accumulator.updateSplitTime(value.toInt())
-                V1DataField.AVG_FIVE_HUNDRED_SPLIT -> accumulator.updateAvgSplitTime(value.toInt())
                 // KEY_OBJECT is decoded onto DataResponse.keyObject and handled in handleKeyObject(),
                 // so it never reaches this map — this case only keeps the `when` exhaustive.
+                // The block below it stays in the poll/decode shape (pollFields must not change —
+                // decode offsets are positional) but feeds nothing: no consumer ever read these.
                 V1DataField.KEY_OBJECT,
+                V1DataField.VERTICAL_METER_NET,
+                V1DataField.AVERAGE_WATTS,
+                V1DataField.AVERAGE_GRADE,
+                V1DataField.LAP_TIME,
+                V1DataField.RECOVERABLE_PAUSED_TIME,
+                V1DataField.START_REQUESTED,
+                V1DataField.GOAL_TIME,
+                V1DataField.FIVE_HUNDRED_SPLIT,
+                V1DataField.AVG_FIVE_HUNDRED_SPLIT,
                 V1DataField.RUNNING_TIME,
                 V1DataField.DISTANCE,
                 V1DataField.CALORIES,
@@ -893,12 +886,12 @@ class V1Session(
     }
 
     /**
-     * Emits a [ConsoleKey] on each fresh press of the console membrane keypad. KEY_OBJECT reports the
-     * *currently-pressed* key (and 0 on release), so we edge-detect: emit when the code changes to a
+     * Logs each fresh press of the console membrane keypad. KEY_OBJECT reports the
+     * *currently-pressed* key (and 0 on release), so we edge-detect: act when the code changes to a
      * new non-zero value. The equipment's own MCU acts on every one of these keys directly (changing
      * resistance/incline/speed, transitioning the workout state machine on START/STOP, etc.) and the
-     * new state flows up through normal polling — so we don't drive anything from this stream, it's
-     * pure UI / diagnostic plumbing.
+     * new state flows up through normal polling — so we don't drive anything from key presses;
+     * decoding them is pure diagnostics.
      */
     private fun handleKeyObject(keyObject: KeyObject?) {
         val code = keyObject?.code ?: 0
@@ -907,7 +900,6 @@ class V1Session(
         if (code == 0) return
         val key = FitProKeypad.consoleKeyFromCode(code)
         logger.d(TAG, "Console keypad: code=$code held=${keyObject?.timeHeld ?: 0}ms${key?.let { " ($it)" } ?: ""}")
-        key?.let { _consoleKeyPresses.tryEmit(it) }
     }
 
     private fun estimatePowerIfNeeded() {
@@ -1026,7 +1018,7 @@ class V1Session(
         private const val FIELD_ENABLED = 1f
         private const val FIELD_DISABLED = 0f
 
-        // KEY_OBJECT key codes for the console-keypad buttons we surface as [ConsoleKey] events.
+        // KEY_OBJECT key codes for the console-keypad buttons we decode for diagnostics.
         // Hyperborea acts on none of them directly — the MCU does the work and the resulting
         // state flows up through the WORKOUT_MODE poll.
     }

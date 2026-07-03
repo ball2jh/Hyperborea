@@ -1,7 +1,7 @@
 package com.nettarion.hyperborea.hardware.fitpro.v2
 
 import com.nettarion.hyperborea.core.AppLogger
-import com.nettarion.hyperborea.core.model.ConsoleKey
+import com.nettarion.hyperborea.hardware.fitpro.session.ConsoleKey
 import com.nettarion.hyperborea.core.model.DeviceCapabilities
 import com.nettarion.hyperborea.core.model.DeviceCommand
 import com.nettarion.hyperborea.core.model.DeviceIdentity
@@ -21,11 +21,7 @@ import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
-import kotlinx.coroutines.channels.BufferOverflow
-import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
-import kotlinx.coroutines.flow.asSharedFlow
-import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.filterNotNull
@@ -50,10 +46,6 @@ class V2Session(
 
     private val _sessionState = MutableStateFlow<SessionState>(SessionState.Disconnected)
     override val sessionState: StateFlow<SessionState> = _sessionState.asStateFlow()
-
-    private val _consoleKeyPresses =
-        MutableSharedFlow<ConsoleKey>(extraBufferCapacity = 8, onBufferOverflow = BufferOverflow.DROP_OLDEST)
-    override val consoleKeyPresses: SharedFlow<ConsoleKey> = _consoleKeyPresses.asSharedFlow()
 
     private val _degradedReason = MutableStateFlow<String?>(null)
     override val degradedReason: StateFlow<String?> = _degradedReason.asStateFlow()
@@ -396,7 +388,6 @@ class V2Session(
         if (code == 0) return
         val key = FitProKeypad.consoleKeyFromCode(code)
         logger.d(TAG, "Console keypad: code=$code${key?.let { " ($it)" } ?: ""}")
-        key?.let { _consoleKeyPresses.tryEmit(it) }
         if (key == ConsoleKey.START) requestWorkoutStart("physical Start key")
         if (key != null && detectedDeviceType == DeviceType.TREADMILL) routeTreadmillKey(key)
     }

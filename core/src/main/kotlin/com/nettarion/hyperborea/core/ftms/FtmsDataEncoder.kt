@@ -25,83 +25,99 @@ object FtmsDataEncoder {
     }
 
     /**
+     * Accumulates an FTMS characteristic value: a little-endian flags header followed by the
+     * payload of the fields whose flag bit was set. Every FTMS Data characteristic follows this
+     * shape, so the four encoders below differ only in which fields they list.
+     *
+     * [flagByteCount] is 2 for the uint16-flag characteristics (Indoor Bike / Treadmill / Rower)
+     * and 3 for Cross Trainer's uint24 flags. Bit 0 stays 0 across all of them (the "more data" /
+     * mandatory-field-present convention), so the leading field is added with no flag bit.
+     *
+     * The byte helpers delegate to [ByteUtils], keeping the wire bytes identical to hand-assembled
+     * output (little-endian, with the same coerce/truncation semantics).
+     */
+    private class FtmsFrameBuilder(private val flagByteCount: Int) {
+        private var flags = 0
+        private val parts = mutableListOf<ByteArray>()
+
+        /** Append the mandatory leading field (bit 0 = 0, no flag to set). */
+        fun mandatory(block: FtmsFrameBuilder.() -> Unit): FtmsFrameBuilder = apply { block() }
+
+        /** Append an optional field, setting its [flagBit]. */
+        fun field(flagBit: Int, block: FtmsFrameBuilder.() -> Unit): FtmsFrameBuilder = apply {
+            flags = flags or (1 shl flagBit)
+            block()
+        }
+
+        fun addUint8(value: Int) = apply { parts.add(byteArrayOf(value.toByte())) }
+        fun addUint16LE(value: Int) = apply { parts.add(uint16LE(value)) }
+        fun addSint16LE(value: Int) = apply { parts.add(sint16LE(value)) }
+        fun addUint24LE(value: Long) = apply { parts.add(uint24LE(value)) }
+
+        fun build(): ByteArray {
+            val result = ByteArray(flagByteCount + parts.sumOf { it.size })
+            for (i in 0 until flagByteCount) {
+                result[i] = ((flags shr (8 * i)) and 0xFF).toByte()
+            }
+            var offset = flagByteCount
+            for (part in parts) {
+                part.copyInto(result, offset)
+                offset += part.size
+            }
+            return result
+        }
+    }
+
+    /**
      * Encodes ExerciseData into FTMS Indoor Bike Data (0x2AD2) characteristic value.
      *
      * Flags (uint16 LE): bit0=0 → speed present, bit2 → cadence, bit4 → total distance,
      * bit5 → resistance, bit6 → power, bit8 → expended energy, bit9 → heart rate,
      * bit11 → elapsed time.
      */
-    fun encodeIndoorBikeData(data: ExerciseData): ByteArray {
-        var flags = 0x0000 // bit0=0 means "more data" / speed present
-
-        val parts = mutableListOf<ByteArray>()
-
+    fun encodeIndoorBikeData(data: ExerciseData): ByteArray = FtmsFrameBuilder(2).apply {
         // Speed: uint16, 0.01 km/h resolution
-        val speedRaw = ((data.speed ?: 0f) * 100).toInt().coerceIn(0, 0xFFFF)
-        parts.add(uint16LE(speedRaw))
+        mandatory { addUint16LE(((data.speed ?: 0f) * 100).toInt().coerceIn(0, 0xFFFF)) }
 
         // Cadence: uint16, 0.5 rpm resolution (bit 2)
-        val cadence = data.cadence
-        if (cadence != null) {
-            flags = flags or (1 shl 2)
-            parts.add(uint16LE((cadence * 2).coerceIn(0, 0xFFFF)))
+        data.cadence?.let { cadence ->
+            field(2) { addUint16LE((cadence * 2).coerceIn(0, 0xFFFF)) }
         }
 
         // Total Distance: uint24, 1m resolution (bit 4)
-        val distance = data.distance
-        if (distance != null) {
-            flags = flags or (1 shl 4)
-            val meters = (distance * 1000).toLong().coerceIn(0, 0xFFFFFF)
-            parts.add(uint24LE(meters))
+        data.distance?.let { distance ->
+            field(4) { addUint24LE((distance * 1000).toLong().coerceIn(0, 0xFFFFFF)) }
         }
 
         // Resistance level: sint16, 0.1 unitless (bit 5)
-        val resistance = data.resistance
-        if (resistance != null) {
-            flags = flags or (1 shl 5)
-            parts.add(sint16LE(resistance * 10))
+        data.resistance?.let { resistance ->
+            field(5) { addSint16LE(resistance * 10) }
         }
 
         // Instantaneous power: sint16, watts (bit 6)
-        val power = data.power
-        if (power != null) {
-            flags = flags or (1 shl 6)
-            parts.add(sint16LE(power))
+        data.power?.let { power ->
+            field(6) { addSint16LE(power) }
         }
 
         // Expended Energy: total uint16 + per-hour uint16 + per-minute uint8 (bit 8)
-        val calories = data.calories
-        if (calories != null) {
-            flags = flags or (1 shl 8)
-            parts.add(uint16LE(calories.coerceIn(0, 0xFFFE)))
-            parts.add(uint16LE(0xFFFF)) // Energy per hour: "Data Not Available"
-            parts.add(byteArrayOf(0xFF.toByte())) // Energy per minute: "Data Not Available"
+        data.calories?.let { calories ->
+            field(8) {
+                addUint16LE(calories.coerceIn(0, 0xFFFE))
+                addUint16LE(0xFFFF) // Energy per hour: "Data Not Available"
+                addUint8(0xFF)      // Energy per minute: "Data Not Available"
+            }
         }
 
         // Heart rate: uint8, bpm (bit 9)
-        val heartRate = data.heartRate
-        if (heartRate != null) {
-            flags = flags or (1 shl 9)
-            parts.add(byteArrayOf(heartRate.coerceIn(0, 255).toByte()))
+        data.heartRate?.let { heartRate ->
+            field(9) { addUint8(heartRate.coerceIn(0, 255)) }
         }
 
         // Elapsed Time: uint16, seconds (bit 11)
-        val elapsedTime = data.elapsedTime
-        if (elapsedTime > 0) {
-            flags = flags or (1 shl 11)
-            parts.add(uint16LE(elapsedTime.toInt().coerceIn(0, 0xFFFF)))
+        if (data.elapsedTime > 0) {
+            field(11) { addUint16LE(data.elapsedTime.toInt().coerceIn(0, 0xFFFF)) }
         }
-
-        val result = ByteArray(2 + parts.sumOf { it.size })
-        result[0] = (flags and 0xFF).toByte()
-        result[1] = (flags shr 8).toByte()
-        var offset = 2
-        for (part in parts) {
-            part.copyInto(result, offset)
-            offset += part.size
-        }
-        return result
-    }
+    }.build()
 
     /**
      * Encodes ExerciseData into FTMS Treadmill Data (0x2ACD) characteristic value.
@@ -110,80 +126,58 @@ object FtmsDataEncoder {
      * bit7 → expended energy, bit8 → heart rate, bit10 → elapsed time,
      * bit12 → force on belt and power output.
      */
-    fun encodeTreadmillData(data: ExerciseData): ByteArray {
-        var flags = 0x0000 // bit0=0 means speed present
-
-        val parts = mutableListOf<ByteArray>()
-
+    fun encodeTreadmillData(data: ExerciseData): ByteArray = FtmsFrameBuilder(2).apply {
         // Speed: uint16, 0.01 km/h resolution
-        val speedRaw = ((data.speed ?: 0f) * 100).toInt().coerceIn(0, 0xFFFF)
-        parts.add(uint16LE(speedRaw))
+        mandatory { addUint16LE(((data.speed ?: 0f) * 100).toInt().coerceIn(0, 0xFFFF)) }
 
         // Total Distance: uint24, 1m resolution (bit 2)
-        val distance = data.distance
-        if (distance != null) {
-            flags = flags or (1 shl 2)
-            val meters = (distance * 1000).toLong().coerceIn(0, 0xFFFFFF)
-            parts.add(uint24LE(meters))
+        data.distance?.let { distance ->
+            field(2) { addUint24LE((distance * 1000).toLong().coerceIn(0, 0xFFFFFF)) }
         }
 
         // Inclination + Ramp Angle: sint16 (0.1%) + sint16 (ramp=0) (bit 3)
-        val incline = data.incline
-        if (incline != null) {
-            flags = flags or (1 shl 3)
-            parts.add(sint16LE((incline * 10).toInt()))
-            parts.add(sint16LE(0)) // Ramp angle
+        data.incline?.let { incline ->
+            field(3) {
+                addSint16LE((incline * 10).toInt())
+                addSint16LE(0) // Ramp angle
+            }
         }
 
         // Elevation Gain: uint16 positive gain + uint16 negative gain, 0.1m resolution (bit 5)
-        val gain = data.verticalGain
-        if (gain != null) {
-            flags = flags or (1 shl 5)
-            parts.add(uint16LE((gain * 10).toInt().coerceIn(0, 0xFFFF))) // positive gain
-            parts.add(uint16LE(0)) // negative gain (not tracked separately)
+        data.verticalGain?.let { gain ->
+            field(5) {
+                addUint16LE((gain * 10).toInt().coerceIn(0, 0xFFFF)) // positive gain
+                addUint16LE(0) // negative gain (not tracked separately)
+            }
         }
 
         // Expended Energy: total uint16 + per-hour uint16 + per-minute uint8 (bit 7)
-        val calories = data.calories
-        if (calories != null) {
-            flags = flags or (1 shl 7)
-            parts.add(uint16LE(calories.coerceIn(0, 0xFFFE)))
-            parts.add(uint16LE(0xFFFF))
-            parts.add(byteArrayOf(0xFF.toByte()))
+        data.calories?.let { calories ->
+            field(7) {
+                addUint16LE(calories.coerceIn(0, 0xFFFE))
+                addUint16LE(0xFFFF)
+                addUint8(0xFF)
+            }
         }
 
         // Heart rate: uint8, bpm (bit 8)
-        val heartRate = data.heartRate
-        if (heartRate != null) {
-            flags = flags or (1 shl 8)
-            parts.add(byteArrayOf(heartRate.coerceIn(0, 255).toByte()))
+        data.heartRate?.let { heartRate ->
+            field(8) { addUint8(heartRate.coerceIn(0, 255)) }
         }
 
         // Elapsed Time: uint16, seconds (bit 10)
-        val elapsedTime = data.elapsedTime
-        if (elapsedTime > 0) {
-            flags = flags or (1 shl 10)
-            parts.add(uint16LE(elapsedTime.toInt().coerceIn(0, 0xFFFF)))
+        if (data.elapsedTime > 0) {
+            field(10) { addUint16LE(data.elapsedTime.toInt().coerceIn(0, 0xFFFF)) }
         }
 
         // Force on Belt + Power Output: sint16 (force=0) + sint16 (watts) (bit 12)
-        val power = data.power
-        if (power != null) {
-            flags = flags or (1 shl 12)
-            parts.add(sint16LE(0)) // Force on belt
-            parts.add(sint16LE(power))
+        data.power?.let { power ->
+            field(12) {
+                addSint16LE(0) // Force on belt
+                addSint16LE(power)
+            }
         }
-
-        val result = ByteArray(2 + parts.sumOf { it.size })
-        result[0] = (flags and 0xFF).toByte()
-        result[1] = (flags shr 8).toByte()
-        var offset = 2
-        for (part in parts) {
-            part.copyInto(result, offset)
-            offset += part.size
-        }
-        return result
-    }
+    }.build()
 
     /**
      * Encodes ExerciseData into FTMS Rower Data (0x2AD1) characteristic value.
@@ -192,71 +186,48 @@ object FtmsDataEncoder {
      * bit5 → instantaneous power, bit7 → resistance level, bit8 → expended energy,
      * bit9 → heart rate, bit11 → elapsed time.
      */
-    fun encodeRowerData(data: ExerciseData): ByteArray {
-        var flags = 0x0000 // bit0=0 means stroke rate/count present
-
-        val parts = mutableListOf<ByteArray>()
-
+    fun encodeRowerData(data: ExerciseData): ByteArray = FtmsFrameBuilder(2).apply {
         // Stroke Rate + Count: always present (bit 0 = 0)
-        val strokeRate = data.strokeRate ?: data.cadence ?: 0
-        parts.add(byteArrayOf((strokeRate * 2).coerceIn(0, 255).toByte()))
-        parts.add(uint16LE((data.strokeCount ?: 0).coerceIn(0, 0xFFFF)))
+        mandatory {
+            val strokeRate = data.strokeRate ?: data.cadence ?: 0
+            addUint8((strokeRate * 2).coerceIn(0, 255))
+            addUint16LE((data.strokeCount ?: 0).coerceIn(0, 0xFFFF))
+        }
 
         // Total Distance: uint24, 1m resolution (bit 2)
-        val distance = data.distance
-        if (distance != null) {
-            flags = flags or (1 shl 2)
-            val meters = (distance * 1000).toLong().coerceIn(0, 0xFFFFFF)
-            parts.add(uint24LE(meters))
+        data.distance?.let { distance ->
+            field(2) { addUint24LE((distance * 1000).toLong().coerceIn(0, 0xFFFFFF)) }
         }
 
         // Instantaneous Power: sint16, watts (bit 5)
-        val power = data.power
-        if (power != null) {
-            flags = flags or (1 shl 5)
-            parts.add(sint16LE(power))
+        data.power?.let { power ->
+            field(5) { addSint16LE(power) }
         }
 
         // Resistance Level: sint16, 0.1 unitless (bit 7)
-        val resistance = data.resistance
-        if (resistance != null) {
-            flags = flags or (1 shl 7)
-            parts.add(sint16LE(resistance * 10))
+        data.resistance?.let { resistance ->
+            field(7) { addSint16LE(resistance * 10) }
         }
 
         // Expended Energy: total uint16 + per-hour uint16 + per-minute uint8 (bit 8)
-        val calories = data.calories
-        if (calories != null) {
-            flags = flags or (1 shl 8)
-            parts.add(uint16LE(calories.coerceIn(0, 0xFFFE)))
-            parts.add(uint16LE(0xFFFF))
-            parts.add(byteArrayOf(0xFF.toByte()))
+        data.calories?.let { calories ->
+            field(8) {
+                addUint16LE(calories.coerceIn(0, 0xFFFE))
+                addUint16LE(0xFFFF)
+                addUint8(0xFF)
+            }
         }
 
         // Heart rate: uint8, bpm (bit 9)
-        val heartRate = data.heartRate
-        if (heartRate != null) {
-            flags = flags or (1 shl 9)
-            parts.add(byteArrayOf(heartRate.coerceIn(0, 255).toByte()))
+        data.heartRate?.let { heartRate ->
+            field(9) { addUint8(heartRate.coerceIn(0, 255)) }
         }
 
         // Elapsed Time: uint16, seconds (bit 11)
-        val elapsedTime = data.elapsedTime
-        if (elapsedTime > 0) {
-            flags = flags or (1 shl 11)
-            parts.add(uint16LE(elapsedTime.toInt().coerceIn(0, 0xFFFF)))
+        if (data.elapsedTime > 0) {
+            field(11) { addUint16LE(data.elapsedTime.toInt().coerceIn(0, 0xFFFF)) }
         }
-
-        val result = ByteArray(2 + parts.sumOf { it.size })
-        result[0] = (flags and 0xFF).toByte()
-        result[1] = (flags shr 8).toByte()
-        var offset = 2
-        for (part in parts) {
-            part.copyInto(result, offset)
-            offset += part.size
-        }
-        return result
-    }
+    }.build()
 
     /**
      * Encodes ExerciseData into FTMS Cross Trainer Data (0x2ACE) characteristic value.
@@ -266,87 +237,60 @@ object FtmsDataEncoder {
      * bit8 → instantaneous power, bit10 → expended energy, bit11 → heart rate,
      * bit13 → elapsed time.
      */
-    fun encodeCrossTrainerData(data: ExerciseData): ByteArray {
-        var flags = 0x000000 // bit0=0 means speed present
-
-        val parts = mutableListOf<ByteArray>()
-
+    fun encodeCrossTrainerData(data: ExerciseData): ByteArray = FtmsFrameBuilder(3).apply {
         // Speed: uint16, 0.01 km/h resolution
-        val speedRaw = ((data.speed ?: 0f) * 100).toInt().coerceIn(0, 0xFFFF)
-        parts.add(uint16LE(speedRaw))
+        mandatory { addUint16LE(((data.speed ?: 0f) * 100).toInt().coerceIn(0, 0xFFFF)) }
 
         // Total Distance: uint24, 1m resolution (bit 2)
-        val distance = data.distance
-        if (distance != null) {
-            flags = flags or (1 shl 2)
-            val meters = (distance * 1000).toLong().coerceIn(0, 0xFFFFFF)
-            parts.add(uint24LE(meters))
+        data.distance?.let { distance ->
+            field(2) { addUint24LE((distance * 1000).toLong().coerceIn(0, 0xFFFFFF)) }
         }
 
         // Step/Min + Avg Step Rate: uint16 (1 step/min) + uint16 (avg=0) (bit 3)
-        val cadence = data.cadence
-        if (cadence != null) {
-            flags = flags or (1 shl 3)
-            parts.add(uint16LE(cadence))
-            parts.add(uint16LE(0)) // Average step rate
+        data.cadence?.let { cadence ->
+            field(3) {
+                addUint16LE(cadence)
+                addUint16LE(0) // Average step rate
+            }
         }
 
         // Inclination + Ramp Angle: sint16 (0.1%) + sint16 (ramp=0) (bit 6)
-        val incline = data.incline
-        if (incline != null) {
-            flags = flags or (1 shl 6)
-            parts.add(sint16LE((incline * 10).toInt()))
-            parts.add(sint16LE(0)) // Ramp angle
+        data.incline?.let { incline ->
+            field(6) {
+                addSint16LE((incline * 10).toInt())
+                addSint16LE(0) // Ramp angle
+            }
         }
 
         // Resistance Level: sint16, 0.1 unitless (bit 7)
-        val resistance = data.resistance
-        if (resistance != null) {
-            flags = flags or (1 shl 7)
-            parts.add(sint16LE(resistance * 10))
+        data.resistance?.let { resistance ->
+            field(7) { addSint16LE(resistance * 10) }
         }
 
         // Instantaneous Power: sint16, watts (bit 8)
-        val power = data.power
-        if (power != null) {
-            flags = flags or (1 shl 8)
-            parts.add(sint16LE(power))
+        data.power?.let { power ->
+            field(8) { addSint16LE(power) }
         }
 
         // Expended Energy: total uint16 + per-hour uint16 + per-minute uint8 (bit 10)
-        val calories = data.calories
-        if (calories != null) {
-            flags = flags or (1 shl 10)
-            parts.add(uint16LE(calories.coerceIn(0, 0xFFFE)))
-            parts.add(uint16LE(0xFFFF))
-            parts.add(byteArrayOf(0xFF.toByte()))
+        data.calories?.let { calories ->
+            field(10) {
+                addUint16LE(calories.coerceIn(0, 0xFFFE))
+                addUint16LE(0xFFFF)
+                addUint8(0xFF)
+            }
         }
 
         // Heart rate: uint8, bpm (bit 11)
-        val heartRate = data.heartRate
-        if (heartRate != null) {
-            flags = flags or (1 shl 11)
-            parts.add(byteArrayOf(heartRate.coerceIn(0, 255).toByte()))
+        data.heartRate?.let { heartRate ->
+            field(11) { addUint8(heartRate.coerceIn(0, 255)) }
         }
 
         // Elapsed Time: uint16, seconds (bit 13)
-        val elapsedTime = data.elapsedTime
-        if (elapsedTime > 0) {
-            flags = flags or (1 shl 13)
-            parts.add(uint16LE(elapsedTime.toInt().coerceIn(0, 0xFFFF)))
+        if (data.elapsedTime > 0) {
+            field(13) { addUint16LE(data.elapsedTime.toInt().coerceIn(0, 0xFFFF)) }
         }
-
-        val result = ByteArray(3 + parts.sumOf { it.size })
-        result[0] = (flags and 0xFF).toByte()
-        result[1] = ((flags shr 8) and 0xFF).toByte()
-        result[2] = ((flags shr 16) and 0xFF).toByte()
-        var offset = 3
-        for (part in parts) {
-            part.copyInto(result, offset)
-            offset += part.size
-        }
-        return result
-    }
+    }.build()
 
     /**
      * Encodes ExerciseData into CPS Measurement (0x2A63) characteristic value.

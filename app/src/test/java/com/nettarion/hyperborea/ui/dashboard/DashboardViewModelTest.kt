@@ -12,7 +12,6 @@ import com.nettarion.hyperborea.core.adapter.SensorAdapter
 import com.nettarion.hyperborea.core.adapter.SensorId
 import com.nettarion.hyperborea.core.adapter.SensorReading
 import com.nettarion.hyperborea.core.model.ClientInfo
-import com.nettarion.hyperborea.core.model.ConsoleKey
 import com.nettarion.hyperborea.core.model.DeviceCommand
 import com.nettarion.hyperborea.core.model.DeviceIdentity
 import com.nettarion.hyperborea.core.model.DeviceInfo
@@ -75,7 +74,6 @@ class DashboardViewModelTest {
         override val exerciseData: StateFlow<ExerciseData?> = this@DashboardViewModelTest.exerciseData
         override val deviceInfo: StateFlow<DeviceInfo?> = this@DashboardViewModelTest.deviceInfo
         override val deviceIdentity: StateFlow<DeviceIdentity?> = this@DashboardViewModelTest.deviceIdentity
-        override val consoleKeyPresses: Flow<ConsoleKey> = emptyFlow()
         override val degradedReason: StateFlow<String?> = MutableStateFlow(null)
         override val prerequisites: List<Prerequisite> = emptyList()
         override fun canOperate(snapshot: SystemSnapshot): Boolean = true

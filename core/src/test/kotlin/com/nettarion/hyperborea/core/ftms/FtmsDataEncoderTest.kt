@@ -704,6 +704,97 @@ class FtmsDataEncoderTest {
         assertThat(uint32LE(encoded, 4)).isEqualTo(0L)
     }
 
+    // --- Golden wire-format (byte-exact) ---
+    //
+    // These lock the FTMS characteristic wire format for the four Data encoders across a matrix of
+    // representative inputs (all-null, all-populated, and boundary values: over-range speed/cadence/
+    // distance/calories/heart-rate/elapsed-time coercion, negative incline/resistance/power). The
+    // expected hex was captured from the encoder and must survive any internal refactor unchanged —
+    // if a byte here moves, a BLE fitness client sees a different packet.
+
+    @Test
+    fun `golden wire format is byte-exact for every encoder and input`() {
+        val expected = mapOf(
+            "bike_nulls" to "00000000",
+            "bike_full" to "740bb80baa007c150064009600fa00ffffff8c0807",
+            "bike_boundary" to "740bffffffffffffffceffecfffeffffffffffffff",
+            "tread_nulls" to "00000000",
+            "tread_full" to "ac15e8038813001e000000d20400002c01ffffff8c60090000c800",
+            "tread_boundary" to "ac15ffffffffffddff0000ffff0000feffffffffffffff00009cff",
+            "rower_nulls" to "0000000000",
+            "rower_full" to "a40b38f401d00700c8003c00b400ffffff91b004",
+            "rower_strokeRate" to "0000305802",
+            "rower_boundary" to "a40bffffffffffffceffd8fffeffffffffffffff",
+            "cross_nulls" to "0000000000",
+            "cross_full" to "cc2d00bc02ac0d0037000000140000005000a000dc00ffffff87dc05",
+            "cross_boundary" to "cc2d00ffffffffff70110000d8ff0000b0ffe2fffeffffffffffffff",
+        )
+        for ((name, bytes) in goldenCases()) {
+            assertThat("$name=${hex(bytes)}").isEqualTo("$name=${expected.getValue(name)}")
+        }
+    }
+
+    private fun goldenCases(): List<Pair<String, ByteArray>> = listOf(
+        "bike_nulls" to FtmsDataEncoder.encodeIndoorBikeData(exerciseData()),
+        "bike_full" to FtmsDataEncoder.encodeIndoorBikeData(
+            exerciseData(
+                speed = 30.0f, cadence = 85, resistance = 10, power = 150,
+                heartRate = 140, distance = 5.5f, calories = 250, elapsedTime = 1800L,
+            ),
+        ),
+        "bike_boundary" to FtmsDataEncoder.encodeIndoorBikeData(
+            exerciseData(
+                speed = 700f, cadence = 40000, resistance = -5, power = -20,
+                heartRate = 300, distance = 20000f, calories = 70000, elapsedTime = 100000L,
+            ),
+        ),
+        "tread_nulls" to FtmsDataEncoder.encodeTreadmillData(exerciseData()),
+        "tread_full" to FtmsDataEncoder.encodeTreadmillData(
+            exerciseData(
+                speed = 10.0f, incline = 3.0f, power = 200, heartRate = 140,
+                distance = 5.0f, calories = 300, elapsedTime = 2400L, verticalGain = 123.4f,
+            ),
+        ),
+        "tread_boundary" to FtmsDataEncoder.encodeTreadmillData(
+            exerciseData(
+                speed = 700f, incline = -3.5f, power = -100, heartRate = 300,
+                distance = 20000f, calories = 70000, elapsedTime = 100000L, verticalGain = 10000f,
+            ),
+        ),
+        "rower_nulls" to FtmsDataEncoder.encodeRowerData(exerciseData()),
+        "rower_full" to FtmsDataEncoder.encodeRowerData(
+            exerciseData(
+                cadence = 28, resistance = 6, power = 200, heartRate = 145,
+                distance = 2.0f, calories = 180, elapsedTime = 1200L, strokeCount = 500,
+            ),
+        ),
+        "rower_strokeRate" to FtmsDataEncoder.encodeRowerData(
+            exerciseData(strokeRate = 24, cadence = 90, strokeCount = 600),
+        ),
+        "rower_boundary" to FtmsDataEncoder.encodeRowerData(
+            exerciseData(
+                strokeRate = 200, resistance = -4, power = -50, heartRate = 300,
+                distance = 20000f, calories = 70000, elapsedTime = 100000L, strokeCount = 70000,
+            ),
+        ),
+        "cross_nulls" to FtmsDataEncoder.encodeCrossTrainerData(exerciseData()),
+        "cross_full" to FtmsDataEncoder.encodeCrossTrainerData(
+            exerciseData(
+                speed = 7.0f, cadence = 55, resistance = 8, power = 160, incline = 2.0f,
+                heartRate = 135, distance = 3.5f, calories = 220, elapsedTime = 1500L,
+            ),
+        ),
+        "cross_boundary" to FtmsDataEncoder.encodeCrossTrainerData(
+            exerciseData(
+                speed = 700f, cadence = 70000, resistance = -8, power = -30, incline = -4.0f,
+                heartRate = 300, distance = 20000f, calories = 70000, elapsedTime = 100000L,
+            ),
+        ),
+    )
+
+    private fun hex(bytes: ByteArray): String =
+        bytes.joinToString("") { "%02x".format(it.toInt() and 0xFF) }
+
     // --- Helpers ---
 
     private fun uint16LE(data: ByteArray, offset: Int): Int =

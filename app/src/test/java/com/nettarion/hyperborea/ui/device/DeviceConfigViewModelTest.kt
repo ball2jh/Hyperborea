@@ -5,7 +5,6 @@ import com.google.common.truth.Truth.assertThat
 import com.nettarion.hyperborea.MainDispatcherRule
 import com.nettarion.hyperborea.core.adapter.AdapterState
 import com.nettarion.hyperborea.core.adapter.HardwareAdapter
-import com.nettarion.hyperborea.core.model.ConsoleKey
 import com.nettarion.hyperborea.core.model.DeviceCommand
 import com.nettarion.hyperborea.core.model.DeviceIdentity
 import com.nettarion.hyperborea.core.model.DeviceInfo
@@ -154,7 +153,6 @@ private class FakeHardwareAdapter : HardwareAdapter {
     override val exerciseData: StateFlow<ExerciseData?> = MutableStateFlow(null)
     override val deviceInfo: StateFlow<DeviceInfo?> = MutableStateFlow(null)
     override val deviceIdentity: StateFlow<DeviceIdentity?> = MutableStateFlow(null)
-    override val consoleKeyPresses: Flow<ConsoleKey> = emptyFlow()
     override val degradedReason: StateFlow<String?> = MutableStateFlow(null)
     override val prerequisites: List<Prerequisite> = emptyList()
     override fun canOperate(snapshot: SystemSnapshot): Boolean = true

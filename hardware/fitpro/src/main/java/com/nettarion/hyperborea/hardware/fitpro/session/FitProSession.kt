@@ -1,21 +1,16 @@
 package com.nettarion.hyperborea.hardware.fitpro.session
 
-import com.nettarion.hyperborea.core.model.ConsoleKey
 import com.nettarion.hyperborea.core.model.DeviceCapabilities
 import com.nettarion.hyperborea.core.model.DeviceCommand
 import com.nettarion.hyperborea.core.model.DeviceIdentity
 import com.nettarion.hyperborea.core.model.DeviceType
 import com.nettarion.hyperborea.core.model.ExerciseData
-import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.StateFlow
 
 interface FitProSession {
     val exerciseData: StateFlow<ExerciseData?>
     val deviceIdentity: StateFlow<DeviceIdentity?>
     val sessionState: StateFlow<SessionState>
-
-    /** Console membrane-keypad presses (resistance ± / incline ± / speed ±), one event per press. */
-    val consoleKeyPresses: SharedFlow<ConsoleKey>
 
     /** Non-null while streaming but degraded — e.g. the console never confirmed the workout started. */
     val degradedReason: StateFlow<String?>

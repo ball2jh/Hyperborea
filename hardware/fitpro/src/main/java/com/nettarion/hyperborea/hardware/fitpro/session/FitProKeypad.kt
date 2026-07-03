@@ -1,15 +1,13 @@
 package com.nettarion.hyperborea.hardware.fitpro.session
 
-import com.nettarion.hyperborea.core.model.ConsoleKey
-
 /**
  * The FitPro console keypad code space — identical on V1 (the KEY_OBJECT field) and V2 (the
  * KEY_COOKED feature); the membrane-keypad firmware predates the protocol split. Both sessions
  * edge-detect the *currently-pressed* code themselves (0 = no key) and translate fresh presses
  * here. What a press *does* differs by protocol: V1 MCUs act on their own keys, V2 forwards them
- * for the host to act on — see [com.nettarion.hyperborea.core.model.ConsoleKey].
+ * for the host to act on — see [ConsoleKey].
  */
-object FitProKeypad {
+internal object FitProKeypad {
 
     fun consoleKeyFromCode(code: Int): ConsoleKey? = when (code) {
         KEY_START -> ConsoleKey.START

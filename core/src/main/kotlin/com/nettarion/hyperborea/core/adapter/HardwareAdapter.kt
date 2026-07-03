@@ -1,25 +1,16 @@
 package com.nettarion.hyperborea.core.adapter
 
-import com.nettarion.hyperborea.core.model.ConsoleKey
 import com.nettarion.hyperborea.core.model.DeviceCommand
 import com.nettarion.hyperborea.core.model.DeviceIdentity
 import com.nettarion.hyperborea.core.model.DeviceInfo
 import com.nettarion.hyperborea.core.model.ExerciseData
 
-import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.StateFlow
 
 interface HardwareAdapter : Adapter {
     val deviceInfo: StateFlow<DeviceInfo?>
     val exerciseData: StateFlow<ExerciseData?>
     val deviceIdentity: StateFlow<DeviceIdentity?>
-
-    /**
-     * Physical-console keypad presses (resistance ±, incline ±, speed ±), one event per press.
-     * Only emits while a hardware session is active; idle/empty otherwise. Observe-only — the
-     * equipment's own controller already acts on these keys; this is here for UI/diagnostics.
-     */
-    val consoleKeyPresses: Flow<ConsoleKey>
 
     /**
      * Non-null when the hardware is connected but in a partially-broken state — e.g. the console

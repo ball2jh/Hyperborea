@@ -2,7 +2,6 @@ package com.nettarion.hyperborea.hardware.fitpro
 
 import com.nettarion.hyperborea.core.adapter.AdapterState
 import com.nettarion.hyperborea.core.AppLogger
-import com.nettarion.hyperborea.core.model.ConsoleKey
 import com.nettarion.hyperborea.core.model.DeviceCapabilities
 import com.nettarion.hyperborea.core.model.DeviceCommand
 import com.nettarion.hyperborea.core.model.DeviceIdentity
@@ -27,12 +26,8 @@ import javax.inject.Singleton
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
-import kotlinx.coroutines.channels.BufferOverflow
-import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
-import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.StateFlow
-import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 
@@ -84,10 +79,6 @@ class FitProAdapter @Inject constructor(
     private val _state = MutableStateFlow<AdapterState>(AdapterState.Inactive)
     override val state: StateFlow<AdapterState> = _state.asStateFlow()
 
-    private val _consoleKeyPresses =
-        MutableSharedFlow<ConsoleKey>(extraBufferCapacity = 8, onBufferOverflow = BufferOverflow.DROP_OLDEST)
-    override val consoleKeyPresses: SharedFlow<ConsoleKey> = _consoleKeyPresses.asSharedFlow()
-
     private val _degradedReason = MutableStateFlow<String?>(null)
     override val degradedReason: StateFlow<String?> = _degradedReason.asStateFlow()
 
@@ -101,7 +92,6 @@ class FitProAdapter @Inject constructor(
     private var lastDetectedType: DeviceType? = null
     private var dataForwardJob: Job? = null
     private var identityForwardJob: Job? = null
-    private var keyForwardJob: Job? = null
     private var degradedForwardJob: Job? = null
     private var stateMonitorJob: Job? = null
 
@@ -187,14 +177,6 @@ class FitProAdapter @Inject constructor(
                     logger.e(TAG, "Data forwarding failed", e)
                     _state.value = AdapterState.Error("Data forwarding failed: ${e.message}", e)
                 }
-            }
-
-            // Forward console-keypad presses from session
-            keyForwardJob = scope.launch {
-                try {
-                    newSession.consoleKeyPresses.collect { key -> _consoleKeyPresses.tryEmit(key) }
-                } catch (e: CancellationException) { throw e }
-                catch (e: Exception) { logger.e(TAG, "Console-key forwarding failed", e) }
             }
 
             // Forward the session's degraded-health reason
@@ -284,8 +266,6 @@ class FitProAdapter @Inject constructor(
 
         dataForwardJob?.cancel()
         dataForwardJob = null
-        keyForwardJob?.cancel()
-        keyForwardJob = null
         degradedForwardJob?.cancel()
         degradedForwardJob = null
         identityForwardJob?.cancel()

@@ -16,17 +16,8 @@ data class ExerciseData(
     val targetResistance: Int? = null,
     val workoutMode: Int? = null,
     val verticalGain: Float? = null,
-    val verticalNet: Float? = null,
-    val averageWatts: Int? = null,
-    val averageIncline: Float? = null,
-    val lapTime: Long? = null,
-    val pausedTime: Long? = null,
-    val startRequested: Boolean? = null,
-    val goalTime: Long? = null,
     val strokeCount: Int? = null,
     val strokeRate: Int? = null,
-    val splitTime: Int? = null,
-    val avgSplitTime: Int? = null,
 ) {
     companion object {
         /**

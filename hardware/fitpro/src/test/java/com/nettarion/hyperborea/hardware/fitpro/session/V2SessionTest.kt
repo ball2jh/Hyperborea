@@ -1,7 +1,6 @@
 package com.nettarion.hyperborea.hardware.fitpro.session
 
 import com.google.common.truth.Truth.assertThat
-import com.nettarion.hyperborea.core.model.ConsoleKey
 import com.nettarion.hyperborea.core.model.DeviceCommand
 import com.nettarion.hyperborea.core.model.DeviceType
 import com.nettarion.hyperborea.core.test.TestAppLogger
@@ -350,26 +349,25 @@ class V2SessionTest {
     }
 
     @Test
-    fun `console keypad events emit ConsoleKeys with edge detection`() = runTest {
+    fun `held console key routes once until released (edge detection)`() = runTest {
+        // KEY_COOKED repeats the currently-pressed code; a held key must act once, not per report.
         val session = createSession(this)
+        emitSupportedFeatures(V2FeatureId.TARGET_KPH, V2FeatureId.WORKOUT_STATE)
         session.start()
         advanceUntilIdle()
+        transport.emitIncoming(buildEventPacket(V2FeatureId.WORKOUT_STATE, V2WorkoutMode.RUNNING.raw))
+        runCurrent()
+        val baseline = transport.writtenPackets.size
 
-        val keys = mutableListOf<ConsoleKey>()
-        val collectJob = backgroundScope.launch { session.consoleKeyPresses.collect { keys.add(it) } }
+        transport.emitIncoming(buildEventPacket(V2FeatureId.KEY_COOKED, 3f)) // speed up pressed
+        transport.emitIncoming(buildEventPacket(V2FeatureId.KEY_COOKED, 3f)) // still held — ignored
+        runCurrent()
+        transport.emitIncoming(buildEventPacket(V2FeatureId.KEY_COOKED, 0f)) // released
+        transport.emitIncoming(buildEventPacket(V2FeatureId.KEY_COOKED, 3f)) // fresh press
         runCurrent()
 
-        transport.emitIncoming(buildEventPacket(V2FeatureId.KEY_COOKED, 3f)) // speed up
-        transport.emitIncoming(buildEventPacket(V2FeatureId.KEY_COOKED, 3f)) // repeat — ignored
-        transport.emitIncoming(buildEventPacket(V2FeatureId.KEY_COOKED, 0f)) // release
-        transport.emitIncoming(buildEventPacket(V2FeatureId.KEY_COOKED, 3f)) // pressed again
-        transport.emitIncoming(buildEventPacket(V2FeatureId.KEY_COOKED, 1f)) // stop
-        runCurrent()
-
-        assertThat(keys).containsExactly(
-            ConsoleKey.SPEED_UP, ConsoleKey.SPEED_UP, ConsoleKey.STOP,
-        ).inOrder()
-        collectJob.cancel()
+        val writes = transport.writtenPackets.drop(baseline)
+        assertThat(writes.filter { it.isFeatureWrite(V2FeatureId.TARGET_KPH) }).hasSize(2)
     }
 
     @Test
