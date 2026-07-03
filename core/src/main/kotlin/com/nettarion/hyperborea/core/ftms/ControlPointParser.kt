@@ -35,9 +35,13 @@ object ControlPointParser {
                 val raw = sint16LEAt(payload, 1)
                 ControlPointResult.DeviceCmd(DeviceCommand.SetIncline(raw / 10f))
             }
-            0x04.toByte() -> { // Set Target Resistance (UINT8, 0.1 resolution)
+            0x04.toByte() -> { // Set Target Resistance (0.1 resolution)
+                // Width is ambiguous in the wild: FTMS 1.0's table says UINT8, but several
+                // clients follow the SINT16 reading (matching Supported Resistance Level Range).
+                // Accept both — a 2-byte parameter would otherwise have only its low byte read,
+                // corrupting targets above 25.5. Zwift's 1-byte form is unaffected.
                 if (payload.size < 2) return ControlPointResult.Unsupported(opcode)
-                val raw = payload[1].toInt() and 0xFF
+                val raw = if (payload.size >= 3) sint16LEAt(payload, 1) else payload[1].toInt() and 0xFF
                 ControlPointResult.DeviceCmd(DeviceCommand.SetResistance((raw / 10.0).roundToInt()))
             }
             0x05.toByte() -> { // Set Target Power

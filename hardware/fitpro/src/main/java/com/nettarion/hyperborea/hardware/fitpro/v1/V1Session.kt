@@ -913,9 +913,21 @@ internal class V1Session(
         if (V1Codec.isMultiPacketHeader(firstPacket)) {
             val expected = V1Codec.expectedPacketCount(firstPacket)
             val packets = mutableListOf(firstPacket)
-            repeat(expected) {
-                val dataPacket = transport.readPacket() ?: return null
-                packets.add(dataPacket)
+            // Total deadline across the whole reassembly: the header's count byte is
+            // MCU-supplied, and each readPacket() can block up to its own timeout — a garbled
+            // header claiming 255 packets must not stall the poll loop for minutes.
+            val complete = withTimeoutOrNull(MULTI_PACKET_TOTAL_TIMEOUT_MS) {
+                repeat(expected) {
+                    val dataPacket = transport.readPacket() ?: return@withTimeoutOrNull false
+                    packets.add(dataPacket)
+                }
+                true
+            }
+            if (complete != true) {
+                if (complete == null) {
+                    logger.w(TAG, "Multi-packet response incomplete (${packets.size}/${expected + 1} packets within ${MULTI_PACKET_TOTAL_TIMEOUT_MS}ms) — dropping")
+                }
+                return null
             }
             return V1Codec.decode(packets, dataResponseFields)
         }
@@ -930,6 +942,9 @@ internal class V1Session(
         // Safety timeout for a single MCU response — it normally replies immediately; if it ever
         // doesn't, fail/degrade gracefully instead of hanging the session.
         private const val RESPONSE_TIMEOUT_MS = 1000L
+        // Total budget for reassembling one multi-packet response (the periodic 87-byte read is
+        // 5 packets, arriving effectively immediately) — bounds a garbled header's claimed count.
+        private const val MULTI_PACKET_TOTAL_TIMEOUT_MS = 2000L
         private const val MAX_CONSECUTIVE_POLL_ERRORS = 10
         private const val MAX_SECURITY_REVERIFY_ATTEMPTS = 5
         private const val SECURITY_DEGRADED_MESSAGE =

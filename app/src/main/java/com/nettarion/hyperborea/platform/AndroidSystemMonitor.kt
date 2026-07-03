@@ -67,7 +67,15 @@ class AndroidSystemMonitor @Inject constructor(
             addAction(UsbManager.ACTION_USB_DEVICE_ATTACHED)
             addAction(UsbManager.ACTION_USB_DEVICE_DETACHED)
         }
-        context.registerReceiver(receiver, filter)
+        // All five actions are protected system broadcasts (only the OS can send them), so the
+        // export flag is not load-bearing here — set for consistency with the other receivers.
+        // Never unregistered: this is an app-lifetime @Singleton.
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            context.registerReceiver(receiver, filter, Context.RECEIVER_NOT_EXPORTED)
+        } else {
+            @Suppress("UnspecifiedRegisterReceiverFlag")
+            context.registerReceiver(receiver, filter)
+        }
         updateStatus()
         logger.i(TAG, "System monitor started")
     }

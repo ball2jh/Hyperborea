@@ -81,6 +81,14 @@ class ControlPointParserTest {
     }
 
     @Test
+    fun `parseFtmsControlPoint set target resistance accepts the 2-byte sint16 form`() {
+        // Resistance 40.0 (400 raw, > 255 so unrepresentable as UINT8) as sint16 LE = 0x90, 0x01
+        val result = ControlPointParser.parseFtmsControlPoint(byteArrayOf(0x04, 0x90.toByte(), 0x01))
+        val cmd = (result as ControlPointParser.ControlPointResult.DeviceCmd).command
+        assertThat((cmd as DeviceCommand.SetResistance).level).isEqualTo(40)
+    }
+
+    @Test
     fun `parseFtmsControlPoint set target power`() {
         // 200 watts as sint16 LE = 0xC8, 0x00
         val result = ControlPointParser.parseFtmsControlPoint(byteArrayOf(0x05, 0xC8.toByte(), 0x00))
