@@ -61,6 +61,14 @@ internal class V2Session(
     private var startRequestJob: Job? = null
     /** Last CURRENT_KPH the console reported; drives the belt zero<->moving edge log. */
     private var lastSpeedKph: Float? = null
+    /**
+     * True once a belt machine has actually reported CURRENT_KPH. Field treadmills (LargeX/T9
+     * 1.19.x) never do — the belt runs at the commanded TARGET_KPH, so that's used as the speed.
+     * But if a console *does* report real belt speed, it's authoritative: this flag stops
+     * TARGET_KPH from overwriting the real reading (otherwise displayed speed flip-flops between
+     * the two on every event).
+     */
+    private var beltReportsCurrentSpeed = false
 
     // Equipment limits the console reports as subscribed events (see applyEvent's limit branches).
     // Null until the MCU reports each; surfaced to the adapter via [deviceCapabilities] to overlay
@@ -628,6 +636,7 @@ internal class V2Session(
                     logger.i(TAG, "Belt speed ${if (nowMoving) "started: $value kph" else "stopped (0)"}")
                 }
                 lastSpeedKph = value
+                if (detectedDeviceType.isBeltBased) beltReportsCurrentSpeed = true
                 accumulator.updateSpeed(value)
             }
             V2FeatureId.TARGET_RESISTANCE -> accumulator.updateResistance(value.toInt())
@@ -647,8 +656,12 @@ internal class V2Session(
                 // Belt machines don't report instantaneous speed (CURRENT_KPH is never sent on the
                 // V2 treadmill); the belt runs at the commanded TARGET_KPH, so that IS the actual
                 // speed — drive the displayed/broadcast speed from it. Bikes/ellipticals report a
-                // real CURRENT_KPH and keep TARGET_KPH as a pure target, so this is belt-only.
-                if (detectedDeviceType.isBeltBased) accumulator.updateSpeed(value)
+                // real CURRENT_KPH and keep TARGET_KPH as a pure target, so this is belt-only —
+                // and only as a fallback: if this belt console does report CURRENT_KPH, that real
+                // reading is authoritative and TARGET_KPH must not overwrite it.
+                if (detectedDeviceType.isBeltBased && !beltReportsCurrentSpeed) {
+                    accumulator.updateSpeed(value)
+                }
             }
             V2FeatureId.TARGET_GRADE -> accumulator.updateTargetIncline(value)
             V2FeatureId.SYSTEM_MODE -> { /* System on/standby/sleep — not the workout state, and not exercise data */ }

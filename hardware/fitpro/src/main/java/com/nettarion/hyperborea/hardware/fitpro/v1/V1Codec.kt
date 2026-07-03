@@ -280,6 +280,8 @@ object V1Codec {
             buf.putInt(encoded)
             buf.array()
         }
+        // 8-byte gear field: currentGear at byte 4, the rest of the range bytes left zero.
+        V1Converter.GEAR -> ByteArray(8).also { it[4] = value.toInt().toByte() }
         V1Converter.KEY_OBJECT -> ByteArray(14)
     }
 
@@ -323,6 +325,8 @@ object V1Codec {
             val raw = ByteBuffer.wrap(data, 0, 4).order(ByteOrder.LITTLE_ENDIAN).int
             raw.toFloat() / 10000f
         }
+        // 8-byte gear field: currentGear is byte 4 (bytes 5/7 carry the gear range, unused here).
+        V1Converter.GEAR -> (data[4].toInt() and 0xFF).toFloat()
         // KEY_OBJECT is decoded into a KeyObject by decodeDataResponseForFields, not through here;
         // this branch only exists so the `when` stays exhaustive.
         V1Converter.KEY_OBJECT -> 0f

@@ -751,6 +751,9 @@ class V1SessionTest {
 
     @Test
     fun `rower fields in data response populate exerciseData`() = runTest {
+        // Doubles as the GEAR-alignment regression: STROKES (index 109) and STROKES_PER_MINUTE
+        // (110) sit far past GEAR (index 26). If GEAR's wire width were under-declared, the
+        // positional decode would land these on the wrong bytes and the values would be garbage.
         val session = startStreamingSession()
 
         backgroundScope.launch {
@@ -890,9 +893,9 @@ class V1SessionTest {
     }
 
     private fun buildDataResponseWithCadence(rpm: Int): ByteArray {
-        // 35 periodicReadFields sorted by fieldIndex = 87 bytes total
+        // 35 periodicReadFields sorted by fieldIndex = 94 bytes total (GEAR is 8 bytes)
         // RPM is at offset 12 (after KPH=2, GRADE=2, RESISTANCE=2, WATTS=2, CURRENT_DISTANCE=4)
-        val fieldData = ByteArray(87)
+        val fieldData = ByteArray(94)
         fieldData[12] = (rpm and 0xFF).toByte()
         fieldData[13] = ((rpm shr 8) and 0xFF).toByte()
 
@@ -909,11 +912,11 @@ class V1SessionTest {
 
     /**
      * Build a DataResponse packet with known field values.
-     * 35 periodicReadFields sorted by fieldIndex = 87 bytes total.
+     * 35 periodicReadFields sorted by fieldIndex = 94 bytes total (GEAR is 8 bytes).
      * Offsets: WATTS=6, RPM=12, WORKOUT_MODE=33.
      */
     private fun buildDataResponsePacket(wattsValue: Int = 100, rpmValue: Int = 0, workoutMode: Int = 0): ByteArray {
-        val fieldData = ByteArray(87)
+        val fieldData = ByteArray(94)
         // WATTS at offset 6 (after KPH=2, GRADE=2, RESISTANCE=2)
         fieldData[6] = (wattsValue and 0xFF).toByte()
         fieldData[7] = ((wattsValue shr 8) and 0xFF).toByte()
@@ -931,7 +934,7 @@ class V1SessionTest {
 
     /**
      * Build a DataResponse with specific speed and resistance values.
-     * 35 periodicReadFields sorted by fieldIndex = 87 bytes total.
+     * 35 periodicReadFields sorted by fieldIndex = 94 bytes total (GEAR is 8 bytes).
      * Key offsets: RESISTANCE=4, WATTS=6, ACTUAL_KPH=36.
      * ACTUAL_KPH uses SPEED converter (raw / 100 → kph).
      */
@@ -940,7 +943,7 @@ class V1SessionTest {
         speedRaw: Int = 0,        // ACTUAL_KPH raw value (kph × 100, e.g., 2000 = 20.0 kph)
         resistanceValue: Int = 0, // raw resistance (converted by resistanceRawToLevel)
     ): ByteArray {
-        val fieldData = ByteArray(87)
+        val fieldData = ByteArray(94)
         // RESISTANCE at offset 4 (after KPH=2, GRADE=2)
         fieldData[4] = (resistanceValue and 0xFF).toByte()
         fieldData[5] = ((resistanceValue shr 8) and 0xFF).toByte()
@@ -963,18 +966,19 @@ class V1SessionTest {
         splitTime: Int = 0,
         avgSplitTime: Int = 0,
     ): ByteArray {
-        val fieldData = ByteArray(87)
-        // STROKES at offset 78, 2 bytes LE
-        fieldData[78] = (strokes and 0xFF).toByte()
-        fieldData[79] = ((strokes shr 8) and 0xFF).toByte()
-        // STROKES_PER_MINUTE at offset 80, 1 byte
-        fieldData[80] = strokesPerMinute.toByte()
-        // FIVE_HUNDRED_SPLIT at offset 81, 2 bytes LE
-        fieldData[81] = (splitTime and 0xFF).toByte()
-        fieldData[82] = ((splitTime shr 8) and 0xFF).toByte()
-        // AVG_FIVE_HUNDRED_SPLIT at offset 83, 2 bytes LE
-        fieldData[83] = (avgSplitTime and 0xFF).toByte()
-        fieldData[84] = ((avgSplitTime shr 8) and 0xFF).toByte()
+        val fieldData = ByteArray(94)
+        // Offsets are +7 vs the pre-GEAR-fix layout: GEAR (index 26) is 8 bytes, and these rower
+        // fields all sit after it. STROKES at offset 85, 2 bytes LE
+        fieldData[85] = (strokes and 0xFF).toByte()
+        fieldData[86] = ((strokes shr 8) and 0xFF).toByte()
+        // STROKES_PER_MINUTE at offset 87, 1 byte
+        fieldData[87] = strokesPerMinute.toByte()
+        // FIVE_HUNDRED_SPLIT at offset 88, 2 bytes LE
+        fieldData[88] = (splitTime and 0xFF).toByte()
+        fieldData[89] = ((splitTime shr 8) and 0xFF).toByte()
+        // AVG_FIVE_HUNDRED_SPLIT at offset 90, 2 bytes LE
+        fieldData[90] = (avgSplitTime and 0xFF).toByte()
+        fieldData[91] = ((avgSplitTime shr 8) and 0xFF).toByte()
 
         val totalLen = 4 + fieldData.size + 1
         val header = byteArrayOf(0x07, totalLen.toByte(), 0x02, 0x02) // status=DONE
@@ -1061,13 +1065,13 @@ class V1SessionTest {
     @Test
     fun `commandToFields SetResistance scales the raw value`() {
         val session = createUnstartedSession() // maxResistance = 24
-        // ResistanceConverter: scale = 10000/24 ≈ 416.67; raw = round(level*scale) - 1, clamped ≥ 0.
+        // ResistanceConverter (matches stock): integer scale = 10000/24 = 416; raw = level*416 - 1, clamped ≥ 0.
         assertThat(session.commandToFields(DeviceCommand.SetResistance(0)))
             .containsExactly(V1DataField.RESISTANCE, 0f)
         assertThat(session.commandToFields(DeviceCommand.SetResistance(12)))
-            .containsExactly(V1DataField.RESISTANCE, 4999f)
+            .containsExactly(V1DataField.RESISTANCE, 4991f)
         assertThat(session.commandToFields(DeviceCommand.SetResistance(24)))
-            .containsExactly(V1DataField.RESISTANCE, 9999f)
+            .containsExactly(V1DataField.RESISTANCE, 9983f)
     }
 
     @Test

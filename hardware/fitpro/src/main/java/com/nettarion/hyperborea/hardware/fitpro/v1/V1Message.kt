@@ -163,7 +163,10 @@ enum class V1DataField(val fieldIndex: Int, val sizeBytes: Int, val converter: V
     CURRENT_TIME(20, 4, V1Converter.INT),
     CURRENT_CALORIES(21, 4, V1Converter.CALORIES),
     GOAL_TIME(22, 4, V1Converter.INT),
-    GEAR(26, 1, V1Converter.BYTE),
+    // 8-byte composite field: currentGear lives at byte offset 4 (bytes 5/7 carry the gear range).
+    // Declaring the full 8-byte width is load-bearing — the poll response is decoded positionally,
+    // so a short size here shifts every field after index 26 (the −10595 kcal misalignment class).
+    GEAR(26, 8, V1Converter.GEAR),
     MAX_GRADE(27, 2, V1Converter.GRADE),
     MIN_GRADE(28, 2, V1Converter.GRADE),
     MAX_KPH(30, 2, V1Converter.SPEED),
@@ -240,5 +243,6 @@ enum class V1Converter {
     PULSE,
     CALORIES,
     VERTICAL,
+    GEAR,
     KEY_OBJECT,
 }
