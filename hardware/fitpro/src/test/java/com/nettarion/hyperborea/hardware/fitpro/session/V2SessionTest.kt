@@ -834,6 +834,33 @@ class V2SessionTest {
     }
 
     @Test
+    fun `host-driven start releases the idle-mode lock before commanding RUNNING`() = runTest {
+        // Stock locks the console's idle state at connect (belt + no START_REQUESTED) but UNLOCKS
+        // it as the first step of starting — the console won't accept WORKOUT_STATE=RUNNING while
+        // still idle-locked. Assert the unlock (IDLE_SYSTEM_MODE_LOCK = 0) precedes the RUNNING write.
+        val session = createSession(this)
+        emitSupportedFeatures(
+            V2FeatureId.TARGET_KPH, V2FeatureId.TARGET_GRADE, V2FeatureId.WORKOUT_STATE,
+            V2FeatureId.IDLE_SYSTEM_MODE_LOCK,
+        )
+        session.start()
+        advanceUntilIdle()
+        val baseline = transport.writtenPackets.size
+
+        transport.emitIncoming(buildEventPacket(V2FeatureId.WORKOUT_STATE, V2WorkoutMode.READY_TO_START.raw))
+        runCurrent()
+
+        val writes = transport.writtenPackets.drop(baseline)
+        val unlockIdx = writes.indexOfFirst {
+            it.isFeatureWrite(V2FeatureId.IDLE_SYSTEM_MODE_LOCK) && it.featureWriteValue() == 0f
+        }
+        val runIdx = writes.indexOfFirst { it.workoutStateWriteValue() == V2WorkoutMode.RUNNING.raw }
+        assertThat(unlockIdx).isAtLeast(0)
+        assertThat(runIdx).isAtLeast(0)
+        assertThat(unlockIdx).isLessThan(runIdx)
+    }
+
+    @Test
     fun `host-driven start writes the stock pre-workout config before RUNNING`() = runTest {
         // When the console declares the stock config features, the host writes them (units, timeouts,
         // goal) before the WORKOUT_STATE=RUNNING transition — this firmware refuses RUNNING otherwise.

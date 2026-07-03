@@ -417,10 +417,14 @@ internal class V2Session(
                     writeFeatureRaw(V2FeatureId.START_REQUESTED, START_REQUESTED_TRUE)
                 } else {
                     logger.i(TAG, "Start requested ($trigger, from=${from ?: "?"}) — host-driving WORKOUT_STATE=RUNNING (console doesn't declare START_REQUESTED)")
-                    // The stock manual-run sequence: write the pre-workout config, then go straight to
-                    // RUNNING (no WARM_UP — that step is rejected from idle on this firmware), then
-                    // command the belt speed/incline right after the state write (as the stock does).
+                    // The stock manual-run sequence: RELEASE the idle-mode lock first, then write the
+                    // pre-workout config, then go straight to RUNNING (no WARM_UP — that step is
+                    // rejected from idle on this firmware), then command the belt speed/incline right
+                    // after the state write. We lock at connect (the pre-start state this firmware
+                    // requires) but the console must be UNLOCKED before it accepts the workout-start
+                    // writes — driving RUNNING while still idle-locked is what stock never does.
                     // Skip the config when resuming from PAUSED.
+                    releaseIdleModeLock()
                     if (from != V2WorkoutMode.PAUSED) writePreWorkoutConfig()
                     writeWorkoutState(V2WorkoutMode.RUNNING)
                     // "Belt go": minimum speed (or the last commanded when resuming) — a host-driven
@@ -531,6 +535,18 @@ internal class V2Session(
      * write until these are set. Each is a single write, gated on the console declaring it; rider
      * weight is already pushed separately (SetUserWeight) by the orchestrator.
      */
+    /**
+     * Releases the idle-mode lock as the first step of a host-driven start. We lock at connect
+     * because this firmware requires the locked idle state before a workout, but stock unlocks
+     * before it commands the workout — the console won't accept the WORKOUT_STATE=RUNNING write
+     * while still idle-locked. Gated on the console declaring the feature; no-op otherwise.
+     */
+    private suspend fun releaseIdleModeLock() {
+        if (V2FeatureId.IDLE_SYSTEM_MODE_LOCK !in (declaredFeatures ?: emptySet())) return
+        logger.i(TAG, "Start: releasing IDLE_SYSTEM_MODE_LOCK (unlocked) before commanding the workout")
+        writeFeatureRaw(V2FeatureId.IDLE_SYSTEM_MODE_LOCK, IDLE_MODE_UNLOCKED)
+    }
+
     private suspend fun writePreWorkoutConfig() {
         val declared = declaredFeatures ?: emptySet()
         val config = listOf(
