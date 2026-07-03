@@ -36,6 +36,9 @@ abstract class AdapterModule {
     abstract fun bindWifiAdapter(impl: WifiAdapter): BroadcastAdapter
 
     companion object {
+        // Manual factory (unlike WifiAdapter's @Binds): FtmsAdapter takes a raw Context, and the
+        // feature modules are Hilt-free by convention (javax.inject only), so the
+        // @ApplicationContext qualifier can only be applied here in the composition root.
         @Provides
         @Singleton
         @IntoSet

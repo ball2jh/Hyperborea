@@ -5,8 +5,7 @@ import com.nettarion.hyperborea.core.ftms.ControlPointParser
 import com.nettarion.hyperborea.core.model.DeviceCommand
 import com.nettarion.hyperborea.core.model.DeviceType
 import com.nettarion.hyperborea.core.model.ExerciseData
-import com.nettarion.hyperborea.core.ftms.FtmsDataEncoder
-import com.nettarion.hyperborea.core.ftms.RevolutionCounter
+import com.nettarion.hyperborea.core.ftms.FtmsNotificationPump
 import java.io.InputStream
 import java.io.OutputStream
 import kotlin.coroutines.CoroutineContext
@@ -36,14 +35,35 @@ class WifiClientHandler(
     internal val enabledNotifications: MutableSet<ShortUuid> =
         java.util.Collections.newSetFromMap(java.util.concurrent.ConcurrentHashMap())
     private val writeMutex = Mutex()
-    private val sendMutex = Mutex()
     @Volatile var isClosed = false
         private set
 
-    private val revCounter = RevolutionCounter()
     private val latestData = MutableStateFlow(ExerciseData.ZERO)
     private var sendJob: Job? = null
     private var consecutiveWriteErrors = 0
+
+    /**
+     * The shared notification pump handles encode order, Training-Status dedup, and the CPS
+     * revolution counters; this sink maps its characteristics onto the TNP short UUIDs and
+     * frames each payload as a TNP notification. The pump's own mutex serializes the ticker,
+     * data pushes, and subscription events.
+     */
+    private val pump = FtmsNotificationPump(deviceType, object : FtmsNotificationPump.Sink {
+        override fun isSubscribed(characteristic: FtmsNotificationPump.Characteristic): Boolean =
+            !isClosed && enabledNotifications.contains(shortUuidFor(characteristic))
+
+        override suspend fun send(characteristic: FtmsNotificationPump.Characteristic, payload: ByteArray) {
+            sendNotification(WifiCodec.encodeNotification(shortUuidFor(characteristic), payload))
+        }
+    })
+
+    private fun shortUuidFor(characteristic: FtmsNotificationPump.Characteristic): ShortUuid =
+        when (characteristic) {
+            FtmsNotificationPump.Characteristic.DATA -> serviceDef.dataCharacteristic
+            FtmsNotificationPump.Characteristic.TRAINING_STATUS -> WifiServiceDefinition.TRAINING_STATUS
+            FtmsNotificationPump.Characteristic.CPS_MEASUREMENT -> WifiServiceDefinition.CPS_MEASUREMENT
+            FtmsNotificationPump.Characteristic.RSC_MEASUREMENT -> WifiServiceDefinition.RSC_MEASUREMENT
+        }
 
     suspend fun runReadLoop() = withContext(ioContext) {
         try {
@@ -73,41 +93,9 @@ class WifiClientHandler(
     fun startSendLoop() {
         sendJob = scope.launch {
             while (isActive && !isClosed) {
-                sendNotificationsInternal(latestData.value)
+                pump.emit(latestData.value)
                 delay(notificationIntervalMs)
             }
-        }
-    }
-
-    private suspend fun sendNotificationsInternal(data: ExerciseData) = sendMutex.withLock {
-        if (isClosed) return@withLock
-        val now = System.currentTimeMillis()
-
-        if (enabledNotifications.contains(serviceDef.dataCharacteristic)) {
-            val value = FtmsDataEncoder.encodeData(deviceType, data)
-            sendNotification(WifiCodec.encodeNotification(serviceDef.dataCharacteristic, value))
-        }
-
-        if (enabledNotifications.contains(WifiServiceDefinition.CPS_MEASUREMENT)) {
-            revCounter.update(data, now)
-            val value = FtmsDataEncoder.encodeCpsMeasurement(
-                data,
-                revCounter.cumulativeWheelRevs,
-                revCounter.lastWheelEventTime,
-                revCounter.cumulativeCrankRevs,
-                revCounter.lastCrankEventTime,
-            )
-            sendNotification(WifiCodec.encodeNotification(WifiServiceDefinition.CPS_MEASUREMENT, value))
-        }
-
-        if (enabledNotifications.contains(WifiServiceDefinition.RSC_MEASUREMENT)) {
-            val value = FtmsDataEncoder.encodeRscMeasurement(data)
-            sendNotification(WifiCodec.encodeNotification(WifiServiceDefinition.RSC_MEASUREMENT, value))
-        }
-
-        if (enabledNotifications.contains(WifiServiceDefinition.TRAINING_STATUS)) {
-            val value = FtmsDataEncoder.encodeTrainingStatus(data.workoutMode)
-            sendNotification(WifiCodec.encodeNotification(WifiServiceDefinition.TRAINING_STATUS, value))
         }
     }
 
@@ -248,7 +236,8 @@ class WifiClientHandler(
         // Push the current sample immediately so the client doesn't wait up to one tick for the first
         // frame after subscribing (and so it never sees a silent stream).
         if (request.enable) {
-            sendNotificationsInternal(latestData.value)
+            pump.onSubscriptionChanged()
+            pump.emit(latestData.value)
         }
     }
 

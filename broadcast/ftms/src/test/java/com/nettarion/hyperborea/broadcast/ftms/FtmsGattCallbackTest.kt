@@ -63,11 +63,11 @@ class FtmsGattCallbackTest {
             every { characteristic } returns charMock
         }
         callback.onDescriptorWriteRequest(device, 1, descriptor, false, true, 0, byteArrayOf(0x01, 0x00))
-        assertThat(callback.isSubscribed(charUuid)).isTrue()
+        assertThat(callback.isSubscribed(device.address, charUuid)).isTrue()
 
         callback.onConnectionStateChange(device, 0, BluetoothProfile.STATE_DISCONNECTED)
 
-        assertThat(callback.isSubscribed(charUuid)).isFalse()
+        assertThat(callback.isSubscribed(device.address, charUuid)).isFalse()
         assertThat(disconnectedDevices).containsExactly(device)
     }
 
@@ -146,12 +146,12 @@ class FtmsGattCallbackTest {
 
         callback.onDescriptorWriteRequest(device, 1, descriptor, false, true, 0, byteArrayOf(0x01, 0x00))
 
-        assertThat(callback.isSubscribed(charUuid)).isTrue()
+        assertThat(callback.isSubscribed(device.address, charUuid)).isTrue()
     }
 
     @Test
     fun `isSubscribed false when no CCCD written`() {
-        assertThat(callback.isSubscribed(FtmsServiceBuilder.FTMS_FEATURE_UUID)).isFalse()
+        assertThat(callback.isSubscribed(device.address, FtmsServiceBuilder.FTMS_FEATURE_UUID)).isFalse()
     }
 
     @Test
@@ -164,10 +164,32 @@ class FtmsGattCallbackTest {
         }
 
         callback.onDescriptorWriteRequest(device, 1, descriptor, false, true, 0, byteArrayOf(0x01, 0x00))
-        assertThat(callback.isSubscribed(charUuid)).isTrue()
+        assertThat(callback.isSubscribed(device.address, charUuid)).isTrue()
 
         callback.onDescriptorWriteRequest(device, 2, descriptor, false, true, 0, byteArrayOf(0x00, 0x00))
-        assertThat(callback.isSubscribed(charUuid)).isFalse()
+        assertThat(callback.isSubscribed(device.address, charUuid)).isFalse()
+    }
+
+    @Test
+    fun `a second central's disconnect does not wipe the first central's subscriptions`() {
+        val other = mockk<BluetoothDevice>(relaxed = true) {
+            every { address } returns "11:22:33:44:55:66"
+        }
+        val charUuid = FtmsServiceBuilder.dataCharacteristicUuid(DeviceType.BIKE)
+        val charMock = mockk<BluetoothGattCharacteristic> { every { uuid } returns charUuid }
+        val descriptor = mockk<BluetoothGattDescriptor> {
+            every { uuid } returns FtmsServiceBuilder.CCCD_UUID
+            every { characteristic } returns charMock
+        }
+
+        callback.onConnectionStateChange(device, 0, BluetoothProfile.STATE_CONNECTED)
+        callback.onConnectionStateChange(other, 0, BluetoothProfile.STATE_CONNECTED)
+        callback.onDescriptorWriteRequest(device, 1, descriptor, false, true, 0, byteArrayOf(0x01, 0x00))
+
+        callback.onConnectionStateChange(other, 0, BluetoothProfile.STATE_DISCONNECTED)
+
+        assertThat(callback.isSubscribed(device.address, charUuid)).isTrue()
+        assertThat(callback.isSubscribed(other.address, charUuid)).isFalse()
     }
 
     @Test

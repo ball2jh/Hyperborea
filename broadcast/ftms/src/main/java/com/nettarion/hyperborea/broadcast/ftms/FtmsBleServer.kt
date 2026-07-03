@@ -19,10 +19,11 @@ import com.nettarion.hyperborea.core.model.DeviceCommand
 import com.nettarion.hyperborea.core.model.DeviceInfo
 import com.nettarion.hyperborea.core.model.ExerciseData
 import com.nettarion.hyperborea.core.ftms.BroadcastProfile
-import com.nettarion.hyperborea.core.ftms.FtmsDataEncoder
+import com.nettarion.hyperborea.core.ftms.FtmsNotificationPump
 import com.nettarion.hyperborea.core.ftms.GattService
-import com.nettarion.hyperborea.core.ftms.RevolutionCounter
 import android.os.RemoteException
+import java.util.UUID
+import java.util.concurrent.ConcurrentHashMap
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.channels.Channel
@@ -46,17 +47,54 @@ class FtmsBleServer(
 
     private var gattServer: BluetoothGattServer? = null
     private var callback: FtmsGattCallback? = null
-    @Volatile private var connectedDevice: BluetoothDevice? = null
+    private var scope: CoroutineScope? = null
+
+    // A GATT server is inherently multi-central: track every connected device by address so a
+    // second central (or a stale link) can't clobber the live client's state.
+    private val connectedDevices = ConcurrentHashMap<String, BluetoothDevice>()
+    private val connectedClients = ConcurrentHashMap<String, ClientInfo>()
+
     @Volatile private var isStopped = false
     private var advertiseCallback: AdvertiseCallback? = null
-    private val revCounter = RevolutionCounter()
-    private var lastTrainingStatus: Byte = 0x01 // Idle
     @Volatile private var latestData: ExerciseData = ExerciseData.ZERO
     private var tickerJob: Job? = null
     // The adapter name we replaced and the one we set — so stop() can put the device's global
     // Bluetooth identity back instead of leaving the console permanently renamed.
     private var originalAdapterName: String? = null
     private var advertisedName: String? = null
+
+    /**
+     * The shared notification pump handles encode order, Training-Status dedup, and the CPS
+     * revolution counters; this sink fans each payload out to every subscribed central.
+     */
+    private val pump = FtmsNotificationPump(deviceInfo.type, object : FtmsNotificationPump.Sink {
+        override fun isSubscribed(characteristic: FtmsNotificationPump.Characteristic): Boolean {
+            val cb = callback ?: return false
+            val charUuid = uuidFor(characteristic)
+            return connectedDevices.keys.any { cb.isSubscribed(it, charUuid) }
+        }
+
+        @SuppressLint("MissingPermission") // Permission verified during start()
+        override suspend fun send(characteristic: FtmsNotificationPump.Characteristic, payload: ByteArray) {
+            if (isStopped) return
+            val server = gattServer ?: return
+            val cb = callback ?: return
+            val charUuid = uuidFor(characteristic)
+            val char = server.getService(serviceUuidFor(characteristic))?.getCharacteristic(charUuid) ?: return
+            char.value = payload
+            for ((address, device) in connectedDevices) {
+                if (!cb.isSubscribed(address, charUuid)) continue
+                try {
+                    if (!server.notifyCharacteristicChanged(device, char, false)) {
+                        logger.w(TAG, "Failed to send $characteristic notification to $address")
+                    }
+                } catch (e: RemoteException) {
+                    logger.d(TAG, "GATT server closed during broadcast: ${e.message}")
+                    return
+                }
+            }
+        }
+    })
 
     // Service addition synchronization
     private val serviceAddedChannel = Channel<Unit>(Channel.UNLIMITED)
@@ -65,6 +103,7 @@ class FtmsBleServer(
     suspend fun start(deviceName: String, scope: CoroutineScope) {
         requireBluetoothPermission()
         isStopped = false
+        this.scope = scope
 
         // Drain any stale events from previous start attempts
         while (serviceAddedChannel.tryReceive().isSuccess) {}
@@ -78,21 +117,32 @@ class FtmsBleServer(
             logger = logger,
             deviceInfo = deviceInfo,
             onClientConnected = { device ->
-                connectedDevice = device
-                onClientChange(setOf(ClientInfo(
+                connectedDevices[device.address] = device
+                connectedClients[device.address] = ClientInfo(
                     id = device.address,
                     protocol = "BLE FTMS",
                     connectedAt = System.currentTimeMillis(),
-                )))
+                )
+                onClientChange(connectedClients.values.toSet())
             },
-            onClientDisconnected = {
-                connectedDevice = null
-                resetRevCounter()
-                onClientChange(emptySet())
+            onClientDisconnected = { device ->
+                connectedDevices.remove(device.address)
+                connectedClients.remove(device.address)
+                if (connectedDevices.isEmpty()) {
+                    scope.launch { pump.resetCounters() }
+                }
+                onClientChange(connectedClients.values.toSet())
             },
             onCommand = onCommand,
             onServiceAdded = { serviceAddedChannel.trySend(Unit) },
-            onSubscriptionEnabled = { emitNotifications(latestData) },
+            onSubscriptionEnabled = {
+                // Runs on a BLE binder thread — hand off to the scope; the pump's mutex
+                // serializes it against the ticker.
+                scope.launch {
+                    pump.onSubscriptionChanged()
+                    pump.emit(latestData)
+                }
+            },
         )
         callback = gattCallback
 
@@ -123,7 +173,7 @@ class FtmsBleServer(
         // a workout starts; a real data change still pushes instantly via broadcastData().
         tickerJob = scope.launch {
             while (isActive && !isStopped) {
-                if (connectedDevice != null) emitNotifications(latestData)
+                if (connectedDevices.isNotEmpty()) pump.emit(latestData)
                 delay(NOTIFICATION_INTERVAL_MS)
             }
         }
@@ -142,20 +192,17 @@ class FtmsBleServer(
         gattServer?.close()
         gattServer = null
         callback = null
-        connectedDevice = null
-        resetRevCounter()
-        lastTrainingStatus = 0x01
+        scope = null
+        connectedDevices.clear()
+        connectedClients.clear()
         latestData = ExerciseData.ZERO
         restoreAdapterName()
+        // No pump reset needed: FtmsAdapter builds a fresh server (and pump) per start.
     }
 
-    /**
-     * [RevolutionCounter] is single-threaded by contract; this and [emitNotifications] share the
-     * same monitor so a reset from a BLE binder thread can't tear counters mid-encode.
-     */
-    @Synchronized
-    private fun resetRevCounter() {
-        revCounter.reset()
+    suspend fun broadcastData(data: ExerciseData) {
+        latestData = data
+        if (!isStopped && connectedDevices.isNotEmpty()) pump.emit(data)
     }
 
     /**
@@ -177,96 +224,10 @@ class FtmsBleServer(
         }
     }
 
-    fun broadcastData(data: ExerciseData) {
-        latestData = data
-        emitNotifications(data)
-    }
-
-    @Synchronized
-    @SuppressLint("MissingPermission") // Permission verified during start()
-    private fun emitNotifications(data: ExerciseData) {
-        if (isStopped) return
-        val server = gattServer ?: return
-        val device = connectedDevice ?: return
-        val cb = callback ?: return
-
-        try {
-            // Data characteristic notification (device-type-specific)
-            val dataUuid = FtmsServiceBuilder.dataCharacteristicUuid(deviceInfo.type)
-            if (cb.isSubscribed(dataUuid)) {
-                val encodedData = FtmsDataEncoder.encodeData(deviceInfo.type, data)
-                val char = server.getService(FtmsServiceBuilder.FTMS_SERVICE_UUID)
-                    ?.getCharacteristic(dataUuid)
-                if (char != null) {
-                    char.value = encodedData
-                    if (!server.notifyCharacteristicChanged(device, char, false)) {
-                        logger.w(TAG, "Failed to send data notification")
-                    }
-                }
-            }
-
-            // Training Status notification (on mode change)
-            val trainingStatus = FtmsDataEncoder.encodeTrainingStatus(data.workoutMode)
-            if (trainingStatus[1] != lastTrainingStatus) {
-                lastTrainingStatus = trainingStatus[1]
-                if (cb.isSubscribed(FtmsServiceBuilder.TRAINING_STATUS_UUID)) {
-                    val tsChar = server.getService(FtmsServiceBuilder.FTMS_SERVICE_UUID)
-                        ?.getCharacteristic(FtmsServiceBuilder.TRAINING_STATUS_UUID)
-                    if (tsChar != null) {
-                        tsChar.value = trainingStatus
-                        if (!server.notifyCharacteristicChanged(device, tsChar, false)) {
-                            logger.w(TAG, "Failed to send Training Status notification")
-                        }
-                    }
-                }
-            }
-
-            // CPS Measurement notification
-            if (cb.isSubscribed(FtmsServiceBuilder.CPS_MEASUREMENT_UUID)) {
-                val now = System.currentTimeMillis()
-                revCounter.update(data, now)
-                val cpsMeasurement = FtmsDataEncoder.encodeCpsMeasurement(
-                    data,
-                    revCounter.cumulativeWheelRevs,
-                    revCounter.lastWheelEventTime,
-                    revCounter.cumulativeCrankRevs,
-                    revCounter.lastCrankEventTime,
-                )
-                val char = server.getService(FtmsServiceBuilder.CPS_SERVICE_UUID)
-                    ?.getCharacteristic(FtmsServiceBuilder.CPS_MEASUREMENT_UUID)
-                if (char != null) {
-                    char.value = cpsMeasurement
-                    if (!server.notifyCharacteristicChanged(device, char, false)) {
-                        logger.w(TAG, "Failed to send CPS Measurement notification")
-                    }
-                }
-            }
-
-            // RSC Measurement notification (treadmills only — the service is absent otherwise, so
-            // no client can subscribe and this stays inert for bikes/rowers/ellipticals).
-            if (cb.isSubscribed(FtmsServiceBuilder.RSC_MEASUREMENT_UUID)) {
-                val rscMeasurement = FtmsDataEncoder.encodeRscMeasurement(data)
-                val char = server.getService(FtmsServiceBuilder.RSC_SERVICE_UUID)
-                    ?.getCharacteristic(FtmsServiceBuilder.RSC_MEASUREMENT_UUID)
-                if (char != null) {
-                    char.value = rscMeasurement
-                    if (!server.notifyCharacteristicChanged(device, char, false)) {
-                        logger.w(TAG, "Failed to send RSC Measurement notification")
-                    }
-                }
-            }
-        } catch (e: RemoteException) {
-            logger.d(TAG, "GATT server closed during broadcast: ${e.message}")
-        }
-    }
-
     @SuppressLint("MissingPermission") // Permission verified during start()
     fun broadcastStatus(opCode: Byte, parameter: ByteArray? = null) {
         val server = gattServer ?: return
-        val device = connectedDevice ?: return
         val cb = callback ?: return
-
-        if (!cb.isSubscribed(FtmsServiceBuilder.FITNESS_MACHINE_STATUS_UUID)) return
 
         val value = if (parameter != null) {
             byteArrayOf(opCode) + parameter
@@ -275,13 +236,29 @@ class FtmsBleServer(
         }
 
         val char = server.getService(FtmsServiceBuilder.FTMS_SERVICE_UUID)
-            ?.getCharacteristic(FtmsServiceBuilder.FITNESS_MACHINE_STATUS_UUID)
-        if (char != null) {
-            char.value = value
+            ?.getCharacteristic(FtmsServiceBuilder.FITNESS_MACHINE_STATUS_UUID) ?: return
+        char.value = value
+        for ((address, device) in connectedDevices) {
+            if (!cb.isSubscribed(address, FtmsServiceBuilder.FITNESS_MACHINE_STATUS_UUID)) continue
             if (!server.notifyCharacteristicChanged(device, char, false)) {
-                logger.w(TAG, "Failed to send Fitness Machine Status notification")
+                logger.w(TAG, "Failed to send Fitness Machine Status notification to $address")
             }
         }
+    }
+
+    private fun uuidFor(characteristic: FtmsNotificationPump.Characteristic): UUID = when (characteristic) {
+        FtmsNotificationPump.Characteristic.DATA -> FtmsServiceBuilder.dataCharacteristicUuid(deviceInfo.type)
+        FtmsNotificationPump.Characteristic.TRAINING_STATUS -> FtmsServiceBuilder.TRAINING_STATUS_UUID
+        FtmsNotificationPump.Characteristic.CPS_MEASUREMENT -> FtmsServiceBuilder.CPS_MEASUREMENT_UUID
+        FtmsNotificationPump.Characteristic.RSC_MEASUREMENT -> FtmsServiceBuilder.RSC_MEASUREMENT_UUID
+    }
+
+    private fun serviceUuidFor(characteristic: FtmsNotificationPump.Characteristic): UUID = when (characteristic) {
+        FtmsNotificationPump.Characteristic.DATA,
+        FtmsNotificationPump.Characteristic.TRAINING_STATUS,
+        -> FtmsServiceBuilder.FTMS_SERVICE_UUID
+        FtmsNotificationPump.Characteristic.CPS_MEASUREMENT -> FtmsServiceBuilder.CPS_SERVICE_UUID
+        FtmsNotificationPump.Characteristic.RSC_MEASUREMENT -> FtmsServiceBuilder.RSC_SERVICE_UUID
     }
 
     private fun startAdvertising() {

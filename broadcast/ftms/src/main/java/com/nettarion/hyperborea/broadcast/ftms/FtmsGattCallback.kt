@@ -33,8 +33,10 @@ class FtmsGattCallback(
 
     internal var gattServer: BluetoothGattServer? = null
 
-    // CCCD subscription state per characteristic UUID
-    private val cccdState = ConcurrentHashMap<UUID, ByteArray>()
+    // CCCD subscription state per device address per characteristic UUID. A GATT server is
+    // inherently multi-central — a disconnect must only drop that device's subscriptions, not
+    // wipe another central's live state.
+    private val cccdState = ConcurrentHashMap<String, ConcurrentHashMap<UUID, ByteArray>>()
 
     override fun onConnectionStateChange(device: BluetoothDevice, status: Int, newState: Int) {
         when (newState) {
@@ -44,7 +46,7 @@ class FtmsGattCallback(
             }
             BluetoothProfile.STATE_DISCONNECTED -> {
                 logger.i(TAG, "Client disconnected: ${device.address}")
-                cccdState.clear()
+                cccdState.remove(device.address)
                 onClientDisconnected(device)
             }
         }
@@ -134,7 +136,7 @@ class FtmsGattCallback(
     ) {
         if (descriptor.uuid == FtmsServiceBuilder.CCCD_UUID) {
             val charUuid = descriptor.characteristic.uuid
-            val value = cccdState[charUuid] ?: FtmsServiceBuilder.CCCD_DISABLED
+            val value = cccdState[device.address]?.get(charUuid) ?: FtmsServiceBuilder.CCCD_DISABLED
             sendGattResponse(device, requestId, BluetoothGatt.GATT_SUCCESS, offset, value)
         } else {
             sendGattResponse(device, requestId, BluetoothGatt.GATT_READ_NOT_PERMITTED, 0, null)
@@ -152,14 +154,14 @@ class FtmsGattCallback(
     ) {
         if (descriptor.uuid == FtmsServiceBuilder.CCCD_UUID && value != null) {
             val charUuid = descriptor.characteristic.uuid
-            cccdState[charUuid] = value.copyOf()
-            logger.d(TAG, "CCCD write for ${charUuid}: ${value.joinToString { "%02X".format(it) }}")
+            cccdState.getOrPut(device.address) { ConcurrentHashMap() }[charUuid] = value.copyOf()
+            logger.d(TAG, "CCCD write from ${device.address} for ${charUuid}: ${value.joinToString { "%02X".format(it) }}")
             if (responseNeeded) {
                 sendGattResponse(device, requestId, BluetoothGatt.GATT_SUCCESS, 0, null)
             }
             // Notifications/indications just got enabled — push the current sample immediately so the
             // client doesn't wait up to one notification tick (and never sees a silent stream).
-            if (isSubscribed(charUuid)) {
+            if (isSubscribed(device.address, charUuid)) {
                 onSubscriptionEnabled(charUuid)
             }
         } else {
@@ -178,8 +180,9 @@ class FtmsGattCallback(
         onServiceAdded.invoke()
     }
 
-    fun isSubscribed(charUuid: UUID): Boolean {
-        val cccd = cccdState[charUuid] ?: return false
+    /** True when [address] has notifications or indications enabled for [charUuid]. */
+    fun isSubscribed(address: String, charUuid: UUID): Boolean {
+        val cccd = cccdState[address]?.get(charUuid) ?: return false
         return cccd.size >= 2 && (cccd[0].toInt() != 0 || cccd[1].toInt() != 0)
     }
 
