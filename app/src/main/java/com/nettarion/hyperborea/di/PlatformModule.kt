@@ -6,6 +6,7 @@ import com.nettarion.hyperborea.core.profile.ProfileRepository
 import com.nettarion.hyperborea.core.profile.RideRecorder
 import com.nettarion.hyperborea.core.profile.UserPreferences
 import com.nettarion.hyperborea.data.ProfileUserPreferences
+import com.nettarion.hyperborea.platform.FitExporter
 import dagger.Module
 import dagger.Provides
 import dagger.hilt.InstallIn
@@ -44,4 +45,11 @@ object PlatformModule {
         logger: AppLogger,
         scope: CoroutineScope,
     ): RideRecorder = RideRecorder(profileRepository, logger, scope)
+
+    @Provides
+    @Singleton
+    fun provideFitExporter(
+        @ApplicationContext context: Context,
+        logger: AppLogger,
+    ): FitExporter = FitExporter(context, logger)
 }

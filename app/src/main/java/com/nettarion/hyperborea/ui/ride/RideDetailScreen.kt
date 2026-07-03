@@ -5,6 +5,7 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.RowScope
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
@@ -50,7 +51,6 @@ import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 
-@Suppress("DEPRECATION")
 @Composable
 fun RideDetailScreen(
     rideId: Long,
@@ -79,40 +79,7 @@ fun RideDetailScreen(
             }
         } else {
             Row(Modifier.fillMaxSize()) {
-                // Left panel — charts
-                Column(
-                    modifier = Modifier
-                        .fillMaxHeight()
-                        .weight(0.65f)
-                        .verticalScroll(rememberScrollState())
-                        .padding(16.dp),
-                ) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        IconButton(onClick = onBack) {
-                            Icon(Icons.Outlined.ArrowBack, contentDescription = "Back", tint = colors.textHigh)
-                        }
-                        val dateFormat = SimpleDateFormat("MMM d, yyyy  HH:mm", Locale.US)
-                        val durationText = formatDuration(ride.durationSeconds)
-                        Text(
-                            text = "${dateFormat.format(Date(ride.startedAt))}  ·  $durationText",
-                            style = MaterialTheme.typography.titleMedium,
-                            color = colors.textHigh,
-                        )
-                    }
-
-                    Spacer(Modifier.height(12.dp))
-
-                    val chartModifier = Modifier
-                        .fillMaxWidth()
-                        .height(140.dp)
-
-                    ChartIfData(samples, { it.power }, "Power", "W", ElectricBlue, chartModifier)
-                    ChartIfData(samples, { it.heartRate }, "Heart Rate", "bpm", StatusError, chartModifier)
-                    ChartIfData(samples, { it.cadence }, "Cadence", "rpm", StatusActive, chartModifier)
-                    ChartIfData(samples, { it.speedKph }, "Speed", "km/h", Amber, chartModifier)
-                    ChartIfData(samples, { it.resistance }, "Resistance", "", colors.textMedium, chartModifier)
-                    ChartIfData(samples, { it.incline }, "Incline", "%", colors.accentWarm, chartModifier)
-                }
+                ChartsPanel(ride = ride, samples = samples, onBack = onBack)
 
                 // Divider
                 Box(
@@ -122,30 +89,13 @@ fun RideDetailScreen(
                         .background(colors.divider),
                 )
 
-                // Right panel — stats + export
-                Column(
-                    modifier = Modifier
-                        .fillMaxHeight()
-                        .weight(0.35f)
-                        .verticalScroll(rememberScrollState())
-                        .padding(20.dp),
-                ) {
-                    Text("Summary", style = MaterialTheme.typography.titleSmall, color = colors.textHigh)
-                    Spacer(Modifier.height(12.dp))
-
-                    SummaryStats(ride, derived, samples, useImperial)
-
-                    Spacer(Modifier.height(16.dp))
-
-                    Button(
-                        onClick = viewModel::exportFit,
-                        modifier = Modifier.fillMaxWidth(),
-                        shape = RoundedCornerShape(12.dp),
-                        colors = ButtonDefaults.buttonColors(containerColor = ElectricBlue),
-                    ) {
-                        Text("Export FIT", fontSize = 14.sp)
-                    }
-                }
+                StatsPanel(
+                    ride = ride,
+                    derived = derived,
+                    samples = samples,
+                    useImperial = useImperial,
+                    onExport = viewModel::exportFit,
+                )
             }
         }
 
@@ -155,6 +105,83 @@ fun RideDetailScreen(
             state = exportSnackbar,
             modifier = Modifier.align(Alignment.BottomCenter),
         )
+    }
+}
+
+@Suppress("DEPRECATION")
+@Composable
+private fun RowScope.ChartsPanel(
+    ride: RideSummary,
+    samples: List<WorkoutSample>,
+    onBack: () -> Unit,
+) {
+    val colors = LocalHyperboreaColors.current
+    Column(
+        modifier = Modifier
+            .fillMaxHeight()
+            .weight(0.65f)
+            .verticalScroll(rememberScrollState())
+            .padding(16.dp),
+    ) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            IconButton(onClick = onBack) {
+                Icon(Icons.Outlined.ArrowBack, contentDescription = "Back", tint = colors.textHigh)
+            }
+            val dateFormat = SimpleDateFormat("MMM d, yyyy  HH:mm", Locale.US)
+            val durationText = formatDuration(ride.durationSeconds)
+            Text(
+                text = "${dateFormat.format(Date(ride.startedAt))}  ·  $durationText",
+                style = MaterialTheme.typography.titleMedium,
+                color = colors.textHigh,
+            )
+        }
+
+        Spacer(Modifier.height(12.dp))
+
+        val chartModifier = Modifier
+            .fillMaxWidth()
+            .height(140.dp)
+
+        ChartIfData(samples, { it.power }, "Power", "W", ElectricBlue, chartModifier)
+        ChartIfData(samples, { it.heartRate }, "Heart Rate", "bpm", StatusError, chartModifier)
+        ChartIfData(samples, { it.cadence }, "Cadence", "rpm", StatusActive, chartModifier)
+        ChartIfData(samples, { it.speedKph }, "Speed", "km/h", Amber, chartModifier)
+        ChartIfData(samples, { it.resistance }, "Resistance", "", colors.textMedium, chartModifier)
+        ChartIfData(samples, { it.incline }, "Incline", "%", colors.accentWarm, chartModifier)
+    }
+}
+
+@Composable
+private fun RowScope.StatsPanel(
+    ride: RideSummary,
+    derived: DerivedMetrics?,
+    samples: List<WorkoutSample>,
+    useImperial: Boolean,
+    onExport: () -> Unit,
+) {
+    val colors = LocalHyperboreaColors.current
+    Column(
+        modifier = Modifier
+            .fillMaxHeight()
+            .weight(0.35f)
+            .verticalScroll(rememberScrollState())
+            .padding(20.dp),
+    ) {
+        Text("Summary", style = MaterialTheme.typography.titleSmall, color = colors.textHigh)
+        Spacer(Modifier.height(12.dp))
+
+        SummaryStats(ride, derived, samples, useImperial)
+
+        Spacer(Modifier.height(16.dp))
+
+        Button(
+            onClick = onExport,
+            modifier = Modifier.fillMaxWidth(),
+            shape = RoundedCornerShape(12.dp),
+            colors = ButtonDefaults.buttonColors(containerColor = ElectricBlue),
+        ) {
+            Text("Export FIT", fontSize = 14.sp)
+        }
     }
 }
 

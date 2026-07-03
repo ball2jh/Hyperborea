@@ -12,9 +12,14 @@ import com.nettarion.hyperborea.core.adapter.BroadcastId
 import com.nettarion.hyperborea.core.adapter.SensorAdapter
 import com.nettarion.hyperborea.core.fitfile.FitActivityBuilder
 import com.nettarion.hyperborea.core.adapter.HardwareAdapter
+import com.nettarion.hyperborea.core.model.DeviceInfo
+import com.nettarion.hyperborea.core.model.ExerciseData
+import com.nettarion.hyperborea.core.model.Profile
 import com.nettarion.hyperborea.core.orchestration.Orchestrator
+import com.nettarion.hyperborea.core.orchestration.OrchestratorState
 import com.nettarion.hyperborea.core.profile.ProfileRepository
 import com.nettarion.hyperborea.core.system.SystemMonitor
+import com.nettarion.hyperborea.core.system.SystemStatus
 import com.nettarion.hyperborea.core.profile.UserPreferences
 import com.nettarion.hyperborea.platform.FitExporter
 import com.nettarion.hyperborea.ui.admin.ExportResult
@@ -42,11 +47,10 @@ class DashboardViewModel @Inject constructor(
     private val systemMonitor: SystemMonitor,
     private val userPreferences: UserPreferences,
     private val profileRepository: ProfileRepository,
+    private val fitExporter: FitExporter,
     private val logger: AppLogger,
     @param:ApplicationContext private val context: Context,
 ) : ViewModel() {
-
-    private val fitExporter = FitExporter(context, logger)
 
     private val broadcastsFlow: Flow<List<BroadcastUiState>> = run {
         val sorted = broadcastAdapters.sortedBy { it.id.ordinal }
@@ -66,30 +70,29 @@ class DashboardViewModel @Inject constructor(
         combine(perAdapterFlows) { it.toList() }
     }
 
+    @Suppress("UNCHECKED_CAST")
     val uiState: StateFlow<DashboardUiState> = combine(
         orchestrator.state,
         orchestrator.exerciseData, // merged hardware + external-HRM stream (not the raw hardware flow)
         hardwareAdapter.state,
         hardwareAdapter.deviceInfo,
-        combine(
-            systemMonitor.snapshot.map { it.status },
-            broadcastsFlow,
-            profileRepository.activeProfile,
-            sensorAdapter.state,
-            userPreferences.useImperial,
-            ::Quint,
-        ),
-    ) { orchState, exercise, hwState, deviceInfo, (status, broadcasts, profile, sState, imperial) ->
+        systemMonitor.snapshot.map { it.status },
+        broadcastsFlow,
+        profileRepository.activeProfile,
+        sensorAdapter.state,
+        userPreferences.useImperial,
+    ) { values ->
+        // Flat vararg combine: values are positional, typed by the flows above (in order).
         DashboardUiState(
-            orchestratorState = orchState,
-            exerciseData = exercise,
-            hardwareState = hwState,
-            deviceInfo = deviceInfo,
-            broadcasts = broadcasts,
-            systemStatus = status,
-            profileName = profile?.name,
-            sensorState = sState,
-            useImperial = imperial,
+            orchestratorState = values[0] as OrchestratorState,
+            exerciseData = values[1] as ExerciseData?,
+            hardwareState = values[2] as AdapterState,
+            deviceInfo = values[3] as DeviceInfo?,
+            systemStatus = values[4] as SystemStatus,
+            broadcasts = values[5] as List<BroadcastUiState>,
+            profileName = (values[6] as Profile?)?.name,
+            sensorState = values[7] as AdapterState,
+            useImperial = values[8] as Boolean,
         )
     }.stateIn(
         viewModelScope,
@@ -206,14 +209,6 @@ class DashboardViewModel @Inject constructor(
         const val TAG = "Dashboard"
     }
 }
-
-private data class Quint<A, B, C, D, E>(
-    val first: A,
-    val second: B,
-    val third: C,
-    val fourth: D,
-    val fifth: E,
-)
 
 sealed interface PostSaveEvent {
     data class ViewRide(val rideId: Long) : PostSaveEvent

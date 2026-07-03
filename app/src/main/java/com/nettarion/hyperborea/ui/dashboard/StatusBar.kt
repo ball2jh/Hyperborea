@@ -12,6 +12,7 @@ import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.RowScope
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.statusBarsPadding
@@ -70,7 +71,6 @@ fun StatusBar(
     modifier: Modifier = Modifier,
     onProfileClick: (() -> Unit)? = null,
 ) {
-    val colors = LocalHyperboreaColors.current
     val timeFormat = remember { SimpleDateFormat("HH:mm", Locale.getDefault()) }
     var currentTime by remember { mutableStateOf(timeFormat.format(Date())) }
     LaunchedEffect(Unit) {
@@ -91,184 +91,236 @@ fun StatusBar(
             .padding(horizontal = 16.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        // Left: status info
-        Row(
-            modifier = Modifier.weight(1f),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            StatusDot(orchestratorState)
-            Spacer(Modifier.width(8.dp))
+        StatusInfo(
+            orchestratorState = orchestratorState,
+            exerciseData = exerciseData,
+            profileName = profileName,
+            deviceName = deviceName,
+            useImperial = useImperial,
+        )
+
+        ActionButtons(
+            orchestratorState = orchestratorState,
+            onStart = onStart,
+            onStop = onStop,
+            onPause = onPause,
+            onResume = onResume,
+        )
+
+        RightControls(
+            broadcasts = broadcasts,
+            currentTime = currentTime,
+            onProfileClick = onProfileClick,
+            onSettingsClick = onSettingsClick,
+        )
+    }
+    }
+}
+
+/** Left section: status dot, state text, device/profile names, and the control-mode badge. */
+@Composable
+private fun RowScope.StatusInfo(
+    orchestratorState: OrchestratorState,
+    exerciseData: ExerciseData?,
+    profileName: String?,
+    deviceName: String?,
+    useImperial: Boolean,
+) {
+    val colors = LocalHyperboreaColors.current
+    Row(
+        modifier = Modifier.weight(1f),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        StatusDot(orchestratorState)
+        Spacer(Modifier.width(8.dp))
+        Text(
+            text = orchestratorState.displayText(),
+            style = MaterialTheme.typography.titleMedium,
+            color = colors.textHigh,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+        )
+
+        if (deviceName != null) {
+            Spacer(Modifier.width(6.dp))
             Text(
-                text = orchestratorState.displayText(),
+                text = "·",
                 style = MaterialTheme.typography.titleMedium,
-                color = colors.textHigh,
+                color = colors.textLow,
+            )
+            Spacer(Modifier.width(6.dp))
+            Text(
+                text = deviceName,
+                style = MaterialTheme.typography.titleMedium,
+                color = colors.textLow,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
             )
-
-            if (deviceName != null) {
-                Spacer(Modifier.width(6.dp))
-                Text(
-                    text = "\u00B7",
-                    style = MaterialTheme.typography.titleMedium,
-                    color = colors.textLow,
-                )
-                Spacer(Modifier.width(6.dp))
-                Text(
-                    text = deviceName,
-                    style = MaterialTheme.typography.titleMedium,
-                    color = colors.textLow,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                )
-            }
-
-            if (profileName != null) {
-                Spacer(Modifier.width(8.dp))
-                Text(
-                    text = "— $profileName",
-                    style = MaterialTheme.typography.titleMedium,
-                    color = colors.textMedium,
-                )
-            }
-
-            // Workout mode badge
-            val controlMode = exerciseData?.controlModeLabel(useImperial)
-            if (controlMode != null && (orchestratorState is OrchestratorState.Running || orchestratorState is OrchestratorState.Paused)) {
-                Spacer(Modifier.width(16.dp))
-                Text(
-                    text = controlMode,
-                    style = MaterialTheme.typography.labelSmall,
-                    color = colors.electricBlue,
-                    modifier = Modifier
-                        .border(
-                            BorderStroke(1.dp, colors.electricBlue),
-                            RoundedCornerShape(4.dp),
-                        )
-                        .padding(horizontal = 8.dp, vertical = 2.dp),
-                )
-            }
         }
 
-        // Center: action buttons
-        when (orchestratorState) {
-            is OrchestratorState.Idle, is OrchestratorState.Error -> {
-                OutlinedButton(
-                    onClick = onStart,
-                    shape = RoundedCornerShape(20.dp),
-                    colors = ButtonDefaults.outlinedButtonColors(contentColor = colors.accentWarm),
-                    border = BorderStroke(1.dp, colors.accentWarm),
-                ) {
-                    Text("\u25B6  START", style = MaterialTheme.typography.titleSmall)
-                }
-            }
-            is OrchestratorState.AwaitingConsoleStart -> {
-                // Equipment is armed; only allow cancelling (no workout has begun yet).
-                OutlinedButton(
-                    onClick = onStop,
-                    shape = RoundedCornerShape(20.dp),
-                    colors = ButtonDefaults.outlinedButtonColors(contentColor = colors.statusError),
-                    border = BorderStroke(1.dp, colors.statusError),
-                ) {
-                    Text("\u25A0  CANCEL", style = MaterialTheme.typography.titleSmall)
-                }
-            }
-            is OrchestratorState.Running -> {
-                OutlinedButton(
-                    onClick = onPause,
-                    shape = RoundedCornerShape(20.dp),
-                    colors = ButtonDefaults.outlinedButtonColors(contentColor = colors.accentWarm),
-                    border = BorderStroke(1.dp, colors.accentWarm),
-                ) {
-                    Text("\u2759\u2759  PAUSE", style = MaterialTheme.typography.titleSmall)
-                }
-                Spacer(Modifier.width(8.dp))
-                OutlinedButton(
-                    onClick = onStop,
-                    shape = RoundedCornerShape(20.dp),
-                    colors = ButtonDefaults.outlinedButtonColors(contentColor = colors.statusError),
-                    border = BorderStroke(1.dp, colors.statusError),
-                ) {
-                    Text("\u25A0  STOP", style = MaterialTheme.typography.titleSmall)
-                }
-            }
-            is OrchestratorState.Paused -> {
-                OutlinedButton(
-                    onClick = onResume,
-                    shape = RoundedCornerShape(20.dp),
-                    colors = ButtonDefaults.outlinedButtonColors(contentColor = colors.statusActive),
-                    border = BorderStroke(1.dp, colors.statusActive),
-                ) {
-                    Text("\u25B6  RESUME", style = MaterialTheme.typography.titleSmall)
-                }
-                Spacer(Modifier.width(8.dp))
-                OutlinedButton(
-                    onClick = onStop,
-                    shape = RoundedCornerShape(20.dp),
-                    colors = ButtonDefaults.outlinedButtonColors(contentColor = colors.statusError),
-                    border = BorderStroke(1.dp, colors.statusError),
-                ) {
-                    Text("\u25A0  STOP", style = MaterialTheme.typography.titleSmall)
-                }
-            }
-            is OrchestratorState.Preparing, is OrchestratorState.Stopping -> {
-                OutlinedButton(
-                    onClick = {},
-                    enabled = false,
-                    shape = RoundedCornerShape(20.dp),
-                ) {
-                    CircularProgressIndicator(
-                        modifier = Modifier.size(20.dp),
-                        strokeWidth = 2.dp,
-                        color = colors.textMedium,
-                    )
-                    Spacer(Modifier.width(8.dp))
-                    Text(
-                        if (orchestratorState is OrchestratorState.Preparing) "PREPARING" else "STOPPING",
-                        style = MaterialTheme.typography.titleSmall,
-                    )
-                }
-            }
-        }
-
-        // Right: broadcast badges + settings
-        Row(
-            modifier = Modifier.weight(1f),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.End,
-        ) {
-            broadcasts.forEach { broadcast ->
-                Spacer(Modifier.width(16.dp))
-                BroadcastBadge(broadcast)
-            }
-            Spacer(Modifier.width(16.dp))
+        if (profileName != null) {
+            Spacer(Modifier.width(8.dp))
             Text(
-                text = currentTime,
+                text = "— $profileName",
                 style = MaterialTheme.typography.titleMedium,
                 color = colors.textMedium,
             )
-            if (onProfileClick != null) {
-                Spacer(Modifier.width(8.dp))
-                IconButton(onClick = onProfileClick) {
-                    Icon(
-                        imageVector = Icons.Outlined.Person,
-                        contentDescription = "Profile",
-                        tint = colors.textLow,
-                        modifier = Modifier.size(36.dp),
+        }
+
+        // Workout mode badge
+        val controlMode = exerciseData?.controlModeLabel(useImperial)
+        if (controlMode != null && (orchestratorState is OrchestratorState.Running || orchestratorState is OrchestratorState.Paused)) {
+            Spacer(Modifier.width(16.dp))
+            Text(
+                text = controlMode,
+                style = MaterialTheme.typography.labelSmall,
+                color = colors.electricBlue,
+                modifier = Modifier
+                    .border(
+                        BorderStroke(1.dp, colors.electricBlue),
+                        RoundedCornerShape(4.dp),
                     )
-                }
+                    .padding(horizontal = 8.dp, vertical = 2.dp),
+            )
+        }
+    }
+}
+
+/** Center section: the start/pause/resume/stop controls that vary by orchestrator state. */
+@Composable
+private fun ActionButtons(
+    orchestratorState: OrchestratorState,
+    onStart: () -> Unit,
+    onStop: () -> Unit,
+    onPause: () -> Unit,
+    onResume: () -> Unit,
+) {
+    val colors = LocalHyperboreaColors.current
+    when (orchestratorState) {
+        is OrchestratorState.Idle, is OrchestratorState.Error -> {
+            OutlinedButton(
+                onClick = onStart,
+                shape = RoundedCornerShape(20.dp),
+                colors = ButtonDefaults.outlinedButtonColors(contentColor = colors.accentWarm),
+                border = BorderStroke(1.dp, colors.accentWarm),
+            ) {
+                Text("▶  START", style = MaterialTheme.typography.titleSmall)
+            }
+        }
+        is OrchestratorState.AwaitingConsoleStart -> {
+            // Equipment is armed; only allow cancelling (no workout has begun yet).
+            OutlinedButton(
+                onClick = onStop,
+                shape = RoundedCornerShape(20.dp),
+                colors = ButtonDefaults.outlinedButtonColors(contentColor = colors.statusError),
+                border = BorderStroke(1.dp, colors.statusError),
+            ) {
+                Text("■  CANCEL", style = MaterialTheme.typography.titleSmall)
+            }
+        }
+        is OrchestratorState.Running -> {
+            OutlinedButton(
+                onClick = onPause,
+                shape = RoundedCornerShape(20.dp),
+                colors = ButtonDefaults.outlinedButtonColors(contentColor = colors.accentWarm),
+                border = BorderStroke(1.dp, colors.accentWarm),
+            ) {
+                Text("❙❙  PAUSE", style = MaterialTheme.typography.titleSmall)
             }
             Spacer(Modifier.width(8.dp))
-            IconButton(onClick = onSettingsClick) {
-                Icon(
-                    imageVector = Icons.Outlined.Settings,
-                    contentDescription = "Quick Settings",
-                    tint = colors.textLow,
-                    modifier = Modifier.size(32.dp),
+            OutlinedButton(
+                onClick = onStop,
+                shape = RoundedCornerShape(20.dp),
+                colors = ButtonDefaults.outlinedButtonColors(contentColor = colors.statusError),
+                border = BorderStroke(1.dp, colors.statusError),
+            ) {
+                Text("■  STOP", style = MaterialTheme.typography.titleSmall)
+            }
+        }
+        is OrchestratorState.Paused -> {
+            OutlinedButton(
+                onClick = onResume,
+                shape = RoundedCornerShape(20.dp),
+                colors = ButtonDefaults.outlinedButtonColors(contentColor = colors.statusActive),
+                border = BorderStroke(1.dp, colors.statusActive),
+            ) {
+                Text("▶  RESUME", style = MaterialTheme.typography.titleSmall)
+            }
+            Spacer(Modifier.width(8.dp))
+            OutlinedButton(
+                onClick = onStop,
+                shape = RoundedCornerShape(20.dp),
+                colors = ButtonDefaults.outlinedButtonColors(contentColor = colors.statusError),
+                border = BorderStroke(1.dp, colors.statusError),
+            ) {
+                Text("■  STOP", style = MaterialTheme.typography.titleSmall)
+            }
+        }
+        is OrchestratorState.Preparing, is OrchestratorState.Stopping -> {
+            OutlinedButton(
+                onClick = {},
+                enabled = false,
+                shape = RoundedCornerShape(20.dp),
+            ) {
+                CircularProgressIndicator(
+                    modifier = Modifier.size(20.dp),
+                    strokeWidth = 2.dp,
+                    color = colors.textMedium,
+                )
+                Spacer(Modifier.width(8.dp))
+                Text(
+                    if (orchestratorState is OrchestratorState.Preparing) "PREPARING" else "STOPPING",
+                    style = MaterialTheme.typography.titleSmall,
                 )
             }
         }
     }
+}
+
+/** Right section: broadcast badges, the clock, and profile/settings icon buttons. */
+@Composable
+private fun RowScope.RightControls(
+    broadcasts: List<BroadcastUiState>,
+    currentTime: String,
+    onProfileClick: (() -> Unit)?,
+    onSettingsClick: () -> Unit,
+) {
+    val colors = LocalHyperboreaColors.current
+    Row(
+        modifier = Modifier.weight(1f),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.End,
+    ) {
+        broadcasts.forEach { broadcast ->
+            Spacer(Modifier.width(16.dp))
+            BroadcastBadge(broadcast)
+        }
+        Spacer(Modifier.width(16.dp))
+        Text(
+            text = currentTime,
+            style = MaterialTheme.typography.titleMedium,
+            color = colors.textMedium,
+        )
+        if (onProfileClick != null) {
+            Spacer(Modifier.width(8.dp))
+            IconButton(onClick = onProfileClick) {
+                Icon(
+                    imageVector = Icons.Outlined.Person,
+                    contentDescription = "Profile",
+                    tint = colors.textLow,
+                    modifier = Modifier.size(36.dp),
+                )
+            }
+        }
+        Spacer(Modifier.width(8.dp))
+        IconButton(onClick = onSettingsClick) {
+            Icon(
+                imageVector = Icons.Outlined.Settings,
+                contentDescription = "Quick Settings",
+                tint = colors.textLow,
+                modifier = Modifier.size(32.dp),
+            )
+        }
     }
 }
 

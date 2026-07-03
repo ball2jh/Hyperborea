@@ -155,38 +155,63 @@ private fun BroadcastsSection(viewModel: AdminViewModel, onOpenSettings: () -> U
             BroadcastId.WIFI -> if (snapshot.status.isWifiEnabled) "WiFi available" else "WiFi off"
         }
 
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 16.dp, vertical = 8.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Column(modifier = Modifier.weight(1f)) {
-                Text(
-                    text = id.displayName,
-                    style = MaterialTheme.typography.bodyLarge,
-                    color = colors.textHigh,
-                )
-                Text(
-                    text = readiness,
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = if (operable) colors.textMedium else colors.textLow,
-                )
-            }
-            Switch(
-                checked = enabled && operable,
-                enabled = operable,
-                onCheckedChange = { viewModel.toggleBroadcast(id, it) },
-                colors = SwitchDefaults.colors(
-                    checkedThumbColor = MaterialTheme.colorScheme.primary,
-                    checkedTrackColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.3f),
-                ),
-            )
-        }
+        SettingToggleRow(
+            title = id.displayName,
+            subtitle = readiness,
+            subtitleColor = if (operable) colors.textMedium else colors.textLow,
+            checked = enabled && operable,
+            enabled = operable,
+            onCheckedChange = { viewModel.toggleBroadcast(id, it) },
+        )
     }
 
     HorizontalDivider(color = colors.divider, modifier = Modifier.padding(vertical = 4.dp))
 
+    SettingToggleRow(
+        title = "System Overlay",
+        subtitle = "Show exercise data over other apps",
+        subtitleColor = colors.textMedium,
+        checked = overlayEnabled,
+        onCheckedChange = { viewModel.toggleOverlay(it) },
+    )
+
+    HorizontalDivider(color = colors.divider, modifier = Modifier.padding(vertical = 4.dp))
+
+    SettingToggleRow(
+        title = "Immersive Mode",
+        subtitle = "Hide navigation and status bars",
+        subtitleColor = colors.textMedium,
+        checked = immersiveModeEnabled,
+        onCheckedChange = { viewModel.toggleImmersiveMode(it) },
+    )
+
+    HorizontalDivider(color = colors.divider, modifier = Modifier.padding(vertical = 4.dp))
+
+    FanRow(fanMode = fanMode, onSelect = viewModel::setFanMode)
+
+    HorizontalDivider(color = colors.divider, modifier = Modifier.padding(vertical = 4.dp))
+
+    OutlinedButton(
+        onClick = onOpenSettings,
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 16.dp, vertical = 8.dp),
+    ) {
+        Text("Open Settings")
+    }
+}
+
+/** A titled row with a description and a trailing [Switch], the drawer's standard toggle layout. */
+@Composable
+private fun SettingToggleRow(
+    title: String,
+    subtitle: String,
+    subtitleColor: androidx.compose.ui.graphics.Color,
+    checked: Boolean,
+    onCheckedChange: (Boolean) -> Unit,
+    enabled: Boolean = true,
+) {
+    val colors = LocalHyperboreaColors.current
     Row(
         modifier = Modifier
             .fillMaxWidth()
@@ -195,58 +220,31 @@ private fun BroadcastsSection(viewModel: AdminViewModel, onOpenSettings: () -> U
     ) {
         Column(modifier = Modifier.weight(1f)) {
             Text(
-                text = "System Overlay",
+                text = title,
                 style = MaterialTheme.typography.bodyLarge,
                 color = colors.textHigh,
             )
             Text(
-                text = "Show exercise data over other apps",
+                text = subtitle,
                 style = MaterialTheme.typography.bodyMedium,
-                color = colors.textMedium,
+                color = subtitleColor,
             )
         }
         Switch(
-            checked = overlayEnabled,
-            onCheckedChange = { viewModel.toggleOverlay(it) },
+            checked = checked,
+            enabled = enabled,
+            onCheckedChange = onCheckedChange,
             colors = SwitchDefaults.colors(
                 checkedThumbColor = MaterialTheme.colorScheme.primary,
                 checkedTrackColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.3f),
             ),
         )
     }
+}
 
-    HorizontalDivider(color = colors.divider, modifier = Modifier.padding(vertical = 4.dp))
-
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(horizontal = 16.dp, vertical = 8.dp),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        Column(modifier = Modifier.weight(1f)) {
-            Text(
-                text = "Immersive Mode",
-                style = MaterialTheme.typography.bodyLarge,
-                color = colors.textHigh,
-            )
-            Text(
-                text = "Hide navigation and status bars",
-                style = MaterialTheme.typography.bodyMedium,
-                color = colors.textMedium,
-            )
-        }
-        Switch(
-            checked = immersiveModeEnabled,
-            onCheckedChange = { viewModel.toggleImmersiveMode(it) },
-            colors = SwitchDefaults.colors(
-                checkedThumbColor = MaterialTheme.colorScheme.primary,
-                checkedTrackColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.3f),
-            ),
-        )
-    }
-
-    HorizontalDivider(color = colors.divider, modifier = Modifier.padding(vertical = 4.dp))
-
+@Composable
+private fun FanRow(fanMode: FanMode, onSelect: (FanMode) -> Unit) {
+    val colors = LocalHyperboreaColors.current
     Row(
         modifier = Modifier
             .fillMaxWidth()
@@ -269,21 +267,10 @@ private fun BroadcastsSection(viewModel: AdminViewModel, onOpenSettings: () -> U
             modifier = Modifier.wrapContentWidth(),
             horizontalArrangement = Arrangement.spacedBy(4.dp),
         ) {
-            FanModeChip("Off", fanMode == FanMode.OFF) { viewModel.setFanMode(FanMode.OFF) }
-            FanModeChip("Auto", fanMode == FanMode.AUTO) { viewModel.setFanMode(FanMode.AUTO) }
-            FanModeChip("Wind", fanMode == FanMode.WIND_SIMULATION) { viewModel.setFanMode(FanMode.WIND_SIMULATION) }
+            FanModeChip("Off", fanMode == FanMode.OFF) { onSelect(FanMode.OFF) }
+            FanModeChip("Auto", fanMode == FanMode.AUTO) { onSelect(FanMode.AUTO) }
+            FanModeChip("Wind", fanMode == FanMode.WIND_SIMULATION) { onSelect(FanMode.WIND_SIMULATION) }
         }
-    }
-
-    HorizontalDivider(color = colors.divider, modifier = Modifier.padding(vertical = 4.dp))
-
-    OutlinedButton(
-        onClick = onOpenSettings,
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(horizontal = 16.dp, vertical = 8.dp),
-    ) {
-        Text("Open Settings")
     }
 }
 

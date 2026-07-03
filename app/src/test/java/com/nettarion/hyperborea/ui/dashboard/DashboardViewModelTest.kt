@@ -33,6 +33,7 @@ import com.nettarion.hyperborea.core.system.SystemSnapshot
 import com.nettarion.hyperborea.core.test.TestAppLogger
 import com.nettarion.hyperborea.core.test.buildExerciseData
 import com.nettarion.hyperborea.core.test.buildSystemSnapshot
+import com.nettarion.hyperborea.platform.FitExporter
 import app.cash.turbine.test
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.ExperimentalCoroutinesApi
@@ -192,6 +193,7 @@ class DashboardViewModelTest {
             scope = scope,
         )
 
+        val context = ContextWrapper(null)
         viewModel = DashboardViewModel(
             orchestrator = orchestrator,
             hardwareAdapter = fakeHardwareAdapter,
@@ -200,8 +202,9 @@ class DashboardViewModelTest {
             systemMonitor = fakeSystemMonitor,
             userPreferences = fakeUserPreferences,
             profileRepository = fakeProfileRepository,
+            fitExporter = FitExporter(context, noOpLogger),
             logger = TestAppLogger(),
-            context = ContextWrapper(null),
+            context = context,
         )
     }
 

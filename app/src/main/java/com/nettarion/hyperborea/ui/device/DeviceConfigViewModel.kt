@@ -13,8 +13,31 @@ import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import javax.inject.Inject
+
+/**
+ * Editable form state for the device-configuration screen. Numeric fields are held as raw
+ * strings so partially-typed values ("-", "1.") survive recomposition; they're parsed on save.
+ */
+data class DeviceConfigUiState(
+    val name: String = "",
+    val type: DeviceType = DeviceType.BIKE,
+    val supportedMetrics: Set<Metric> = emptySet(),
+    val maxResistance: String = "",
+    val minResistance: String = "",
+    val maxIncline: String = "",
+    val minIncline: String = "",
+    val maxPower: String = "",
+    val minPower: String = "",
+    val resistanceStep: String = "",
+    val inclineStep: String = "",
+    val speedStep: String = "",
+    val powerStep: String = "",
+    val maxSpeed: String = "",
+    val isCustom: Boolean = false,
+)
 
 @HiltViewModel
 class DeviceConfigViewModel @Inject constructor(
@@ -23,50 +46,8 @@ class DeviceConfigViewModel @Inject constructor(
     private val logger: AppLogger,
 ) : ViewModel() {
 
-    private val _name = MutableStateFlow("")
-    val name: StateFlow<String> = _name.asStateFlow()
-
-    private val _type = MutableStateFlow(DeviceType.BIKE)
-    val type: StateFlow<DeviceType> = _type.asStateFlow()
-
-    private val _supportedMetrics = MutableStateFlow(emptySet<Metric>())
-    val supportedMetrics: StateFlow<Set<Metric>> = _supportedMetrics.asStateFlow()
-
-    private val _maxResistance = MutableStateFlow("")
-    val maxResistance: StateFlow<String> = _maxResistance.asStateFlow()
-
-    private val _minResistance = MutableStateFlow("")
-    val minResistance: StateFlow<String> = _minResistance.asStateFlow()
-
-    private val _maxIncline = MutableStateFlow("")
-    val maxIncline: StateFlow<String> = _maxIncline.asStateFlow()
-
-    private val _minIncline = MutableStateFlow("")
-    val minIncline: StateFlow<String> = _minIncline.asStateFlow()
-
-    private val _maxPower = MutableStateFlow("")
-    val maxPower: StateFlow<String> = _maxPower.asStateFlow()
-
-    private val _minPower = MutableStateFlow("")
-    val minPower: StateFlow<String> = _minPower.asStateFlow()
-
-    private val _resistanceStep = MutableStateFlow("")
-    val resistanceStep: StateFlow<String> = _resistanceStep.asStateFlow()
-
-    private val _inclineStep = MutableStateFlow("")
-    val inclineStep: StateFlow<String> = _inclineStep.asStateFlow()
-
-    private val _speedStep = MutableStateFlow("")
-    val speedStep: StateFlow<String> = _speedStep.asStateFlow()
-
-    private val _powerStep = MutableStateFlow("")
-    val powerStep: StateFlow<String> = _powerStep.asStateFlow()
-
-    private val _maxSpeed = MutableStateFlow("")
-    val maxSpeed: StateFlow<String> = _maxSpeed.asStateFlow()
-
-    private val _isCustom = MutableStateFlow(false)
-    val isCustom: StateFlow<Boolean> = _isCustom.asStateFlow()
+    private val _uiState = MutableStateFlow(DeviceConfigUiState())
+    val uiState: StateFlow<DeviceConfigUiState> = _uiState.asStateFlow()
 
     private var currentConfigKey: Int? = null
 
@@ -74,7 +55,6 @@ class DeviceConfigViewModel @Inject constructor(
         currentConfigKey = configKey
         viewModelScope.launch {
             val custom = configKey?.let { deviceConfigRepository.getConfig(it) }
-            _isCustom.value = custom != null
             // Defaults preference: the user's saved config, else the live adapter info (carries
             // the session-detected type and MCU-reported bounds — model-less consoles have no
             // catalog entry to fall back to), else the catalog for a real model number.
@@ -82,49 +62,33 @@ class DeviceConfigViewModel @Inject constructor(
                 ?: hardwareAdapter.deviceInfo.value
                 ?: configKey?.takeIf { it > 0 }?.let { DeviceDatabase.fromModel(it) }
                 ?: DeviceInfo.DEFAULT_INDOOR_BIKE
-            populateFrom(info)
+            _uiState.value = info.toUiState(isCustom = custom != null)
         }
     }
 
-    private fun populateFrom(info: DeviceInfo) {
-        _name.value = info.name
-        _type.value = info.type
-        _supportedMetrics.value = info.supportedMetrics
-        _maxResistance.value = info.maxResistance.toString()
-        _minResistance.value = info.minResistance.toString()
-        _maxIncline.value = info.maxIncline.toString()
-        _minIncline.value = info.minIncline.toString()
-        _maxPower.value = info.maxPower.toString()
-        _minPower.value = info.minPower.toString()
-        _resistanceStep.value = info.resistanceStep.toString()
-        _inclineStep.value = info.inclineStep.toString()
-        _speedStep.value = info.speedStep.toString()
-        _powerStep.value = info.powerStep.toString()
-        _maxSpeed.value = info.maxSpeed.toString()
-    }
+    fun setName(value: String) = _uiState.update { it.copy(name = value) }
+    fun setType(value: DeviceType) = _uiState.update { it.copy(type = value) }
 
-    fun setName(value: String) { _name.value = value }
-    fun setType(value: DeviceType) { _type.value = value }
-
-    fun toggleMetric(metric: Metric) {
-        _supportedMetrics.value = if (metric in _supportedMetrics.value) {
-            _supportedMetrics.value - metric
+    fun toggleMetric(metric: Metric) = _uiState.update {
+        val metrics = if (metric in it.supportedMetrics) {
+            it.supportedMetrics - metric
         } else {
-            _supportedMetrics.value + metric
+            it.supportedMetrics + metric
         }
+        it.copy(supportedMetrics = metrics)
     }
 
-    fun setMaxResistance(value: String) { _maxResistance.value = value }
-    fun setMinResistance(value: String) { _minResistance.value = value }
-    fun setMaxIncline(value: String) { _maxIncline.value = value }
-    fun setMinIncline(value: String) { _minIncline.value = value }
-    fun setMaxPower(value: String) { _maxPower.value = value }
-    fun setMinPower(value: String) { _minPower.value = value }
-    fun setResistanceStep(value: String) { _resistanceStep.value = value }
-    fun setInclineStep(value: String) { _inclineStep.value = value }
-    fun setSpeedStep(value: String) { _speedStep.value = value }
-    fun setPowerStep(value: String) { _powerStep.value = value }
-    fun setMaxSpeed(value: String) { _maxSpeed.value = value }
+    fun setMaxResistance(value: String) = _uiState.update { it.copy(maxResistance = value) }
+    fun setMinResistance(value: String) = _uiState.update { it.copy(minResistance = value) }
+    fun setMaxIncline(value: String) = _uiState.update { it.copy(maxIncline = value) }
+    fun setMinIncline(value: String) = _uiState.update { it.copy(minIncline = value) }
+    fun setMaxPower(value: String) = _uiState.update { it.copy(maxPower = value) }
+    fun setMinPower(value: String) = _uiState.update { it.copy(minPower = value) }
+    fun setResistanceStep(value: String) = _uiState.update { it.copy(resistanceStep = value) }
+    fun setInclineStep(value: String) = _uiState.update { it.copy(inclineStep = value) }
+    fun setSpeedStep(value: String) = _uiState.update { it.copy(speedStep = value) }
+    fun setPowerStep(value: String) = _uiState.update { it.copy(powerStep = value) }
+    fun setMaxSpeed(value: String) = _uiState.update { it.copy(maxSpeed = value) }
 
     fun save(onSaved: () -> Unit) {
         val key = currentConfigKey
@@ -134,26 +98,11 @@ class DeviceConfigViewModel @Inject constructor(
             logger.w(TAG, "No device config key (equipment never connected) — config not saved")
             return
         }
-        val info = DeviceInfo(
-            name = _name.value,
-            type = _type.value,
-            supportedMetrics = _supportedMetrics.value,
-            maxResistance = _maxResistance.value.toIntOrNull() ?: 0,
-            minResistance = _minResistance.value.toIntOrNull() ?: 0,
-            minIncline = _minIncline.value.toFloatOrNull() ?: 0f,
-            maxIncline = _maxIncline.value.toFloatOrNull() ?: 0f,
-            maxPower = _maxPower.value.toIntOrNull() ?: 0,
-            minPower = _minPower.value.toIntOrNull() ?: 0,
-            powerStep = _powerStep.value.toIntOrNull() ?: 1,
-            resistanceStep = _resistanceStep.value.toFloatOrNull() ?: 1f,
-            inclineStep = _inclineStep.value.toFloatOrNull() ?: 0.5f,
-            speedStep = _speedStep.value.toFloatOrNull() ?: 0.5f,
-            maxSpeed = _maxSpeed.value.toFloatOrNull() ?: 0f,
-        )
+        val info = _uiState.value.toDeviceInfo()
         viewModelScope.launch {
             deviceConfigRepository.saveConfig(key, info)
             hardwareAdapter.refreshDeviceInfo()
-            _isCustom.value = true
+            _uiState.update { it.copy(isCustom = true) }
             logger.i(TAG, "Saved config for key $key")
             onSaved()
         }
@@ -168,11 +117,45 @@ class DeviceConfigViewModel @Inject constructor(
             val defaults = hardwareAdapter.deviceInfo.value
                 ?: key.takeIf { it > 0 }?.let { DeviceDatabase.fromModel(it) }
                 ?: DeviceInfo.DEFAULT_INDOOR_BIKE
-            populateFrom(defaults)
-            _isCustom.value = false
+            _uiState.value = defaults.toUiState(isCustom = false)
             logger.i(TAG, "Reset config for key $key to defaults")
         }
     }
+
+    private fun DeviceInfo.toUiState(isCustom: Boolean) = DeviceConfigUiState(
+        name = name,
+        type = type,
+        supportedMetrics = supportedMetrics,
+        maxResistance = maxResistance.toString(),
+        minResistance = minResistance.toString(),
+        maxIncline = maxIncline.toString(),
+        minIncline = minIncline.toString(),
+        maxPower = maxPower.toString(),
+        minPower = minPower.toString(),
+        resistanceStep = resistanceStep.toString(),
+        inclineStep = inclineStep.toString(),
+        speedStep = speedStep.toString(),
+        powerStep = powerStep.toString(),
+        maxSpeed = maxSpeed.toString(),
+        isCustom = isCustom,
+    )
+
+    private fun DeviceConfigUiState.toDeviceInfo() = DeviceInfo(
+        name = name,
+        type = type,
+        supportedMetrics = supportedMetrics,
+        maxResistance = maxResistance.toIntOrNull() ?: 0,
+        minResistance = minResistance.toIntOrNull() ?: 0,
+        minIncline = minIncline.toFloatOrNull() ?: 0f,
+        maxIncline = maxIncline.toFloatOrNull() ?: 0f,
+        maxPower = maxPower.toIntOrNull() ?: 0,
+        minPower = minPower.toIntOrNull() ?: 0,
+        powerStep = powerStep.toIntOrNull() ?: 1,
+        resistanceStep = resistanceStep.toFloatOrNull() ?: 1f,
+        inclineStep = inclineStep.toFloatOrNull() ?: 0.5f,
+        speedStep = speedStep.toFloatOrNull() ?: 0.5f,
+        maxSpeed = maxSpeed.toFloatOrNull() ?: 0f,
+    )
 
     private companion object {
         const val TAG = "DeviceConfigViewModel"

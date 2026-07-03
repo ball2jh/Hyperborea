@@ -58,10 +58,10 @@ class DeviceConfigViewModelTest {
         vm.load(2117)
         advanceUntilIdle()
 
-        assertThat(vm.name.value).isEqualTo("NordicTrack S22i")
-        assertThat(vm.type.value).isEqualTo(DeviceType.BIKE)
-        assertThat(vm.maxResistance.value).isEqualTo("24")
-        assertThat(vm.isCustom.value).isFalse()
+        assertThat(vm.uiState.value.name).isEqualTo("NordicTrack S22i")
+        assertThat(vm.uiState.value.type).isEqualTo(DeviceType.BIKE)
+        assertThat(vm.uiState.value.maxResistance).isEqualTo("24")
+        assertThat(vm.uiState.value.isCustom).isFalse()
     }
 
     @Test
@@ -82,9 +82,9 @@ class DeviceConfigViewModelTest {
         vm.load(2117)
         advanceUntilIdle()
 
-        assertThat(vm.name.value).isEqualTo("My Bike")
-        assertThat(vm.maxResistance.value).isEqualTo("30")
-        assertThat(vm.isCustom.value).isTrue()
+        assertThat(vm.uiState.value.name).isEqualTo("My Bike")
+        assertThat(vm.uiState.value.maxResistance).isEqualTo("30")
+        assertThat(vm.uiState.value.isCustom).isTrue()
     }
 
     @Test
@@ -105,7 +105,7 @@ class DeviceConfigViewModelTest {
         assertThat(fakeRepo.configs[2117]!!.name).isEqualTo("Custom Name")
         assertThat(fakeRepo.configs[2117]!!.maxResistance).isEqualTo(32)
         assertThat(fakeHardwareAdapter.refreshCalled).isTrue()
-        assertThat(vm.isCustom.value).isTrue()
+        assertThat(vm.uiState.value.isCustom).isTrue()
     }
 
     @Test
@@ -115,14 +115,14 @@ class DeviceConfigViewModelTest {
         val vm = createViewModel()
         vm.load(2117)
         advanceUntilIdle()
-        assertThat(vm.isCustom.value).isTrue()
+        assertThat(vm.uiState.value.isCustom).isTrue()
 
         vm.resetToDefaults()
         advanceUntilIdle()
 
         assertThat(fakeRepo.configs[2117]).isNull()
-        assertThat(vm.name.value).isEqualTo("NordicTrack S22i")
-        assertThat(vm.isCustom.value).isFalse()
+        assertThat(vm.uiState.value.name).isEqualTo("NordicTrack S22i")
+        assertThat(vm.uiState.value.isCustom).isFalse()
         assertThat(fakeHardwareAdapter.refreshCalled).isTrue()
     }
 
@@ -132,8 +132,8 @@ class DeviceConfigViewModelTest {
         vm.load(null)
         advanceUntilIdle()
 
-        assertThat(vm.name.value).isEqualTo("Hyperborea")
-        assertThat(vm.type.value).isEqualTo(DeviceType.BIKE)
+        assertThat(vm.uiState.value.name).isEqualTo("Hyperborea")
+        assertThat(vm.uiState.value.type).isEqualTo(DeviceType.BIKE)
     }
 }
 
