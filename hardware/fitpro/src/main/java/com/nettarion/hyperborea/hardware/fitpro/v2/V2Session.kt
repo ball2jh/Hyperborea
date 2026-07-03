@@ -9,46 +9,29 @@ import com.nettarion.hyperborea.core.model.DeviceInfo
 import com.nettarion.hyperborea.core.model.DeviceType
 import com.nettarion.hyperborea.core.model.ExerciseData
 import com.nettarion.hyperborea.core.model.isBeltBased
+import com.nettarion.hyperborea.hardware.fitpro.session.BaseFitProSession
 import com.nettarion.hyperborea.hardware.fitpro.session.DeviceDatabase
 import com.nettarion.hyperborea.hardware.fitpro.session.ExerciseDataAccumulator
-import com.nettarion.hyperborea.hardware.fitpro.session.FitProSession
-import com.nettarion.hyperborea.hardware.fitpro.session.FitProKeypad
-import com.nettarion.hyperborea.hardware.fitpro.session.GripHeartRateFilter
 import com.nettarion.hyperborea.hardware.fitpro.session.SessionState
 import com.nettarion.hyperborea.hardware.fitpro.transport.HidTransport
-import kotlin.math.roundToInt
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
-import kotlinx.coroutines.flow.StateFlow
-import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.filterNotNull
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withTimeoutOrNull
 
-class V2Session(
-    private val transport: HidTransport,
-    private val logger: AppLogger,
-    private val scope: CoroutineScope,
-    private val deviceInfo: DeviceInfo,
-    private val accumulator: ExerciseDataAccumulator = ExerciseDataAccumulator(),
-) : FitProSession {
-
-    private val _exerciseData = MutableStateFlow<ExerciseData?>(null)
-    override val exerciseData: StateFlow<ExerciseData?> = _exerciseData.asStateFlow()
-
-    private val _deviceIdentity = MutableStateFlow<DeviceIdentity?>(null)
-    override val deviceIdentity: StateFlow<DeviceIdentity?> = _deviceIdentity.asStateFlow()
-
-    private val _sessionState = MutableStateFlow<SessionState>(SessionState.Disconnected)
-    override val sessionState: StateFlow<SessionState> = _sessionState.asStateFlow()
-
-    private val _degradedReason = MutableStateFlow<String?>(null)
-    override val degradedReason: StateFlow<String?> = _degradedReason.asStateFlow()
+internal class V2Session(
+    transport: HidTransport,
+    logger: AppLogger,
+    scope: CoroutineScope,
+    deviceInfo: DeviceInfo,
+    accumulator: ExerciseDataAccumulator = ExerciseDataAccumulator(),
+) : BaseFitProSession(transport, logger, scope, deviceInfo, accumulator, TAG) {
 
     /** Latest [V2FeatureId.WORKOUT_STATE] value reported by the console (raw [V2WorkoutMode] ordinal); null until first event. */
     private val _workoutMode = MutableStateFlow<Float?>(null)
@@ -73,26 +56,11 @@ class V2Session(
     /** Set after the handshake; writes to features the console didn't declare are skipped. */
     private var declaredFeatures: Set<V2FeatureId>? = null
 
-    private var lastKeyCode = 0
-
-    /**
-     * Equipment type of the connected machine. Resolved during [start], preferring the console's
-     * own [V2FeatureId.DEVICE_TYPE] report (pushed as an initial event after subscribing); when
-     * the console doesn't implement that feature we fall back to inferring from the supported
-     * feature set — a belt-driven machine reports speed/grade features but no flywheel-resistance
-     * features. Defaults to [DeviceType.BIKE] until resolved.
-     */
-    override var detectedDeviceType: DeviceType = DeviceType.BIKE
-        private set
-
     private var receiveJob: Job? = null
     /** In-flight start-request drive (see [requestWorkoutStart]); completes → next press may retry. */
     private var startRequestJob: Job? = null
-    private var lastSentGrade = 0f
-    private var lastSentSpeed = 0f
     /** Last CURRENT_KPH the console reported; drives the belt zero<->moving edge log. */
     private var lastSpeedKph: Float? = null
-    private val gripHeartRate = GripHeartRateFilter()
 
     // Equipment limits the console reports as subscribed events (see applyEvent's limit branches).
     // Null until the MCU reports each; surfaced to the adapter via [deviceCapabilities] to overlay
@@ -190,27 +158,14 @@ class V2Session(
             try { transport.close() } catch (e: Exception) { logger.w(TAG, "Transport close failed: ${e.message}") }
         }
 
+        // No per-field state resets: sessions are single-use (the adapter builds a fresh
+        // instance per connect), so only the externally-observed flows need clearing.
         accumulator.reset()
-        featureAccumulator.clear()
-        unknownFeatureCodes.clear()
-        _supportedFeatures.value = null
-        _reportedDeviceType.value = null
-        productInfoAccumulator.clear()
-        _productInfo.value = null
-        declaredFeatures = null
-        lastKeyCode = 0
-        lastSpeedKph = null
-        lastSentSpeed = 0f
-        lastSentGrade = 0f
-        capMaxSpeed = null
-        capMinIncline = null
-        capMaxIncline = null
-        capMaxResistance = null
-        capMaxPower = null
         _exerciseData.value = null
         _deviceIdentity.value = null
         _degradedReason.value = null
         _sessionState.value = SessionState.Disconnected
+        cancelSessionScope()
         logger.i(TAG, "V2 session stopped")
     }
 
@@ -258,6 +213,7 @@ class V2Session(
             receiveJob?.cancel()
             receiveJob = null
             try { transport.close() } catch (_: Exception) {}
+            cancelSessionScope() // transient instance — nothing may outlive identify()
         }
     }
 
@@ -307,16 +263,14 @@ class V2Session(
                 lastSentSpeed = command.kph
                 V2Message.Outgoing.WriteFeature(V2FeatureId.TARGET_KPH, command.kph)
             }
-            is DeviceCommand.AdjustIncline -> {
-                lastSentGrade += if (command.increase) deviceInfo.inclineStep else -deviceInfo.inclineStep
-                lastSentGrade = lastSentGrade.coerceIn(deviceInfo.minIncline, deviceInfo.maxIncline)
-                V2Message.Outgoing.WriteFeature(V2FeatureId.TARGET_GRADE, lastSentGrade)
-            }
-            is DeviceCommand.AdjustSpeed -> {
-                lastSentSpeed += if (command.increase) deviceInfo.speedStep else -deviceInfo.speedStep
-                lastSentSpeed = lastSentSpeed.coerceIn(0f, deviceInfo.maxSpeed)
-                V2Message.Outgoing.WriteFeature(V2FeatureId.TARGET_KPH, lastSentSpeed)
-            }
+            is DeviceCommand.AdjustIncline -> V2Message.Outgoing.WriteFeature(
+                V2FeatureId.TARGET_GRADE,
+                nextAdjustedGrade(command.increase),
+            )
+            is DeviceCommand.AdjustSpeed -> V2Message.Outgoing.WriteFeature(
+                V2FeatureId.TARGET_KPH,
+                nextAdjustedSpeed(command.increase),
+            )
             is DeviceCommand.SetTargetPower -> V2Message.Outgoing.WriteFeature(
                 V2FeatureId.GOAL_WATTS,
                 command.watts.toFloat(),
@@ -374,22 +328,16 @@ class V2Session(
     }
 
     /**
-     * Console keypad. Same code space as the V1 keypad field; events repeat the current code, so
-     * emit only on changes and ignore the idle/no-key value. Observe-and-forward only: the V2 MCU
-     * acts on its own speed/incline/Stop keys (and reports the resulting state), so the host never
+     * Fresh keypad presses (edge detection in the base). Mostly observe-only: the V2 MCU acts on
+     * its own speed/incline/Stop keys (and reports the resulting state), so the host never
      * translates a key into a target write — doing so would double-step the belt. The one action we
      * take is treating the physical Start as a start request ([requestWorkoutStart]), covering
      * firmware that forwards the key without also reporting [V2WorkoutMode.READY_TO_START]; the
      * single-flight guard absorbs the overlap when both arrive.
      */
-    private fun handleKeyCode(code: Int) {
-        if (code == lastKeyCode) return
-        lastKeyCode = code
-        if (code == 0) return
-        val key = FitProKeypad.consoleKeyFromCode(code)
-        logger.d(TAG, "Console keypad: code=$code${key?.let { " ($it)" } ?: ""}")
+    override fun onConsoleKeyPressed(key: ConsoleKey) {
         if (key == ConsoleKey.START) requestWorkoutStart("physical Start key")
-        if (key != null && detectedDeviceType == DeviceType.TREADMILL) routeTreadmillKey(key)
+        if (detectedDeviceType == DeviceType.TREADMILL) routeTreadmillKey(key)
     }
 
     /**
@@ -413,7 +361,7 @@ class V2Session(
             ConsoleKey.STOP -> DeviceCommand.PauseWorkout
             else -> return
         }
-        scope.launch { writeFeature(command) }
+        sessionScope.launch { writeFeature(command) }
     }
 
     /**
@@ -454,7 +402,7 @@ class V2Session(
         //    WORKOUT_STATE to RUNNING, then command the belt (the firmware won't move it on its own).
         val acked = consoleDeclaresStartRequested
 
-        startRequestJob = scope.launch {
+        startRequestJob = sessionScope.launch {
             try {
                 if (acked) {
                     logger.i(TAG, "Start requested ($trigger, from=${from ?: "?"}) — acking with START_REQUESTED")
@@ -592,7 +540,7 @@ class V2Session(
     }
 
     private fun startReceiveLoop() {
-        receiveJob = scope.launch {
+        receiveJob = sessionScope.launch {
             try {
                 transport.incoming().collect { data ->
                     handleIncoming(data)
@@ -611,8 +559,6 @@ class V2Session(
         }
     }
 
-    private var lastLogTimeMs = 0L
-
     private fun handleIncoming(data: ByteArray) {
         val message = V2Codec.decode(data) ?: return
 
@@ -620,15 +566,7 @@ class V2Session(
             is V2Message.Incoming.Event -> {
                 applyEvent(message.feature, message.value)
                 _exerciseData.value = accumulator.snapshot()
-
-                val now = System.currentTimeMillis()
-                if (now - lastLogTimeMs >= 1000L) {
-                    lastLogTimeMs = now
-                    val snap = _exerciseData.value
-                    if (snap != null) {
-                        logger.d(TAG, "power=${snap.power}W cadence=${snap.cadence}rpm speed=${snap.speed}kph resistance=${snap.resistance} incline=${snap.incline}%")
-                    }
-                }
+                logTelemetryThrottled()
             }
             is V2Message.Incoming.SupportedFeatures -> {
                 if (message.isEndOfList) {
@@ -663,7 +601,7 @@ class V2Session(
     private fun applyEvent(feature: V2FeatureId, value: Float) {
         when (feature) {
             V2FeatureId.DEVICE_TYPE -> _reportedDeviceType.value = value
-            V2FeatureId.KEY_COOKED -> handleKeyCode(value.toInt())
+            V2FeatureId.KEY_COOKED -> onKeypadCode(value.toInt())
             V2FeatureId.REQUEST_DISCONNECT -> if (value != 0f) {
                 // The console wants the link back (e.g. its own maintenance flow). Surface it
                 // loudly; deciding to comply is the orchestrator's call once we see this in the
@@ -767,9 +705,6 @@ class V2Session(
         }
     }
 
-    private fun roundToStep(value: Float, step: Float): Float =
-        (value / step).roundToInt() * step
-
     /**
      * Brings the console up to the workout-active state the way the firmware expects. Two paths,
      * mirroring [com.nettarion.hyperborea.hardware.fitpro.v1.V1Session.transitionToActive]:
@@ -800,9 +735,7 @@ class V2Session(
         writeWorkoutState(V2WorkoutMode.RUNNING)
         val running = confirmWorkoutMode("reach RUNNING") { it == V2WorkoutMode.RUNNING }
         logger.i(TAG, "Console workout state: NONE → WARM_UP → ${if (running) V2WorkoutMode.RUNNING else V2WorkoutMode.UNKNOWN}")
-        _degradedReason.value =
-            if (running) null
-            else "The console didn't confirm the workout started — resistance/speed may not respond"
+        _degradedReason.value = if (running) null else WORKOUT_NOT_CONFIRMED_REASON
     }
 
     /**
@@ -897,7 +830,7 @@ class V2Session(
     }
 
     companion object {
-        private const val TAG = "V2Session"
+        internal const val TAG = "V2Session"
 
         // Belt-machine halt on stop: let the PAUSED write settle before teardown.
         private const val BELT_HALT_SETTLE_MS = 200L

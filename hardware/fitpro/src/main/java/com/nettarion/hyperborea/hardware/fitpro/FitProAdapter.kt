@@ -30,6 +30,8 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 
 
 @Singleton
@@ -85,6 +87,14 @@ class FitProAdapter @Inject constructor(
     private var session: FitProSession? = null
     private var initialElapsedSeconds: Long = 0L
 
+    /**
+     * Serializes every operation that opens or closes a USB transport (connect / disconnect /
+     * identify / transient calibration). Each of these builds its own transport+session, and the
+     * transport's half-duplex mutex is per-instance — without this lock an idle-dashboard
+     * identify() could claim the interface while a connect() is mid-handshake on it.
+     */
+    private val lifecycleMutex = Mutex()
+
     /** Last USB product id seen — feeds the synthetic [DeviceInfo.configKey] for model-less consoles. */
     private var lastProductId: Int? = null
 
@@ -95,7 +105,7 @@ class FitProAdapter @Inject constructor(
     private var degradedForwardJob: Job? = null
     private var stateMonitorJob: Job? = null
 
-    override suspend fun connect() {
+    override suspend fun connect() = lifecycleMutex.withLock {
         if (_state.value is AdapterState.Active || _state.value is AdapterState.Activating) return
         _state.value = AdapterState.Activating
 
@@ -231,7 +241,11 @@ class FitProAdapter @Inject constructor(
         }
     }
 
-    override suspend fun identify(): DeviceInfo? {
+    override suspend fun identify(): DeviceInfo? = lifecycleMutex.withLock {
+        // A live session owns the USB interface — identity is already published; don't touch it.
+        if (_state.value is AdapterState.Active || _state.value is AdapterState.Activating) {
+            return _deviceInfo.value
+        }
         try {
             val result = transportFactory.create(FITPRO_VENDOR_ID, FITPRO_PRODUCT_ID_V1)
             val transport = result.transport
@@ -260,7 +274,7 @@ class FitProAdapter @Inject constructor(
         }
     }
 
-    override suspend fun disconnect() {
+    override suspend fun disconnect() = lifecycleMutex.withLock {
         if (_state.value is AdapterState.Inactive) return
         logger.i(TAG, "Disconnecting")
 
@@ -356,7 +370,7 @@ class FitProAdapter @Inject constructor(
         }
     }
 
-    private suspend fun calibrateTransient() {
+    private suspend fun calibrateTransient() = lifecycleMutex.withLock {
         val result = transportFactory.create(FITPRO_VENDOR_ID, FITPRO_PRODUCT_ID_V1)
         val transport = result.transport
         val productId = result.productId

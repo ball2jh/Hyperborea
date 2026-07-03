@@ -8,61 +8,38 @@ import com.nettarion.hyperborea.core.model.DeviceInfo
 import com.nettarion.hyperborea.core.model.DeviceType
 import com.nettarion.hyperborea.core.model.ExerciseData
 import com.nettarion.hyperborea.core.model.isBeltBased
+import com.nettarion.hyperborea.hardware.fitpro.session.BaseFitProSession
 import com.nettarion.hyperborea.hardware.fitpro.session.DeviceDatabase
 import com.nettarion.hyperborea.hardware.fitpro.session.ExerciseDataAccumulator
-import com.nettarion.hyperborea.hardware.fitpro.session.FitProKeypad
-import com.nettarion.hyperborea.hardware.fitpro.session.FitProSession
-import com.nettarion.hyperborea.hardware.fitpro.session.GripHeartRateFilter
 import com.nettarion.hyperborea.hardware.fitpro.session.PowerEstimator
 import com.nettarion.hyperborea.hardware.fitpro.session.SessionState
 import com.nettarion.hyperborea.hardware.fitpro.transport.HidTransport
-import kotlin.math.roundToInt
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
-import kotlinx.coroutines.flow.MutableStateFlow
-import kotlinx.coroutines.flow.StateFlow
-import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withTimeoutOrNull
 
-class V1Session(
-    private val transport: HidTransport,
-    private val logger: AppLogger,
-    private val scope: CoroutineScope,
-    private val deviceInfo: DeviceInfo,
-    private val accumulator: ExerciseDataAccumulator = ExerciseDataAccumulator(),
-) : FitProSession {
-
-    private val _exerciseData = MutableStateFlow<ExerciseData?>(null)
-    override val exerciseData: StateFlow<ExerciseData?> = _exerciseData.asStateFlow()
-
-    private val _deviceIdentity = MutableStateFlow<DeviceIdentity?>(null)
-    override val deviceIdentity: StateFlow<DeviceIdentity?> = _deviceIdentity.asStateFlow()
-
-    private val _sessionState = MutableStateFlow<SessionState>(SessionState.Disconnected)
-    override val sessionState: StateFlow<SessionState> = _sessionState.asStateFlow()
-
-    private val _degradedReason = MutableStateFlow<String?>(null)
-    override val degradedReason: StateFlow<String?> = _degradedReason.asStateFlow()
+internal class V1Session(
+    transport: HidTransport,
+    logger: AppLogger,
+    scope: CoroutineScope,
+    deviceInfo: DeviceInfo,
+    accumulator: ExerciseDataAccumulator = ExerciseDataAccumulator(),
+) : BaseFitProSession(transport, logger, scope, deviceInfo, accumulator, TAG) {
 
     private var pollJob: Job? = null
     private var pendingWriteFields: Map<V1DataField, Float> = emptyMap()
     private val pendingWriteMutex = Mutex()
     @Volatile private var pendingCalibration: CompletableDeferred<Unit>? = null
-    private var lastLogTimeMs = 0L
     private var consecutivePollErrors = 0
     private var securityBlockReverifies = 0
-    private var lastSentGrade = 0f
-    private var lastSentSpeed = 0f
-    private var lastKeyCode = -1 // for KEY_OBJECT press-edge detection
     private val resistance = ResistanceConverter(deviceInfo.maxResistance)
-    private val gripHeartRate = GripHeartRateFilter()
 
     /** Device capabilities read from MCU during handshake. */
     var capabilities: V1Capabilities? = null
@@ -95,19 +72,6 @@ class V1Session(
 
     /** Bitfield indices ([V1DataField.fieldIndex]) the device declared it supports; empty if it couldn't be read. */
     private var supportedBitFields: Set<Int> = emptySet()
-
-    /**
-     * Equipment type as detected from the MCU's own `Connect` device-id response. The constructor's
-     * [deviceInfo] arrives here from [com.nettarion.hyperborea.hardware.fitpro.session.DeviceDatabase.fromProductId],
-     * which only knows the USB product id and defaults [DeviceType.BIKE] for every FitPro device —
-     * so its `.type` cannot be trusted during [prepareConsole]/[transitionToActive]. The MCU's
-     * equipment id, captured in [handshake] and mapped via [DeviceDatabase.deviceTypeFromEquipmentId],
-     * is the ground truth at this stage. [com.nettarion.hyperborea.hardware.fitpro.FitProAdapter]
-     * reads this back through [FitProSession.detectedDeviceType] after [start] returns and uses it
-     * to refine the adapter-level [DeviceInfo.type].
-     */
-    override var detectedDeviceType: DeviceType = DeviceType.BIKE
-        private set
 
     /**
      * The actual set we poll for each loop iteration, narrowed to what the device claims to support.
@@ -179,6 +143,7 @@ class V1Session(
         _deviceIdentity.value = null
         _degradedReason.value = null
         _sessionState.value = SessionState.Disconnected
+        cancelSessionScope()
         logger.i(TAG, "V1 session stopped")
     }
 
@@ -312,14 +277,10 @@ class V1Session(
             mapOf(V1DataField.KPH to command.kph)
         }
         is DeviceCommand.AdjustIncline -> {
-            lastSentGrade += if (command.increase) deviceInfo.inclineStep else -deviceInfo.inclineStep
-            lastSentGrade = lastSentGrade.coerceIn(deviceInfo.minIncline, deviceInfo.maxIncline)
-            mapOf(V1DataField.GRADE to lastSentGrade)
+            mapOf(V1DataField.GRADE to nextAdjustedGrade(command.increase))
         }
         is DeviceCommand.AdjustSpeed -> {
-            lastSentSpeed += if (command.increase) deviceInfo.speedStep else -deviceInfo.speedStep
-            lastSentSpeed = lastSentSpeed.coerceIn(0f, deviceInfo.maxSpeed)
-            mapOf(V1DataField.KPH to lastSentSpeed)
+            mapOf(V1DataField.KPH to nextAdjustedSpeed(command.increase))
         }
         is DeviceCommand.SetTargetPower -> {
             mapOf(
@@ -610,9 +571,7 @@ class V1Session(
         writeAndConfirmWorkoutMode(WorkoutMode.WARM_UP) { it != WorkoutMode.IDLE }
         val running = writeAndConfirmWorkoutMode(WorkoutMode.RUNNING) { it == WorkoutMode.RUNNING }
         logger.i(TAG, "Console state: IDLE → WARM_UP → ${running ?: WorkoutMode.UNKNOWN}")
-        _degradedReason.value =
-            if (running == WorkoutMode.RUNNING) null
-            else "The console didn't confirm the workout started — resistance/speed may not respond"
+        _degradedReason.value = if (running == WorkoutMode.RUNNING) null else WORKOUT_NOT_CONFIRMED_REASON
     }
 
     private suspend fun writeAndConfirmWorkoutMode(target: WorkoutMode, accept: (WorkoutMode) -> Boolean): WorkoutMode? {
@@ -651,7 +610,7 @@ class V1Session(
     }
 
     private fun startPollLoop() {
-        pollJob = scope.launch {
+        pollJob = sessionScope.launch {
             while (isActive && _sessionState.value is SessionState.Streaming) {
                 val calibDeferred = pendingCalibration
                 if (calibDeferred != null) {
@@ -784,14 +743,7 @@ class V1Session(
             }
             _exerciseData.value = accumulator.snapshot()
 
-            val now = System.currentTimeMillis()
-            if (now - lastLogTimeMs >= 1000L) {
-                lastLogTimeMs = now
-                val snap = _exerciseData.value
-                if (snap != null) {
-                    logger.d(TAG, "power=${snap.power}W cadence=${snap.cadence}rpm speed=${snap.speed}kph resistance=${snap.resistance} incline=${snap.incline}%")
-                }
-            }
+            logTelemetryThrottled()
         }
     }
 
@@ -886,20 +838,14 @@ class V1Session(
     }
 
     /**
-     * Logs each fresh press of the console membrane keypad. KEY_OBJECT reports the
-     * *currently-pressed* key (and 0 on release), so we edge-detect: act when the code changes to a
-     * new non-zero value. The equipment's own MCU acts on every one of these keys directly (changing
-     * resistance/incline/speed, transitioning the workout state machine on START/STOP, etc.) and the
-     * new state flows up through normal polling — so we don't drive anything from key presses;
+     * Logs each fresh press of the console membrane keypad (edge detection in the base). The
+     * equipment's own MCU acts on every one of these keys directly (changing
+     * resistance/incline/speed, transitioning the workout state machine on START/STOP, etc.) and
+     * the new state flows up through normal polling — so we don't drive anything from key presses;
      * decoding them is pure diagnostics.
      */
     private fun handleKeyObject(keyObject: KeyObject?) {
-        val code = keyObject?.code ?: 0
-        if (code == lastKeyCode) return
-        lastKeyCode = code
-        if (code == 0) return
-        val key = FitProKeypad.consoleKeyFromCode(code)
-        logger.d(TAG, "Console keypad: code=$code held=${keyObject?.timeHeld ?: 0}ms${key?.let { " ($it)" } ?: ""}")
+        onKeypadCode(keyObject?.code ?: 0, heldMs = keyObject?.timeHeld ?: 0)
     }
 
     private fun estimatePowerIfNeeded() {
@@ -976,11 +922,8 @@ class V1Session(
         return V1Codec.decodeSingle(firstPacket, dataResponseFields)
     }
 
-    private fun roundToStep(value: Float, step: Float): Float =
-        (value / step).roundToInt() * step
-
     companion object {
-        private const val TAG = "V1Session"
+        internal const val TAG = "V1Session"
         private const val POLL_INTERVAL_MS = 100L
         private const val COMMAND_DELAY_MS = 100L
         private const val READ_DELAY_MS = 0L
