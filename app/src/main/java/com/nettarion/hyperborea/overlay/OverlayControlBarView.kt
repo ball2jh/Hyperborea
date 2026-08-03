@@ -50,6 +50,13 @@ class OverlayControlBarView(
     private var useImperial = false
     private var lastData: ExerciseData? = null
 
+    /**
+     * Single handler for all −/+ auto-repeat callbacks so they can be cancelled wholesale: a
+     * button can be disabled (or the whole window removed) mid-hold, in which case the release
+     * event never reaches the per-button touch listener.
+     */
+    private val holdHandler = Handler(Looper.getMainLooper())
+
     init {
         val dp = { value: Int -> dpToPx(value) }
 
@@ -170,10 +177,18 @@ class OverlayControlBarView(
         // Speed/incline targets only apply to a moving belt; while Paused the belt is stopped
         // and while armed a stored target would kick in the moment the belt starts.
         val adjustEnabled = state is OrchestratorState.Running
+        if (!adjustEnabled) holdHandler.removeCallbacksAndMessages(null)
         adjustButtons.forEach {
             it.alpha = if (adjustEnabled) 1f else 0.35f
             it.isEnabled = adjustEnabled
         }
+    }
+
+    override fun onDetachedFromWindow() {
+        // The window can be removed mid-hold (overlay hidden/style switched); no release event
+        // will arrive, so stop any auto-repeat here.
+        holdHandler.removeCallbacksAndMessages(null)
+        super.onDetachedFromWindow()
     }
 
     private fun formatIncline(value: Float): String {
@@ -223,23 +238,26 @@ class OverlayControlBarView(
             gravity = Gravity.CENTER
             setPadding(dpToPx(12), dpToPx(8), dpToPx(12), dpToPx(8))
 
-            val handler = Handler(Looper.getMainLooper())
             val repeater = object : Runnable {
                 override fun run() {
                     onTick()
-                    handler.postDelayed(this, HOLD_REPEAT_INTERVAL_MS)
+                    holdHandler.postDelayed(this, HOLD_REPEAT_INTERVAL_MS)
                 }
             }
             setOnTouchListener { _, event ->
-                if (!isEnabled) return@setOnTouchListener true
+                if (!isEnabled) {
+                    // Disabled mid-hold: this release is the only chance to stop the repeater.
+                    holdHandler.removeCallbacks(repeater)
+                    return@setOnTouchListener true
+                }
                 when (event.action) {
                     MotionEvent.ACTION_DOWN -> {
                         onTick()
-                        handler.postDelayed(repeater, HOLD_REPEAT_INITIAL_MS)
+                        holdHandler.postDelayed(repeater, HOLD_REPEAT_INITIAL_MS)
                         true
                     }
                     MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
-                        handler.removeCallbacks(repeater)
+                        holdHandler.removeCallbacks(repeater)
                         true
                     }
                     else -> false
