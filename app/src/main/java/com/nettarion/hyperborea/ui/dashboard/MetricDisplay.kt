@@ -20,6 +20,18 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import com.nettarion.hyperborea.ui.theme.LocalHyperboreaColors
 
+/** Elapsed-time display shared by the metric grids: `m:ss`, growing to `h:mm:ss` past an hour. */
+internal fun formatTime(elapsedSeconds: Long): String {
+    val hours = elapsedSeconds / 3600
+    val minutes = (elapsedSeconds % 3600) / 60
+    val seconds = elapsedSeconds % 60
+    return if (hours > 0) {
+        "%d:%02d:%02d".format(hours, minutes, seconds)
+    } else {
+        "%d:%02d".format(minutes, seconds)
+    }
+}
+
 @Composable
 fun MetricCell(
     value: String?,

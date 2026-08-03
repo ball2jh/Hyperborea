@@ -29,6 +29,7 @@ import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.compose.LifecycleEventEffect
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.nettarion.hyperborea.core.profile.OverlayStyle
 import com.nettarion.hyperborea.ui.theme.LocalHyperboreaColors
 
 /**
@@ -43,6 +44,7 @@ fun DisplaySettingsContent(
     val colors = LocalHyperboreaColors.current
     val useImperial by viewModel.useImperial.collectAsStateWithLifecycle()
     val overlayEnabled by viewModel.overlayEnabled.collectAsStateWithLifecycle()
+    val overlayStyle by viewModel.overlayStyle.collectAsStateWithLifecycle()
     val immersiveModeEnabled by viewModel.immersiveModeEnabled.collectAsStateWithLifecycle()
     val screenSleepEnabled by viewModel.screenSleepEnabled.collectAsStateWithLifecycle()
     val screenSleepMinutes by viewModel.screenSleepTimeoutMinutes.collectAsStateWithLifecycle()
@@ -98,6 +100,21 @@ fun DisplaySettingsContent(
             checked = overlayEnabled,
             onCheckedChange = viewModel::setOverlayEnabled,
         )
+    }
+
+    if (overlayEnabled) {
+        SettingsRow(
+            title = "Overlay Style",
+            subtitle = when (overlayStyle) {
+                OverlayStyle.METRICS -> "Metrics bar — live workout data, shown mid-workout"
+                OverlayStyle.CONTROLS -> "Control bar — speed, incline and start/stop, always available"
+            },
+        ) {
+            OverlayStyleToggle(
+                style = overlayStyle,
+                onSelect = viewModel::setOverlayStyle,
+            )
+        }
     }
 
     HorizontalDivider(color = colors.divider, modifier = Modifier.padding(vertical = 8.dp))
@@ -225,6 +242,43 @@ private fun ThemedSwitch(
             checkedTrackColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.3f),
         ),
     )
+}
+
+@Composable
+private fun OverlayStyleToggle(
+    style: OverlayStyle,
+    onSelect: (OverlayStyle) -> Unit,
+) {
+    val colors = LocalHyperboreaColors.current
+    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        OverlayStyle.entries.forEach { option ->
+            val selected = option == style
+            FilterChip(
+                selected = selected,
+                onClick = { if (!selected) onSelect(option) },
+                label = {
+                    Text(
+                        when (option) {
+                            OverlayStyle.METRICS -> "Metrics bar"
+                            OverlayStyle.CONTROLS -> "Control bar"
+                        },
+                    )
+                },
+                colors = FilterChipDefaults.filterChipColors(
+                    selectedContainerColor = colors.electricBlue.copy(alpha = 0.15f),
+                    selectedLabelColor = colors.electricBlue,
+                    containerColor = MaterialTheme.colorScheme.surface,
+                    labelColor = colors.textLow,
+                ),
+                border = FilterChipDefaults.filterChipBorder(
+                    enabled = true,
+                    selected = selected,
+                    borderColor = colors.divider,
+                    selectedBorderColor = colors.electricBlue,
+                ),
+            )
+        }
+    }
 }
 
 @Composable

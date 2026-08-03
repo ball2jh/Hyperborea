@@ -914,6 +914,8 @@ class OrchestratorTest {
     ) : UserPreferences {
         override val enabledBroadcasts = MutableStateFlow(enabled)
         override val overlayEnabled = MutableStateFlow(false)
+        override val overlayStyle = MutableStateFlow(com.nettarion.hyperborea.core.profile.OverlayStyle.METRICS)
+        override val lastKnownDeviceType = MutableStateFlow<com.nettarion.hyperborea.core.model.DeviceType?>(null)
         override val savedSensorAddress = MutableStateFlow<String?>(null)
         override val fanMode = MutableStateFlow(com.nettarion.hyperborea.core.model.FanMode.OFF)
         override fun setBroadcastEnabled(id: BroadcastId, enabled: Boolean) {
@@ -923,6 +925,12 @@ class OrchestratorTest {
         }
         override fun setOverlayEnabled(enabled: Boolean) {
             overlayEnabled.value = enabled
+        }
+        override fun setOverlayStyle(style: com.nettarion.hyperborea.core.profile.OverlayStyle) {
+            overlayStyle.value = style
+        }
+        override fun setLastKnownDeviceType(type: com.nettarion.hyperborea.core.model.DeviceType) {
+            lastKnownDeviceType.value = type
         }
         override fun setSavedSensorAddress(address: String?) {
             savedSensorAddress.value = address

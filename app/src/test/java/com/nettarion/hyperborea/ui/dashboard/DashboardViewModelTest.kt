@@ -70,6 +70,7 @@ class DashboardViewModelTest {
 
     private val toggledBroadcasts = mutableListOf<Pair<BroadcastId, Boolean>>()
 
+    private val sentCommands = mutableListOf<DeviceCommand>()
     private val fakeHardwareAdapter = object : HardwareAdapter {
         override val state: StateFlow<AdapterState> = hardwareState
         override val exerciseData: StateFlow<ExerciseData?> = this@DashboardViewModelTest.exerciseData
@@ -81,7 +82,9 @@ class DashboardViewModelTest {
         override suspend fun connect() {}
         override suspend fun disconnect() {}
         override suspend fun identify(): DeviceInfo? = null
-        override suspend fun sendCommand(command: DeviceCommand) {}
+        override suspend fun sendCommand(command: DeviceCommand) {
+            sentCommands.add(command)
+        }
         override fun setInitialElapsedTime(seconds: Long) {}
         override suspend fun refreshDeviceInfo() {}
     }
@@ -101,6 +104,12 @@ class DashboardViewModelTest {
             toggledBroadcasts.add(id to enabled)
         }
         override fun setOverlayEnabled(enabled: Boolean) {}
+        override val overlayStyle: StateFlow<com.nettarion.hyperborea.core.profile.OverlayStyle> =
+            MutableStateFlow(com.nettarion.hyperborea.core.profile.OverlayStyle.METRICS)
+        override fun setOverlayStyle(style: com.nettarion.hyperborea.core.profile.OverlayStyle) {}
+        override val lastKnownDeviceType: StateFlow<com.nettarion.hyperborea.core.model.DeviceType?> =
+            MutableStateFlow(null)
+        override fun setLastKnownDeviceType(type: com.nettarion.hyperborea.core.model.DeviceType) {}
         override fun setSavedSensorAddress(address: String?) {}
         override fun setFanMode(mode: com.nettarion.hyperborea.core.model.FanMode) {}
         override val immersiveModeEnabled: StateFlow<Boolean> = MutableStateFlow(true)
@@ -407,5 +416,31 @@ class DashboardViewModelTest {
             assertThat(updated.systemStatus.isBluetoothLeEnabled).isTrue()
             assertThat(updated.systemStatus.isWifiEnabled).isTrue()
         }
+    }
+
+    @Test
+    fun `adjustIncline forwards AdjustIncline command to hardware`() = runTest {
+        createViewModel()
+
+        viewModel.adjustIncline(increase = true)
+        viewModel.adjustIncline(increase = false)
+
+        assertThat(sentCommands).containsExactly(
+            DeviceCommand.AdjustIncline(increase = true),
+            DeviceCommand.AdjustIncline(increase = false),
+        ).inOrder()
+    }
+
+    @Test
+    fun `adjustSpeed forwards AdjustSpeed command to hardware`() = runTest {
+        createViewModel()
+
+        viewModel.adjustSpeed(increase = true)
+        viewModel.adjustSpeed(increase = false)
+
+        assertThat(sentCommands).containsExactly(
+            DeviceCommand.AdjustSpeed(increase = true),
+            DeviceCommand.AdjustSpeed(increase = false),
+        ).inOrder()
     }
 }

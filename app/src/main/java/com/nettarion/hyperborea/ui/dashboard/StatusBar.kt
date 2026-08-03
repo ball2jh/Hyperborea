@@ -9,6 +9,7 @@ import androidx.compose.animation.core.tween
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Row
@@ -39,10 +40,13 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.nettarion.hyperborea.core.adapter.AdapterState
@@ -54,6 +58,7 @@ import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 
 @Composable
 fun StatusBar(
@@ -70,6 +75,10 @@ fun StatusBar(
     onSettingsClick: () -> Unit,
     modifier: Modifier = Modifier,
     onProfileClick: (() -> Unit)? = null,
+    isTreadmill: Boolean = false,
+    controlsEnabled: Boolean = false,
+    onAdjustIncline: (increase: Boolean) -> Unit = {},
+    onAdjustSpeed: (increase: Boolean) -> Unit = {},
 ) {
     val timeFormat = remember { SimpleDateFormat("HH:mm", Locale.getDefault()) }
     var currentTime by remember { mutableStateOf(timeFormat.format(Date())) }
@@ -99,6 +108,11 @@ fun StatusBar(
             useImperial = useImperial,
         )
 
+        if (isTreadmill) {
+            AdjustCluster(label = "INCL", enabled = controlsEnabled, onAdjust = onAdjustIncline)
+            Spacer(Modifier.width(12.dp))
+        }
+
         ActionButtons(
             orchestratorState = orchestratorState,
             onStart = onStart,
@@ -106,6 +120,11 @@ fun StatusBar(
             onPause = onPause,
             onResume = onResume,
         )
+
+        if (isTreadmill) {
+            Spacer(Modifier.width(12.dp))
+            AdjustCluster(label = "SPD", enabled = controlsEnabled, onAdjust = onAdjustSpeed)
+        }
 
         RightControls(
             broadcasts = broadcasts,
@@ -277,6 +296,79 @@ private fun ActionButtons(
     }
 }
 
+/**
+ * Treadmill −/+ control pair (incline or speed). Taps send one adjust step; press-and-hold
+ * auto-repeats — safe because the hardware session accumulates each step into a pending target
+ * exactly like the physical console keys. Dimmed and inert outside a Running workout: a target
+ * written while the belt is armed would be applied the instant it starts.
+ */
+@Composable
+private fun AdjustCluster(
+    label: String,
+    enabled: Boolean,
+    onAdjust: (increase: Boolean) -> Unit,
+) {
+    val colors = LocalHyperboreaColors.current
+    Row(
+        verticalAlignment = Alignment.CenterVertically,
+        modifier = Modifier.alpha(if (enabled) 1f else 0.35f),
+    ) {
+        RepeatingAdjustButton(symbol = "−", enabled = enabled, onTick = { onAdjust(false) })
+        Spacer(Modifier.width(6.dp))
+        Text(
+            text = label,
+            style = MaterialTheme.typography.labelSmall,
+            color = colors.textLow,
+        )
+        Spacer(Modifier.width(6.dp))
+        RepeatingAdjustButton(symbol = "+", enabled = enabled, onTick = { onAdjust(true) })
+    }
+}
+
+@Composable
+private fun RepeatingAdjustButton(
+    symbol: String,
+    enabled: Boolean,
+    onTick: () -> Unit,
+) {
+    val colors = LocalHyperboreaColors.current
+    val scope = rememberCoroutineScope()
+    Box(
+        modifier = Modifier
+            .size(34.dp)
+            .clip(CircleShape)
+            .border(BorderStroke(1.dp, colors.textLow), CircleShape)
+            .pointerInput(enabled) {
+                if (!enabled) return@pointerInput
+                detectTapGestures(onPress = {
+                    onTick()
+                    val repeat = scope.launch {
+                        delay(HOLD_REPEAT_INITIAL_MS)
+                        while (true) {
+                            onTick()
+                            delay(HOLD_REPEAT_INTERVAL_MS)
+                        }
+                    }
+                    try {
+                        tryAwaitRelease()
+                    } finally {
+                        repeat.cancel()
+                    }
+                })
+            },
+        contentAlignment = Alignment.Center,
+    ) {
+        Text(
+            text = symbol,
+            style = MaterialTheme.typography.titleMedium,
+            color = colors.textHigh,
+        )
+    }
+}
+
+private const val HOLD_REPEAT_INITIAL_MS = 500L
+private const val HOLD_REPEAT_INTERVAL_MS = 350L
+
 /** Right section: broadcast badges, the clock, and profile/settings icon buttons. */
 @Composable
 private fun RowScope.RightControls(
@@ -291,16 +383,26 @@ private fun RowScope.RightControls(
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.End,
     ) {
-        broadcasts.forEach { broadcast ->
+        // Weighted (fill=false) so the trailing icon buttons keep their intrinsic size when the
+        // bar is tight (treadmill control clusters + PAUSE/STOP is the widest case at 1920 px) —
+        // the badges/clock group is what shrinks, not the icons.
+        Row(
+            modifier = Modifier.weight(1f, fill = false),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.End,
+        ) {
+            broadcasts.forEach { broadcast ->
+                Spacer(Modifier.width(16.dp))
+                BroadcastBadge(broadcast)
+            }
             Spacer(Modifier.width(16.dp))
-            BroadcastBadge(broadcast)
+            Text(
+                text = currentTime,
+                style = MaterialTheme.typography.titleMedium,
+                color = colors.textMedium,
+                maxLines = 1,
+            )
         }
-        Spacer(Modifier.width(16.dp))
-        Text(
-            text = currentTime,
-            style = MaterialTheme.typography.titleMedium,
-            color = colors.textMedium,
-        )
         if (onProfileClick != null) {
             Spacer(Modifier.width(8.dp))
             IconButton(onClick = onProfileClick) {

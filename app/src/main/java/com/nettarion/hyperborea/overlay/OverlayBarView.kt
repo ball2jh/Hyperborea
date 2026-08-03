@@ -25,7 +25,7 @@ class OverlayBarView(
     private val onResumeClick: () -> Unit,
     private val onStopClick: () -> Unit,
     private val onPositionChanged: ((x: Int, y: Int) -> Unit)? = null,
-) : FrameLayout(context) {
+) : FrameLayout(context), OverlayContentView {
 
     private val resValue: TextView
     private val pwrValue: TextView
@@ -104,7 +104,7 @@ class OverlayBarView(
         addView(root, LayoutParams(LayoutParams.WRAP_CONTENT, LayoutParams.WRAP_CONTENT))
     }
 
-    fun updateExerciseData(data: ExerciseData?) {
+    override fun updateExerciseData(data: ExerciseData?) {
         if (data == null) {
             resValue.text = "—"
             pwrValue.text = "—"
@@ -136,7 +136,7 @@ class OverlayBarView(
         }
     }
 
-    fun updateState(state: OrchestratorState) {
+    override fun updateState(state: OrchestratorState) {
         isPaused = state is OrchestratorState.Paused
         pauseResumeButton.text = if (isPaused) "▶" else "⏸"
         pauseResumeButton.setTextColor(if (isPaused) STATUS_ACTIVE_COLOR else AMBER_COLOR)
@@ -251,15 +251,15 @@ class OverlayBarView(
     }
 
     companion object {
-        // Colors matching ui/theme/Color.kt
-        private const val SURFACE_COLOR = 0xFF0F1115.toInt()
-        private const val TEXT_HIGH_COLOR = 0xFFF0F2F5.toInt()
-        private const val TEXT_MEDIUM_COLOR = 0xFF7A8290.toInt()
-        private const val TEXT_LOW_COLOR = 0xFF3D4350.toInt()
-        private const val DIVIDER_COLOR = 0xFF1A1D24.toInt()
-        private const val ELECTRIC_BLUE_COLOR = 0xFF3B82F6.toInt()
-        private const val AMBER_COLOR = 0xFFF59E0B.toInt()
-        private const val STATUS_ACTIVE_COLOR = 0xFF22C55E.toInt()
-        private const val STATUS_ERROR_COLOR = 0xFFEF4444.toInt()
+        // Colors shared with OverlayControlBarView via OverlayPalette (ui/theme/Color.kt values).
+        private const val SURFACE_COLOR = OverlayPalette.SURFACE
+        private const val TEXT_HIGH_COLOR = OverlayPalette.TEXT_HIGH
+        private const val TEXT_MEDIUM_COLOR = OverlayPalette.TEXT_MEDIUM
+        private const val TEXT_LOW_COLOR = OverlayPalette.TEXT_LOW
+        private const val DIVIDER_COLOR = OverlayPalette.DIVIDER
+        private const val ELECTRIC_BLUE_COLOR = OverlayPalette.ELECTRIC_BLUE
+        private const val AMBER_COLOR = OverlayPalette.AMBER
+        private const val STATUS_ACTIVE_COLOR = OverlayPalette.STATUS_ACTIVE
+        private const val STATUS_ERROR_COLOR = OverlayPalette.STATUS_ERROR
     }
 }

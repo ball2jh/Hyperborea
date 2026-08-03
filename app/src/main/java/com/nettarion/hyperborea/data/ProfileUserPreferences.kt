@@ -4,7 +4,9 @@ import android.content.Context
 import android.content.SharedPreferences
 import com.nettarion.hyperborea.core.AppLogger
 import com.nettarion.hyperborea.core.adapter.BroadcastId
+import com.nettarion.hyperborea.core.model.DeviceType
 import com.nettarion.hyperborea.core.model.FanMode
+import com.nettarion.hyperborea.core.profile.OverlayStyle
 import com.nettarion.hyperborea.core.profile.UserPreferences
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -22,6 +24,12 @@ class ProfileUserPreferences(
 
     private val _overlayEnabled = MutableStateFlow(prefs.getBoolean(KEY_OVERLAY_ENABLED, false))
     override val overlayEnabled: StateFlow<Boolean> = _overlayEnabled
+
+    private val _overlayStyle = MutableStateFlow(loadOverlayStyle())
+    override val overlayStyle: StateFlow<OverlayStyle> = _overlayStyle
+
+    private val _lastKnownDeviceType = MutableStateFlow(loadLastKnownDeviceType())
+    override val lastKnownDeviceType: StateFlow<DeviceType?> = _lastKnownDeviceType
 
     private val _savedSensorAddress = MutableStateFlow(prefs.getString(KEY_SENSOR_ADDRESS, null))
     override val savedSensorAddress: StateFlow<String?> = _savedSensorAddress
@@ -54,6 +62,19 @@ class ProfileUserPreferences(
         _overlayEnabled.value = enabled
         prefs.edit().putBoolean(KEY_OVERLAY_ENABLED, enabled).apply()
         logger.i(TAG, "Overlay ${if (enabled) "enabled" else "disabled"}")
+    }
+
+    override fun setOverlayStyle(style: OverlayStyle) {
+        _overlayStyle.value = style
+        prefs.edit().putString(KEY_OVERLAY_STYLE, style.name).apply()
+        logger.i(TAG, "Overlay style set to ${style.name}")
+    }
+
+    override fun setLastKnownDeviceType(type: DeviceType) {
+        if (_lastKnownDeviceType.value == type) return
+        _lastKnownDeviceType.value = type
+        prefs.edit().putString(KEY_LAST_DEVICE_TYPE, type.name).apply()
+        logger.i(TAG, "Last known device type set to ${type.name}")
     }
 
     override fun setSavedSensorAddress(address: String?) {
@@ -107,10 +128,22 @@ class ProfileUserPreferences(
         return try { FanMode.valueOf(stored) } catch (_: IllegalArgumentException) { FanMode.OFF }
     }
 
+    private fun loadOverlayStyle(): OverlayStyle {
+        val stored = prefs.getString(KEY_OVERLAY_STYLE, null) ?: return OverlayStyle.METRICS
+        return try { OverlayStyle.valueOf(stored) } catch (_: IllegalArgumentException) { OverlayStyle.METRICS }
+    }
+
+    private fun loadLastKnownDeviceType(): DeviceType? {
+        val stored = prefs.getString(KEY_LAST_DEVICE_TYPE, null) ?: return null
+        return try { DeviceType.valueOf(stored) } catch (_: IllegalArgumentException) { null }
+    }
+
     private companion object {
         const val TAG = "UserPreferences"
         const val KEY_ENABLED_BROADCASTS = "enabled_broadcasts"
         const val KEY_OVERLAY_ENABLED = "overlay_enabled"
+        const val KEY_OVERLAY_STYLE = "overlay_style"
+        const val KEY_LAST_DEVICE_TYPE = "last_known_device_type"
         const val KEY_SENSOR_ADDRESS = "saved_sensor_address"
         const val KEY_FAN_MODE = "fan_mode"
         const val KEY_IMMERSIVE_MODE = "immersive_mode_enabled"

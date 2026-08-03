@@ -1,19 +1,14 @@
 package com.nettarion.hyperborea.ui.dashboard
 
-import androidx.compose.foundation.background
-import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.VerticalDivider
 import androidx.compose.runtime.Composable
-import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import com.nettarion.hyperborea.core.model.ExerciseData
@@ -21,8 +16,13 @@ import com.nettarion.hyperborea.core.model.Metric
 import com.nettarion.hyperborea.ui.theme.LocalHyperboreaColors
 import com.nettarion.hyperborea.ui.util.UnitFormatter
 
+/**
+ * Treadmill-specific dashboard: incline and speed as the hero tiles flanking a live 400 m track
+ * widget, with the secondary metrics in a row along the bottom. Bikes and other equipment keep
+ * [MetricGrid].
+ */
 @Composable
-fun MetricGrid(
+fun TreadmillMetricGrid(
     exerciseData: ExerciseData?,
     supportedMetrics: Set<Metric>?,
     useImperial: Boolean,
@@ -32,73 +32,61 @@ fun MetricGrid(
     fun isSupported(metric: Metric): Boolean = supportedMetrics?.contains(metric) != false
 
     Column(modifier = modifier.fillMaxSize()) {
-        // Primary row: Cadence | POWER | Heart Rate
+        // Hero row: INCLINE | 400 m track | SPEED
         Row(modifier = Modifier.weight(2f).fillMaxWidth()) {
-            // Cadence
             MetricCell(
-                value = exerciseData?.cadence?.toString(),
-                unit = "RPM",
-                label = "Cadence",
+                value = exerciseData?.incline?.let { "%.1f".format(it) },
+                unit = "%",
+                label = "Incline",
                 modifier = Modifier.weight(0.7f).fillMaxHeight(),
-                supported = isSupported(Metric.CADENCE),
+                valueStyle = MaterialTheme.typography.displayLarge,
+                unitStyle = MaterialTheme.typography.headlineLarge,
+                valueColor = colors.accentWarm,
+                target = exerciseData?.targetIncline?.let { "%.1f".format(it) },
+                supported = isSupported(Metric.INCLINE),
             )
             VerticalDivider(thickness = 1.dp, color = colors.divider)
-            // Power (hero) — amber accent + bottom border
-            Box(modifier = Modifier.weight(1f).fillMaxHeight()) {
-                MetricCell(
-                    value = exerciseData?.power?.toString(),
-                    unit = "W",
-                    label = "Power",
-                    modifier = Modifier.fillMaxSize(),
-                    valueStyle = MaterialTheme.typography.displayLarge,
-                    unitStyle = MaterialTheme.typography.headlineLarge,
-                    valueColor = colors.accentWarm,
-                    target = exerciseData?.targetPower?.toString(),
-                    supported = isSupported(Metric.POWER),
-                )
-                Box(
-                    modifier = Modifier
-                        .align(Alignment.BottomCenter)
-                        .fillMaxWidth()
-                        .padding(horizontal = 24.dp)
-                        .height(2.dp)
-                        .background(colors.accentWarm),
-                )
-            }
+            RunningTrackWidget(
+                distanceKm = exerciseData?.distance,
+                useImperial = useImperial,
+                modifier = Modifier.weight(1f).fillMaxHeight(),
+            )
             VerticalDivider(thickness = 1.dp, color = colors.divider)
-            // Heart Rate
             MetricCell(
-                value = exerciseData?.heartRate?.toString(),
-                unit = "BPM",
-                label = "Heart Rate",
+                value = exerciseData?.speed?.let {
+                    "%.1f".format(if (useImperial) it * UnitFormatter.KM_TO_MI else it)
+                },
+                unit = if (useImperial) "mph" else "km/h",
+                label = "Speed",
                 modifier = Modifier.weight(0.7f).fillMaxHeight(),
-                supported = isSupported(Metric.HEART_RATE),
+                valueStyle = MaterialTheme.typography.displayLarge,
+                unitStyle = MaterialTheme.typography.headlineLarge,
+                valueColor = colors.accentWarm,
+                target = exerciseData?.targetSpeed?.let {
+                    "%.1f".format(if (useImperial) it * UnitFormatter.KM_TO_MI else it)
+                },
+                supported = isSupported(Metric.SPEED),
             )
         }
         HorizontalDivider(thickness = 1.dp, color = colors.divider)
-        // Secondary row: Speed | Time | Resistance | Incline | Distance | Calories
+        // Secondary row: Power | Time | Heart Rate | Distance | Calories
         Row(modifier = Modifier.weight(1f).fillMaxWidth()) {
             val secondaryValueStyle = MaterialTheme.typography.displaySmall
             val secondaryUnitStyle = MaterialTheme.typography.labelLarge
             val secondaryLabelStyle = MaterialTheme.typography.titleMedium
             val secondaryTargetStyle = MaterialTheme.typography.labelMedium
 
-            val speedUnit = if (useImperial) "mph" else "km/h"
             MetricCell(
-                value = exerciseData?.speed?.let {
-                    "%.1f".format(if (useImperial) it * UnitFormatter.KM_TO_MI else it)
-                },
-                unit = speedUnit,
-                label = "Speed",
+                value = exerciseData?.power?.toString(),
+                unit = "W",
+                label = "Power",
                 modifier = Modifier.weight(1f).fillMaxHeight(),
                 valueStyle = secondaryValueStyle,
                 unitStyle = secondaryUnitStyle,
                 labelStyle = secondaryLabelStyle,
                 targetStyle = secondaryTargetStyle,
-                target = exerciseData?.targetSpeed?.let {
-                    "%.1f".format(if (useImperial) it * UnitFormatter.KM_TO_MI else it)
-                },
-                supported = isSupported(Metric.SPEED),
+                target = exerciseData?.targetPower?.toString(),
+                supported = isSupported(Metric.POWER),
             )
             VerticalDivider(thickness = 1.dp, color = colors.divider)
             MetricCell(
@@ -112,29 +100,14 @@ fun MetricGrid(
             )
             VerticalDivider(thickness = 1.dp, color = colors.divider)
             MetricCell(
-                value = exerciseData?.resistance?.toString(),
-                unit = "",
-                label = "Resistance",
+                value = exerciseData?.heartRate?.toString(),
+                unit = "BPM",
+                label = "Heart Rate",
                 modifier = Modifier.weight(1f).fillMaxHeight(),
                 valueStyle = secondaryValueStyle,
                 unitStyle = secondaryUnitStyle,
                 labelStyle = secondaryLabelStyle,
-                targetStyle = secondaryTargetStyle,
-                target = exerciseData?.targetResistance?.toString(),
-                supported = isSupported(Metric.RESISTANCE),
-            )
-            VerticalDivider(thickness = 1.dp, color = colors.divider)
-            MetricCell(
-                value = exerciseData?.incline?.let { "%.1f".format(it) },
-                unit = "%",
-                label = "Incline",
-                modifier = Modifier.weight(1f).fillMaxHeight(),
-                valueStyle = secondaryValueStyle,
-                unitStyle = secondaryUnitStyle,
-                labelStyle = secondaryLabelStyle,
-                targetStyle = secondaryTargetStyle,
-                target = exerciseData?.targetIncline?.let { "%.1f".format(it) },
-                supported = isSupported(Metric.INCLINE),
+                supported = isSupported(Metric.HEART_RATE),
             )
             VerticalDivider(thickness = 1.dp, color = colors.divider)
             MetricCell(
@@ -163,4 +136,3 @@ fun MetricGrid(
         }
     }
 }
-

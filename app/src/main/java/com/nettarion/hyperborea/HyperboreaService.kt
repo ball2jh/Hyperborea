@@ -21,6 +21,9 @@ import com.nettarion.hyperborea.platform.update.UpdateManager
 import dagger.hilt.android.AndroidEntryPoint
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.filterNotNull
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeoutOrNull
@@ -49,8 +52,11 @@ class HyperboreaService : Service() {
             orchestrator = orchestrator,
             hardwareAdapter = hardwareAdapter,
             overlayEnabled = userPreferences.overlayEnabled,
+            overlayStyle = userPreferences.overlayStyle,
+            useImperial = userPreferences.useImperial,
             logger = logger,
             scope = scope,
+            onStart = { activate() },
             onPause = { pause() },
             onResume = { resume() },
             onStop = {
@@ -65,6 +71,15 @@ class HyperboreaService : Service() {
         scope.launch {
             broadcastManager.start()
             updateManager.startAutoUpdate()
+        }
+        // Persist the identified device type so device-aware UI copy (profile picker prompt)
+        // survives restarts and renders before the USB probe completes.
+        scope.launch {
+            hardwareAdapter.deviceInfo
+                .filterNotNull()
+                .map { it.type }
+                .distinctUntilChanged()
+                .collect { userPreferences.setLastKnownDeviceType(it) }
         }
         startStateObserver()
         logger.i(TAG, "Service created")

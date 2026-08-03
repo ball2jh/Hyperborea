@@ -36,6 +36,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.nettarion.hyperborea.core.model.DeviceType
 import com.nettarion.hyperborea.core.model.Profile
 import com.nettarion.hyperborea.ui.theme.LocalHyperboreaColors
 
@@ -48,6 +49,7 @@ fun ProfilePickerScreen(
     viewModel: ProfilePickerViewModel = hiltViewModel(),
 ) {
     val profiles by viewModel.profiles.collectAsStateWithLifecycle()
+    val deviceType by viewModel.deviceType.collectAsStateWithLifecycle()
     val colors = LocalHyperboreaColors.current
 
     LaunchedEffect(profiles, autoSelect) {
@@ -65,7 +67,7 @@ fun ProfilePickerScreen(
     ) {
         Column(horizontalAlignment = Alignment.CenterHorizontally) {
             Text(
-                text = "Who's riding?",
+                text = pickerPrompt(deviceType),
                 style = MaterialTheme.typography.headlineLarge,
                 color = colors.textHigh,
             )
@@ -98,7 +100,7 @@ fun ProfilePickerScreen(
                     color = colors.textLow,
                 )
                 Text(
-                    text = "Ride without saving",
+                    text = guestSubtitle(deviceType),
                     style = MaterialTheme.typography.bodySmall,
                     color = colors.textLow.copy(alpha = 0.6f),
                 )
@@ -186,4 +188,25 @@ private fun AddProfileCard(onClick: () -> Unit) {
             textAlign = TextAlign.Center,
         )
     }
+}
+
+/**
+ * Device-aware picker headline. Null device type (nothing identified yet, ever) falls back to
+ * activity-neutral copy.
+ */
+internal fun pickerPrompt(type: DeviceType?): String = when (type) {
+    DeviceType.BIKE -> "Who's riding?"
+    DeviceType.TREADMILL -> "Who's running?"
+    DeviceType.ROWER -> "Who's rowing?"
+    DeviceType.ELLIPTICAL -> "Who's training?"
+    null -> "Who's working out?"
+}
+
+/** Device-aware subtitle for the Guest entry, mirroring [pickerPrompt]. */
+internal fun guestSubtitle(type: DeviceType?): String = when (type) {
+    DeviceType.BIKE -> "Ride without saving"
+    DeviceType.TREADMILL -> "Run without saving"
+    DeviceType.ROWER -> "Row without saving"
+    DeviceType.ELLIPTICAL -> "Train without saving"
+    null -> "Work out without saving"
 }
