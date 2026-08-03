@@ -6,9 +6,7 @@ import com.nettarion.hyperborea.broadcast.wifi.NsdRegistrar
 import com.nettarion.hyperborea.broadcast.wifi.WifiAdapter
 import com.nettarion.hyperborea.core.AppLogger
 import com.nettarion.hyperborea.core.adapter.BroadcastAdapter
-import com.nettarion.hyperborea.core.adapter.HardwareAdapter
 import com.nettarion.hyperborea.core.adapter.SensorAdapter
-import com.nettarion.hyperborea.hardware.fitpro.FitProAdapter
 import com.nettarion.hyperborea.hardware.fitpro.transport.HidTransportFactory
 import com.nettarion.hyperborea.hardware.fitpro.transport.UsbHidTransportFactory
 import com.nettarion.hyperborea.sensor.hrm.HrmAdapter
@@ -26,9 +24,8 @@ import javax.inject.Singleton
 @InstallIn(SingletonComponent::class)
 abstract class AdapterModule {
 
-    @Binds
-    @Singleton
-    abstract fun bindHardwareAdapter(impl: FitProAdapter): HardwareAdapter
+    // The HardwareAdapter binding lives in HardwareAdapterModule, split across the debug/release
+    // source sets so debug builds can substitute the demo treadmill on emulators.
 
     @Binds
     @Singleton

@@ -12,14 +12,19 @@ import android.os.Handler
 import android.os.Looper
 import android.provider.Settings
 import android.view.Gravity
+import android.view.View
 import android.view.WindowManager
 import com.nettarion.hyperborea.core.AppLogger
 import com.nettarion.hyperborea.core.adapter.HardwareAdapter
+import com.nettarion.hyperborea.core.model.DeviceCommand
 import com.nettarion.hyperborea.core.orchestration.Orchestrator
 import com.nettarion.hyperborea.core.orchestration.OrchestratorState
+import com.nettarion.hyperborea.core.profile.OverlayStyle
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.drop
 import kotlinx.coroutines.launch
 
 class OverlayManager(
@@ -27,8 +32,11 @@ class OverlayManager(
     private val orchestrator: Orchestrator,
     private val hardwareAdapter: HardwareAdapter,
     private val overlayEnabled: StateFlow<Boolean>,
+    private val overlayStyle: StateFlow<OverlayStyle>,
+    private val useImperial: StateFlow<Boolean>,
     private val logger: AppLogger,
     private val scope: CoroutineScope,
+    private val onStart: () -> Unit,
     private val onPause: () -> Unit,
     private val onResume: () -> Unit,
     private val onStop: () -> Unit,
@@ -37,9 +45,11 @@ class OverlayManager(
     private val mainHandler = Handler(Looper.getMainLooper())
     private val windowManager = context.getSystemService(Context.WINDOW_SERVICE) as WindowManager
     private val prefs: SharedPreferences = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
-    private var view: OverlayBarView? = null
+    private var view: View? = null
+    private var contentView: OverlayContentView? = null
     private var exerciseDataJob: Job? = null
     private var stateJob: Job? = null
+    private var unitsJob: Job? = null
     private var userDismissed = false
     private var isAppInForeground: Boolean
     private var lastState: OrchestratorState = OrchestratorState.Idle
@@ -86,6 +96,17 @@ class OverlayManager(
         }
 
         (context.applicationContext as Application).registerActivityLifecycleCallbacks(lifecycleCallbacks)
+
+        // Rebuild the window when the user switches style in settings; also covers switching to
+        // CONTROLS while idle-and-backgrounded, where METRICS would never have been shown.
+        scope.launch {
+            overlayStyle.drop(1).collect {
+                mainHandler.post {
+                    hide()
+                    if (shouldShowOverlay()) show()
+                }
+            }
+        }
     }
 
     fun show() {
@@ -99,22 +120,38 @@ class OverlayManager(
         }
 
         val params = createLayoutParams()
-        val overlayView = OverlayBarView(
-            context = context,
-            layoutParams = params,
-            windowManager = windowManager,
-            onPauseClick = onPause,
-            onResumeClick = onResume,
-            onStopClick = onStop,
-            onPositionChanged = { x, y -> savePosition(x, y) },
-        )
+        val overlayView: View = when (overlayStyle.value) {
+            OverlayStyle.METRICS -> OverlayBarView(
+                context = context,
+                layoutParams = params,
+                windowManager = windowManager,
+                onPauseClick = onPause,
+                onResumeClick = onResume,
+                onStopClick = onStop,
+                onPositionChanged = { x, y -> savePosition(x, y) },
+            )
+            OverlayStyle.CONTROLS -> OverlayControlBarView(
+                context = context,
+                layoutParams = params,
+                windowManager = windowManager,
+                onAdjustIncline = { increase -> sendCommand(DeviceCommand.AdjustIncline(increase)) },
+                onAdjustSpeed = { increase -> sendCommand(DeviceCommand.AdjustSpeed(increase)) },
+                onStartClick = onStart,
+                onPauseClick = onPause,
+                onResumeClick = onResume,
+                onStopClick = onStop,
+                onPositionChanged = { x, y -> savePosition(x, y) },
+            ).apply { setUseImperial(useImperial.value) }
+        }
 
         windowManager.addView(overlayView, params)
         view = overlayView
+        contentView = overlayView as OverlayContentView
         userDismissed = false
 
-        startCollectors(overlayView)
-        logger.d(TAG, "Overlay shown")
+        contentView?.updateState(lastState)
+        startCollectors()
+        logger.d(TAG, "Overlay shown (style=${overlayStyle.value})")
     }
 
     fun hide() {
@@ -124,11 +161,14 @@ class OverlayManager(
         }
         exerciseDataJob?.cancel()
         stateJob?.cancel()
+        unitsJob?.cancel()
         exerciseDataJob = null
         stateJob = null
+        unitsJob = null
 
         windowManager.removeView(v)
         view = null
+        contentView = null
         logger.d(TAG, "Overlay hidden")
     }
 
@@ -153,28 +193,16 @@ class OverlayManager(
         }
         mainHandler.post {
             lastState = state
-            when (state) {
-                is OrchestratorState.Running -> {
-                    if (shouldShowOverlay()) show()
-                    view?.updateState(state)
-                }
-                is OrchestratorState.Paused -> {
-                    view?.updateState(state)
-                }
-                is OrchestratorState.Idle,
-                is OrchestratorState.Stopping,
-                is OrchestratorState.Error,
-                -> {
-                    logger.d(TAG, "Overlay auto-hidden (state=$state)")
-                    userDismissed = false
-                    hide()
-                }
-                is OrchestratorState.Preparing,
-                is OrchestratorState.AwaitingConsoleStart,
-                -> {
-                    // The on-screen banner on the dashboard is the visible cue; the floating
-                    // overlay only needs to surface mid-workout pause/running states.
-                }
+            if (stateAllowsOverlay(overlayStyle.value, state)) {
+                if (shouldShowOverlay()) show()
+                contentView?.updateState(state)
+            } else {
+                // A hide-causing state ends the "user dismissed it this workout" suppression, so
+                // the overlay comes back for the next workout (and, in CONTROLS style, for the
+                // post-workout Idle). Mid-workout dismissal recovery is the notification toggle.
+                logger.d(TAG, "Overlay auto-hidden (state=$state)")
+                userDismissed = false
+                hide()
             }
         }
     }
@@ -188,20 +216,41 @@ class OverlayManager(
         val result = overlayEnabled.value &&
             !isAppInForeground &&
             !userDismissed &&
-            (lastState is OrchestratorState.Running || lastState is OrchestratorState.Paused)
-        logger.d(TAG, "shouldShowOverlay=$result (enabled=${overlayEnabled.value}, fg=$isAppInForeground, dismissed=$userDismissed, state=$lastState)")
+            stateAllowsOverlay(overlayStyle.value, lastState)
+        logger.d(
+            TAG,
+            "shouldShowOverlay=$result (enabled=${overlayEnabled.value}, style=${overlayStyle.value}, " +
+                "fg=$isAppInForeground, dismissed=$userDismissed, state=$lastState)",
+        )
         return result
     }
 
-    private fun startCollectors(overlayView: OverlayBarView) {
+    private fun sendCommand(command: DeviceCommand) {
+        scope.launch {
+            try {
+                hardwareAdapter.sendCommand(command)
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                logger.w(TAG, "Overlay command failed: $command — ${e.message}")
+            }
+        }
+    }
+
+    private fun startCollectors() {
         exerciseDataJob = scope.launch {
             hardwareAdapter.exerciseData.collect { data ->
-                overlayView.post { overlayView.updateExerciseData(data) }
+                view?.post { contentView?.updateExerciseData(data) }
             }
         }
         stateJob = scope.launch {
             orchestrator.state.collect { state ->
-                overlayView.post { overlayView.updateState(state) }
+                view?.post { contentView?.updateState(state) }
+            }
+        }
+        unitsJob = scope.launch {
+            useImperial.collect { imperial ->
+                view?.post { (contentView as? OverlayControlBarView)?.setUseImperial(imperial) }
             }
         }
     }
@@ -249,4 +298,21 @@ class OverlayManager(
         private const val DEFAULT_X = 0
         private const val DEFAULT_Y = 100
     }
+}
+
+/**
+ * Which orchestrator states each overlay style may be visible in. METRICS is a mid-workout HUD;
+ * CONTROLS is a standing remote, so it also persists through Idle (start a workout from another
+ * app) and the armed/preparing states. Error and Stopping hide both — errors route the user to
+ * the app for detail.
+ */
+internal fun stateAllowsOverlay(style: OverlayStyle, state: OrchestratorState): Boolean = when (style) {
+    OverlayStyle.METRICS ->
+        state is OrchestratorState.Running || state is OrchestratorState.Paused
+    OverlayStyle.CONTROLS ->
+        state is OrchestratorState.Idle ||
+            state is OrchestratorState.Preparing ||
+            state is OrchestratorState.AwaitingConsoleStart ||
+            state is OrchestratorState.Running ||
+            state is OrchestratorState.Paused
 }

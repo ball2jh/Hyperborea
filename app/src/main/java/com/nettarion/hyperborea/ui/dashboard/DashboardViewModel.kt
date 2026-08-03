@@ -12,6 +12,7 @@ import com.nettarion.hyperborea.core.adapter.BroadcastId
 import com.nettarion.hyperborea.core.adapter.SensorAdapter
 import com.nettarion.hyperborea.core.fitfile.FitActivityBuilder
 import com.nettarion.hyperborea.core.adapter.HardwareAdapter
+import com.nettarion.hyperborea.core.model.DeviceCommand
 import com.nettarion.hyperborea.core.model.DeviceInfo
 import com.nettarion.hyperborea.core.model.ExerciseData
 import com.nettarion.hyperborea.core.model.Profile
@@ -134,6 +135,25 @@ class DashboardViewModel @Inject constructor(
     fun resumeBroadcasting() {
         logger.i(TAG, "User action: resume broadcasting")
         context.startHyperboreaService(HyperboreaService.ACTION_RESUME)
+    }
+
+    /** Treadmill incline step from the StatusBar cluster; the hardware session handles step/clamp. */
+    fun adjustIncline(increase: Boolean) = sendHardwareCommand(DeviceCommand.AdjustIncline(increase))
+
+    /** Treadmill speed step from the StatusBar cluster; the hardware session handles step/clamp. */
+    fun adjustSpeed(increase: Boolean) = sendHardwareCommand(DeviceCommand.AdjustSpeed(increase))
+
+    private fun sendHardwareCommand(command: DeviceCommand) {
+        logger.i(TAG, "User action: $command")
+        viewModelScope.launch {
+            try {
+                hardwareAdapter.sendCommand(command)
+            } catch (e: kotlinx.coroutines.CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                logger.e(TAG, "Command failed: $command", e)
+            }
+        }
     }
 
     fun toggleBroadcast(id: BroadcastId, enabled: Boolean) {

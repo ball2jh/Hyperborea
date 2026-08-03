@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Distinguishes the side-by-side debug install from the production app on the console. -->
+    <string name="app_name">Hyperborea Dev</string>
+</resources>

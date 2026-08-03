@@ -2,6 +2,7 @@ package com.nettarion.hyperborea.ui.settings
 
 import android.content.Intent
 import androidx.lifecycle.ViewModel
+import com.nettarion.hyperborea.core.profile.OverlayStyle
 import com.nettarion.hyperborea.core.profile.UserPreferences
 import com.nettarion.hyperborea.platform.ScreenSleepController
 import dagger.hilt.android.lifecycle.HiltViewModel
@@ -21,6 +22,7 @@ class DisplaySettingsViewModel @Inject constructor(
 
     val useImperial: StateFlow<Boolean> = userPreferences.useImperial
     val overlayEnabled: StateFlow<Boolean> = userPreferences.overlayEnabled
+    val overlayStyle: StateFlow<OverlayStyle> = userPreferences.overlayStyle
     val immersiveModeEnabled: StateFlow<Boolean> = userPreferences.immersiveModeEnabled
     val screenSleepEnabled: StateFlow<Boolean> = userPreferences.screenSleepEnabled
     val screenSleepTimeoutMinutes: StateFlow<Int> = userPreferences.screenSleepTimeoutMinutes
@@ -31,6 +33,10 @@ class DisplaySettingsViewModel @Inject constructor(
 
     fun setOverlayEnabled(enabled: Boolean) {
         userPreferences.setOverlayEnabled(enabled)
+    }
+
+    fun setOverlayStyle(style: OverlayStyle) {
+        userPreferences.setOverlayStyle(style)
     }
 
     fun setImmersiveModeEnabled(enabled: Boolean) {

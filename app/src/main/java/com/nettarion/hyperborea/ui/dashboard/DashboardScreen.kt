@@ -36,6 +36,7 @@ import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.nettarion.hyperborea.core.model.DeviceType
 import com.nettarion.hyperborea.core.orchestration.OrchestratorState
 import com.nettarion.hyperborea.ui.admin.AdminDrawer
 import com.nettarion.hyperborea.ui.theme.LocalHyperboreaColors
@@ -86,6 +87,7 @@ fun DashboardScreen(
             .background(MaterialTheme.colorScheme.background)
             .navigationBarsPadding(),
     ) {
+        val isTreadmill = uiState.deviceInfo?.type == DeviceType.TREADMILL
         Column(modifier = Modifier.fillMaxSize()) {
             StatusBar(
                 orchestratorState = uiState.orchestratorState,
@@ -110,14 +112,27 @@ fun DashboardScreen(
                     if (profileId != null) onProfileClick(profileId)
                     else onSwitchProfile()
                 },
+                isTreadmill = isTreadmill,
+                controlsEnabled = uiState.orchestratorState is OrchestratorState.Running,
+                onAdjustIncline = viewModel::adjustIncline,
+                onAdjustSpeed = viewModel::adjustSpeed,
             )
             HorizontalDivider(thickness = 1.dp, color = colors.divider)
-            MetricGrid(
-                exerciseData = uiState.exerciseData,
-                supportedMetrics = uiState.deviceInfo?.supportedMetrics,
-                useImperial = uiState.useImperial,
-                modifier = Modifier.weight(1f),
-            )
+            if (isTreadmill) {
+                TreadmillMetricGrid(
+                    exerciseData = uiState.exerciseData,
+                    supportedMetrics = uiState.deviceInfo?.supportedMetrics,
+                    useImperial = uiState.useImperial,
+                    modifier = Modifier.weight(1f),
+                )
+            } else {
+                MetricGrid(
+                    exerciseData = uiState.exerciseData,
+                    supportedMetrics = uiState.deviceInfo?.supportedMetrics,
+                    useImperial = uiState.useImperial,
+                    modifier = Modifier.weight(1f),
+                )
+            }
         }
 
         // Treadmill safety overlay: equipment is armed (broadcasts live), MCU is parked in

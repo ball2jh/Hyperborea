@@ -130,6 +130,16 @@ android {
     }
 
     buildTypes {
+        debug {
+            // Side-by-side install next to the release-signed production app on real consoles:
+            // debug and release keys differ, so an in-place update is rejected
+            // (INSTALL_FAILED_UPDATE_INCOMPATIBLE). A distinct id + label keeps the fleet build
+            // untouched while testing. Both apps contend for the USB device and HOME role —
+            // force-stop the production app while testing the debug one.
+            applicationIdSuffix = ".debug"
+            versionNameSuffix = "-debug"
+            // The "Hyperborea Dev" label lives in src/debug/res/values/strings.xml.
+        }
         release {
             // No R8/ProGuard: this is an open-source project — obfuscation buys nothing and
             // minified class names used to leak into diagnostics and crash reports.

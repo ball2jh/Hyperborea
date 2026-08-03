@@ -1,6 +1,7 @@
 package com.nettarion.hyperborea.core.profile
 
 import com.nettarion.hyperborea.core.adapter.BroadcastId
+import com.nettarion.hyperborea.core.model.DeviceType
 import com.nettarion.hyperborea.core.model.FanMode
 
 import kotlinx.coroutines.flow.StateFlow
@@ -8,6 +9,13 @@ import kotlinx.coroutines.flow.StateFlow
 interface UserPreferences {
     val enabledBroadcasts: StateFlow<Set<BroadcastId>>
     val overlayEnabled: StateFlow<Boolean>
+    val overlayStyle: StateFlow<OverlayStyle>
+    /**
+     * Device type from the most recent successful hardware identification. Lets the UI show
+     * device-appropriate copy (e.g. the profile picker prompt) before the USB probe completes —
+     * or when it never will (emulator). Null until the first hardware handshake ever succeeds.
+     */
+    val lastKnownDeviceType: StateFlow<DeviceType?>
     val savedSensorAddress: StateFlow<String?>
     val fanMode: StateFlow<FanMode>
     val immersiveModeEnabled: StateFlow<Boolean>
@@ -23,6 +31,8 @@ interface UserPreferences {
     val screenSleepTimeoutMinutes: StateFlow<Int>
     fun setBroadcastEnabled(id: BroadcastId, enabled: Boolean)
     fun setOverlayEnabled(enabled: Boolean)
+    fun setOverlayStyle(style: OverlayStyle)
+    fun setLastKnownDeviceType(type: DeviceType)
     fun setSavedSensorAddress(address: String?)
     fun setFanMode(mode: FanMode)
     fun setImmersiveModeEnabled(enabled: Boolean)

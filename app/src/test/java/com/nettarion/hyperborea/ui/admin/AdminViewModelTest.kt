@@ -101,6 +101,12 @@ class AdminViewModelTest {
         override val fanMode: StateFlow<com.nettarion.hyperborea.core.model.FanMode> = MutableStateFlow(com.nettarion.hyperborea.core.model.FanMode.OFF)
         override fun setBroadcastEnabled(id: BroadcastId, enabled: Boolean) {}
         override fun setOverlayEnabled(enabled: Boolean) {}
+        override val overlayStyle: StateFlow<com.nettarion.hyperborea.core.profile.OverlayStyle> =
+            MutableStateFlow(com.nettarion.hyperborea.core.profile.OverlayStyle.METRICS)
+        override fun setOverlayStyle(style: com.nettarion.hyperborea.core.profile.OverlayStyle) {}
+        override val lastKnownDeviceType: StateFlow<com.nettarion.hyperborea.core.model.DeviceType?> =
+            MutableStateFlow(null)
+        override fun setLastKnownDeviceType(type: com.nettarion.hyperborea.core.model.DeviceType) {}
         override fun setSavedSensorAddress(address: String?) {}
         override fun setFanMode(mode: com.nettarion.hyperborea.core.model.FanMode) {}
         override val immersiveModeEnabled: StateFlow<Boolean> = MutableStateFlow(true)
