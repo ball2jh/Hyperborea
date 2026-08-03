@@ -1,6 +1,8 @@
 # Changelog
 
 ## [Unreleased]
+
+## [1.3.0] - 2026-08-03
 - **Treadmills get their own dashboard.** When the equipment is a treadmill, the main screen now shows large incline and speed tiles (with their live "→ target" values when Zwift or the control buttons are driving them) around a 400 m running-track widget — a lap counter with a live marker sweeping the oval as distance accrues — and a Power / Time / Heart Rate / Distance / Calories row along the bottom. Bikes, ellipticals, and rowers keep the existing layout.
 - **On-screen incline and speed controls.** On treadmills the top bar now carries persistent − / + clusters for incline and speed beside Start/Pause/Stop. Taps step exactly like the physical console keys (press-and-hold auto-repeats); the buttons are active only while a workout is running, so a stored target can't surprise-start an armed belt.
 - **New "Control bar" overlay style.** The floating overlay (Settings → Display) now has two styles: the existing metrics bar, and a control bar with incline − / +, speed − / +, and Start/Pause/Stop that stays available even before a workout — so a run can be started, adjusted, and stopped from inside iFit or any other app. The control bar respects the units setting.
