@@ -202,6 +202,8 @@ class WifiClientHandler(
                 }
                 // Extract fan command from simulation parameters (opcode 0x11)
                 ControlPointParser.extractFanCommand(request.value)?.let { onCommand(it) }
+                // Reset/Stop end the client's control session — drop constant-watts (ERG) mode with it
+                ControlPointParser.extractErgExitCommand(request.value)?.let { onCommand(it) }
                 parsed
             }
             WifiServiceDefinition.TRAINER_CONTROL -> {

@@ -114,33 +114,20 @@ class ControlPointParserTest {
     }
 
     @Test
-    fun `parseFtmsControlPoint set wheel circumference returns SessionControl`() {
-        // 0x12 with uint16 LE circumference (2096mm = 0x0830)
+    fun `parseFtmsControlPoint set wheel circumference returns Unsupported`() {
+        // 0x12 with uint16 LE circumference (2096mm = 0x0830) — refused: no wheel, feature bit not advertised
         val result = ControlPointParser.parseFtmsControlPoint(byteArrayOf(0x12, 0x30, 0x08))
-        assertThat(result).isInstanceOf(ControlPointParser.ControlPointResult.SessionControl::class.java)
-        assertThat((result as ControlPointParser.ControlPointResult.SessionControl).opcode)
-            .isEqualTo(0x12.toByte())
-    }
-
-    @Test
-    fun `parseFtmsControlPoint set wheel circumference too short returns Unsupported`() {
-        val result = ControlPointParser.parseFtmsControlPoint(byteArrayOf(0x12, 0x30))
         assertThat(result).isInstanceOf(ControlPointParser.ControlPointResult.Unsupported::class.java)
     }
 
     @Test
-    fun `parseFtmsControlPoint spin down control returns SessionControl`() {
-        // 0x13 with uint8 control parameter (0x01 = start)
+    fun `parseFtmsControlPoint spin down control returns Unsupported`() {
+        // 0x13 with uint8 control parameter (0x01 = start) — refused: nothing to spin down,
+        // feature bit not advertised; acking success left clients waiting on a status flow
         val result = ControlPointParser.parseFtmsControlPoint(byteArrayOf(0x13, 0x01))
-        assertThat(result).isInstanceOf(ControlPointParser.ControlPointResult.SessionControl::class.java)
-        assertThat((result as ControlPointParser.ControlPointResult.SessionControl).opcode)
-            .isEqualTo(0x13.toByte())
-    }
-
-    @Test
-    fun `parseFtmsControlPoint spin down control too short returns Unsupported`() {
-        val result = ControlPointParser.parseFtmsControlPoint(byteArrayOf(0x13))
         assertThat(result).isInstanceOf(ControlPointParser.ControlPointResult.Unsupported::class.java)
+        assertThat((result as ControlPointParser.ControlPointResult.Unsupported).opcode)
+            .isEqualTo(0x13.toByte())
     }
 
     @Test
@@ -255,6 +242,29 @@ class ControlPointParserTest {
     fun `extractFanCommand too short payload returns null`() {
         val payload = byteArrayOf(0x11, 0x00)
         assertThat(ControlPointParser.extractFanCommand(payload)).isNull()
+    }
+
+    // --- extractErgExitCommand ---
+
+    @Test
+    fun `extractErgExitCommand reset implies ERG exit`() {
+        val cmd = ControlPointParser.extractErgExitCommand(byteArrayOf(0x01))
+        assertThat(cmd).isEqualTo(DeviceCommand.SetErgMode(enable = false))
+    }
+
+    @Test
+    fun `extractErgExitCommand stop implies ERG exit`() {
+        // 0x08 with the stop/pause parameter (0x01 = stop)
+        val cmd = ControlPointParser.extractErgExitCommand(byteArrayOf(0x08, 0x01))
+        assertThat(cmd).isEqualTo(DeviceCommand.SetErgMode(enable = false))
+    }
+
+    @Test
+    fun `extractErgExitCommand other opcodes return null`() {
+        assertThat(ControlPointParser.extractErgExitCommand(byteArrayOf(0x00))).isNull() // Request Control
+        assertThat(ControlPointParser.extractErgExitCommand(byteArrayOf(0x07))).isNull() // Start
+        assertThat(ControlPointParser.extractErgExitCommand(byteArrayOf(0x05, 0x00, 0x00))).isNull() // Target Power
+        assertThat(ControlPointParser.extractErgExitCommand(byteArrayOf())).isNull()
     }
 
     // --- Response encoding ---

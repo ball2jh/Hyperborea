@@ -279,10 +279,16 @@ internal class V2Session(
                 V2FeatureId.TARGET_KPH,
                 nextAdjustedSpeed(command.increase),
             )
-            is DeviceCommand.SetTargetPower -> V2Message.Outgoing.WriteFeature(
-                V2FeatureId.GOAL_WATTS,
-                command.watts.toFloat(),
-            )
+            is DeviceCommand.SetTargetPower -> {
+                if (command.watts <= 0) {
+                    // FTMS clients send a 0 W target to unload the trainer (spin-down prep). A zero
+                    // watt goal is outside the MCU's contract — on V1 it pins resistance at max —
+                    // so don't pass it through here either.
+                    logger.d(TAG, "Dropping SetTargetPower(0): zero watt goal not written to MCU")
+                    return
+                }
+                V2Message.Outgoing.WriteFeature(V2FeatureId.GOAL_WATTS, command.watts.toFloat())
+            }
             is DeviceCommand.PauseWorkout -> {
                 accumulator.pause()
                 V2Message.Outgoing.WriteFeature(V2FeatureId.WORKOUT_STATE, V2WorkoutMode.PAUSED.raw)

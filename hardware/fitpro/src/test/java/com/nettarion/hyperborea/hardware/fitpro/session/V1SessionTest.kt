@@ -1250,10 +1250,93 @@ class V1SessionTest {
     }
 
     @Test
-    fun `commandToFields SetErgMode disable maps to IS_CONSTANT_WATTS_MODE 0`() {
+    fun `commandToFields SetErgMode disable clears IS_CONSTANT_WATTS_MODE when engaged`() {
         val session = createUnstartedSession()
+        session.commandToFields(DeviceCommand.SetErgMode(true))
         val fields = session.commandToFields(DeviceCommand.SetErgMode(false))
         assertThat(fields).containsExactly(V1DataField.IS_CONSTANT_WATTS_MODE, 0f)
+    }
+
+    @Test
+    fun `commandToFields SetErgMode disable is a no-op when not engaged`() {
+        // Clients Reset on every connect; the implied ERG exit must not generate junk writes.
+        val session = createUnstartedSession()
+        val fields = session.commandToFields(DeviceCommand.SetErgMode(false))
+        assertThat(fields).isEmpty()
+    }
+
+    // --- Constant-watts (ERG) mode engagement and exit ---
+    // A 0 W target (the FTMS "unload", sent by Zwift before a spin-down) must never engage
+    // constant-watts mode: the MCU treats a zero watt goal as garbage and pins resistance at max
+    // until power-cycle (field incident, S22i). And because the MCU never leaves the mode on its
+    // own, every switch back to manual control must clear it.
+
+    @Test
+    fun `commandToFields SetTargetPower engages constant watts with the goal`() {
+        val session = createUnstartedSession()
+        val fields = session.commandToFields(DeviceCommand.SetTargetPower(150))
+        assertThat(fields).containsExactly(
+            V1DataField.WATT_GOAL, 150f,
+            V1DataField.IS_CONSTANT_WATTS_MODE, 1f,
+        )
+    }
+
+    @Test
+    fun `commandToFields SetTargetPower zero exits constant watts instead of engaging`() {
+        val session = createUnstartedSession()
+        session.commandToFields(DeviceCommand.SetTargetPower(150))
+        val fields = session.commandToFields(DeviceCommand.SetTargetPower(0))
+        assertThat(fields).containsExactly(V1DataField.IS_CONSTANT_WATTS_MODE, 0f)
+        // The exit stuck: a later manual target has no leftover mode write.
+        assertThat(session.commandToFields(DeviceCommand.SetIncline(2.0f)))
+            .containsExactly(V1DataField.GRADE, 2.0f)
+    }
+
+    @Test
+    fun `commandToFields SetTargetPower zero writes nothing when not engaged`() {
+        val session = createUnstartedSession()
+        val fields = session.commandToFields(DeviceCommand.SetTargetPower(0))
+        assertThat(fields).isEmpty()
+    }
+
+    @Test
+    fun `commandToFields SetIncline exits constant watts when engaged`() {
+        val session = createUnstartedSession()
+        session.commandToFields(DeviceCommand.SetTargetPower(150))
+        val fields = session.commandToFields(DeviceCommand.SetIncline(2.0f))
+        assertThat(fields).containsExactly(
+            V1DataField.IS_CONSTANT_WATTS_MODE, 0f,
+            V1DataField.GRADE, 2.0f,
+        )
+    }
+
+    @Test
+    fun `commandToFields SetResistance exits constant watts when engaged`() {
+        val session = createUnstartedSession()
+        session.commandToFields(DeviceCommand.SetTargetPower(150))
+        val fields = session.commandToFields(DeviceCommand.SetResistance(12))
+        assertThat(fields).containsExactly(
+            V1DataField.IS_CONSTANT_WATTS_MODE, 0f,
+            V1DataField.RESISTANCE, 4991f,
+        )
+    }
+
+    @Test
+    fun `commandToFields SetTargetSpeed exits constant watts when engaged`() {
+        val session = createUnstartedSession()
+        session.commandToFields(DeviceCommand.SetTargetPower(150))
+        val fields = session.commandToFields(DeviceCommand.SetTargetSpeed(10.0f))
+        assertThat(fields).containsExactly(
+            V1DataField.IS_CONSTANT_WATTS_MODE, 0f,
+            V1DataField.KPH, 10.0f,
+        )
+    }
+
+    @Test
+    fun `commandToFields manual targets do not write mode when not engaged`() {
+        val session = createUnstartedSession()
+        val fields = session.commandToFields(DeviceCommand.SetIncline(2.0f))
+        assertThat(fields).containsExactly(V1DataField.GRADE, 2.0f)
     }
 
     // --- Poll-field filtering by supportedBitFields ---

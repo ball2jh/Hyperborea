@@ -27,6 +27,22 @@ class FtmsServiceMetadataTest {
     }
 
     @Test
+    fun `ftmsFeatureValue for BIKE does not advertise spin down or wheel circumference`() {
+        // Target-settings bits live in bytes 4-7 (uint32 LE). Bit 14 (Wheel Circumference) and
+        // bit 15 (Spin Down Control) must stay clear: advertising spin-down invites clients into
+        // a calibration flow the equipment mishandles (0 W unload target → resistance pinned at
+        // max). Bit 13 (Indoor Bike Simulation) stays set.
+        val value = FtmsServiceMetadata.ftmsFeatureValue(DeviceType.BIKE)
+        val targetBits = (value[4].toInt() and 0xFF) or
+            ((value[5].toInt() and 0xFF) shl 8) or
+            ((value[6].toInt() and 0xFF) shl 16) or
+            ((value[7].toInt() and 0xFF) shl 24)
+        assertThat(targetBits and (1 shl 13)).isNotEqualTo(0) // Indoor Bike Simulation
+        assertThat(targetBits and (1 shl 14)).isEqualTo(0)    // Wheel Circumference
+        assertThat(targetBits and (1 shl 15)).isEqualTo(0)    // Spin Down Control
+    }
+
+    @Test
     fun `ftmsFeatureValue for TREADMILL is 8 bytes with correct content`() {
         val value = FtmsServiceMetadata.ftmsFeatureValue(DeviceType.TREADMILL)
         assertThat(value.size).isEqualTo(8)

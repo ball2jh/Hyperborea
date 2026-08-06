@@ -126,6 +126,9 @@ class FtmsGattCallback(
 
         // Extract fan command from simulation parameters (opcode 0x11)
         ControlPointParser.extractFanCommand(value)?.let { onCommand(it) }
+
+        // Reset/Stop end the client's control session — drop constant-watts (ERG) mode with it
+        ControlPointParser.extractErgExitCommand(value)?.let { onCommand(it) }
     }
 
     override fun onDescriptorReadRequest(

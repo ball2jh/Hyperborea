@@ -556,6 +556,20 @@ class V2SessionTest {
     }
 
     @Test
+    fun `writeFeature SetTargetPower zero is dropped`() = runTest {
+        // The FTMS "unload" target (0 W, sent before a spin-down) is outside the MCU's contract —
+        // on V1 it pins resistance at max — so it must never reach the wire.
+        val session = createSession(this)
+        session.start()
+        advanceUntilIdle()
+
+        val countBefore = transport.writtenPackets.size
+        session.writeFeature(DeviceCommand.SetTargetPower(0))
+
+        assertThat(transport.writtenPackets.size).isEqualTo(countBefore)
+    }
+
+    @Test
     fun `writeFeature SetTargetSpeed sends TARGET_KPH`() = runTest {
         val session = createSession(this)
         session.start()

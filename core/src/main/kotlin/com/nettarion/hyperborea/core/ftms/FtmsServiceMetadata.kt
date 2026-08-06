@@ -49,8 +49,13 @@ object FtmsServiceMetadata {
     val RSC_FEATURE_VALUE = byteArrayOf(0x02, 0x00)
 
     fun ftmsFeatureValue(deviceType: DeviceType): ByteArray = when (deviceType) {
+        // Bike target-settings deliberately exclude Wheel Circumference (bit 14) and Spin Down
+        // Control (bit 15): there is no wheel and nothing to calibrate (magnetic brake, computed
+        // power), and advertising spin-down invites clients into a calibration flow whose 0 W
+        // "unload" target the equipment mishandles (field-observed: resistance pinned at max).
+        // The control point refuses opcodes 0x12/0x13 to match.
         DeviceType.BIKE -> byteArrayOf(
-            0x8F.toByte(), 0x56, 0x00, 0x00, 0x0E, 0xE0.toByte(), 0x00, 0x00,
+            0x8F.toByte(), 0x56, 0x00, 0x00, 0x0E, 0x20, 0x00, 0x00,
         )
         DeviceType.TREADMILL -> byteArrayOf(
             0x0D, 0xD6.toByte(), 0x00, 0x00, 0x0A, 0x00, 0x00, 0x00,

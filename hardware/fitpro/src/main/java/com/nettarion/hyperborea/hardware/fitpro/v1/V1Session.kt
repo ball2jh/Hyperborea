@@ -85,6 +85,17 @@ internal class V1Session(
     /** Tracks whether the previous poll's response was flagged truncated, so we log only on the edge. */
     private var lastTruncatedSeen: Boolean = false
 
+    /**
+     * Whether the MCU is in constant-watts (ERG) mode. Updated from the IS_CONSTANT_WATTS_MODE
+     * readback each poll (authoritative — survives an app restart with the MCU still latched) and
+     * set optimistically when a command engages/exits the mode, so a mode switch that lands inside
+     * the ~100ms readback window still sees the right state. The MCU never leaves this mode on its
+     * own: it keeps chasing the last watt goal — overriding written targets and the console's own
+     * resistance keys — until the flag is cleared or the equipment is power-cycled, so every
+     * command that implies manual control must clear it (see [ergExitFields]).
+     */
+    @Volatile private var mcuErgMode: Boolean = false
+
     override suspend fun start() {
         if (_sessionState.value is SessionState.Streaming || _sessionState.value is SessionState.Connecting) return
 
@@ -266,27 +277,36 @@ internal class V1Session(
 
     internal fun commandToFields(command: DeviceCommand): Map<V1DataField, Float> = when (command) {
         is DeviceCommand.SetResistance -> {
-            mapOf(V1DataField.RESISTANCE to resistance.levelToRaw(command.level).toFloat())
+            ergExitFields() + mapOf(V1DataField.RESISTANCE to resistance.levelToRaw(command.level).toFloat())
         }
         is DeviceCommand.SetIncline -> {
             lastSentGrade = roundToStep(command.percent, deviceInfo.inclineStep)
-            mapOf(V1DataField.GRADE to lastSentGrade)
+            ergExitFields() + mapOf(V1DataField.GRADE to lastSentGrade)
         }
         is DeviceCommand.SetTargetSpeed -> {
             lastSentSpeed = command.kph
-            mapOf(V1DataField.KPH to command.kph)
+            ergExitFields() + mapOf(V1DataField.KPH to command.kph)
         }
         is DeviceCommand.AdjustIncline -> {
-            mapOf(V1DataField.GRADE to nextAdjustedGrade(command.increase))
+            ergExitFields() + mapOf(V1DataField.GRADE to nextAdjustedGrade(command.increase))
         }
         is DeviceCommand.AdjustSpeed -> {
-            mapOf(V1DataField.KPH to nextAdjustedSpeed(command.increase))
+            ergExitFields() + mapOf(V1DataField.KPH to nextAdjustedSpeed(command.increase))
         }
         is DeviceCommand.SetTargetPower -> {
-            mapOf(
-                V1DataField.WATT_GOAL to command.watts.toFloat(),
-                V1DataField.IS_CONSTANT_WATTS_MODE to 1f,
-            )
+            if (command.watts <= 0) {
+                // FTMS clients use a 0 W target to unload the trainer (Zwift sends one right
+                // before a spin-down). A zero watt goal is outside the MCU's constant-watts
+                // contract — field-observed on an S22i: it pins resistance at max whenever the
+                // rider pedals and stays latched until power-cycle. Treat it as an ERG exit.
+                ergExitFields()
+            } else {
+                mcuErgMode = true
+                mapOf(
+                    V1DataField.WATT_GOAL to command.watts.toFloat(),
+                    V1DataField.IS_CONSTANT_WATTS_MODE to 1f,
+                )
+            }
         }
         is DeviceCommand.PauseWorkout -> {
             mapOf(V1DataField.WORKOUT_MODE to WorkoutMode.PAUSE.raw)
@@ -306,7 +326,25 @@ internal class V1Session(
         is DeviceCommand.SetPauseTimeout -> mapOf(V1DataField.PAUSE_TIMEOUT to command.seconds.toFloat())
         is DeviceCommand.SetWarmUpMode -> mapOf(V1DataField.WORKOUT_MODE to WorkoutMode.WARM_UP.raw)
         is DeviceCommand.SetCoolDownMode -> mapOf(V1DataField.WORKOUT_MODE to WorkoutMode.COOL_DOWN.raw)
-        is DeviceCommand.SetErgMode -> mapOf(V1DataField.IS_CONSTANT_WATTS_MODE to if (command.enable) 1f else 0f)
+        is DeviceCommand.SetErgMode -> if (command.enable) {
+            mcuErgMode = true
+            mapOf(V1DataField.IS_CONSTANT_WATTS_MODE to 1f)
+        } else {
+            ergExitFields()
+        }
+    }
+
+    /**
+     * Fields that clear constant-watts mode, or nothing when it isn't engaged. Appended to every
+     * command that implies manual control (grade/resistance/speed targets) and produced by explicit
+     * ERG exits, so the exit write piggybacks on the next poll cycle only when actually needed —
+     * clients Reset on every connect, and unconditionally writing 0 each time is junk traffic.
+     */
+    private fun ergExitFields(): Map<V1DataField, Float> = if (mcuErgMode) {
+        mcuErgMode = false
+        mapOf(V1DataField.IS_CONSTANT_WATTS_MODE to 0f)
+    } else {
+        emptyMap()
     }
 
     private suspend fun handshake() {
@@ -791,6 +829,13 @@ internal class V1Session(
                     }
                     accumulator.updateWorkoutMode(mode)
                 }
+                V1DataField.IS_CONSTANT_WATTS_MODE -> {
+                    val engaged = value != 0f
+                    if (engaged != mcuErgMode) {
+                        logger.d(TAG, "Constant-watts (ERG) mode readback: ${if (engaged) "engaged" else "off"}")
+                    }
+                    mcuErgMode = engaged
+                }
                 V1DataField.VERTICAL_METER_GAIN -> accumulator.updateVerticalGain(value)
                 V1DataField.STROKES -> accumulator.updateStrokeCount(value.toInt())
                 V1DataField.STROKES_PER_MINUTE -> accumulator.updateStrokeRate(value.toInt())
@@ -822,7 +867,6 @@ internal class V1Session(
                 V1DataField.WARMUP_TIMEOUT,
                 V1DataField.COOLDOWN_TIMEOUT,
                 V1DataField.DISTANCE_GOAL,
-                V1DataField.IS_CONSTANT_WATTS_MODE,
                 V1DataField.MAX_GRADE,
                 V1DataField.MIN_GRADE,
                 V1DataField.MAX_KPH,

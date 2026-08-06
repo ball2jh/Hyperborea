@@ -57,14 +57,15 @@ object ControlPointParser {
                 val gradeRaw = sint16LEAt(payload, 3)
                 ControlPointResult.DeviceCmd(DeviceCommand.SetIncline(gradeRaw / 100f))
             }
-            0x12.toByte() -> { // Set Wheel Circumference (uint16 LE, 0.1mm resolution)
-                if (payload.size < 3) return ControlPointResult.Unsupported(opcode)
-                ControlPointResult.SessionControl(opcode)
-            }
-            0x13.toByte() -> { // Spin Down Control (uint8 control)
-                if (payload.size < 2) return ControlPointResult.Unsupported(opcode)
-                ControlPointResult.SessionControl(opcode)
-            }
+            // Set Wheel Circumference (0x12) and Spin Down Control (0x13) are refused, not acked:
+            // there is no wheel and nothing to spin down — resistance is a controlled magnetic
+            // brake and power is computed, so a spin-down calibration is meaningless here. The
+            // corresponding feature bits are not advertised. Acking success anyway (the old
+            // behavior) walked clients into a calibration flow that could never complete: they
+            // waited on a spin-down status we never send, while their preparatory writes (a 0 W
+            // "unload" target) reached the equipment mid-flow.
+            0x12.toByte() -> ControlPointResult.Unsupported(opcode)
+            0x13.toByte() -> ControlPointResult.Unsupported(opcode)
             else -> ControlPointResult.Unsupported(opcode)
         }
     }
@@ -110,6 +111,22 @@ object ControlPointParser {
             else -> 3          // HIGH
         }
         return DeviceCommand.SetFanSpeed(level)
+    }
+
+    /**
+     * Extracts the ERG-exit implied by FTMS session-control opcodes. Reset (0x01) and Stop/Pause
+     * (0x08) end the client's control session, but clients don't send an explicit "leave ERG" —
+     * they just stop sending power targets. Without this, equipment that latches its constant-watts
+     * mode keeps chasing the last watt goal (overriding both app targets and the console's own
+     * resistance keys) until it is power-cycled.
+     */
+    fun extractErgExitCommand(ftmsPayload: ByteArray): DeviceCommand.SetErgMode? {
+        val opcode = ftmsPayload.firstOrNull() ?: return null
+        return if (opcode == 0x01.toByte() || opcode == 0x08.toByte()) {
+            DeviceCommand.SetErgMode(enable = false)
+        } else {
+            null
+        }
     }
 
     /**
