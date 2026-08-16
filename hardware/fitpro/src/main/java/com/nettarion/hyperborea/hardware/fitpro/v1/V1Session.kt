@@ -108,7 +108,7 @@ internal class V1Session(
             handshake()
 
             // Console init (done while still in IDLE), then bring the workout up the way the
-            // console firmware expects (device-type-dependent — treadmills stop at WARM_UP and
+            // console firmware expects (device-type-dependent — treadmills remain in IDLE and
             // wait for the physical Start key, see transitionToActive).
             prepareConsole()
             accumulator.start()
@@ -576,15 +576,12 @@ internal class V1Session(
      * Brings the console up to the workout-active state the way the firmware expects. Two paths,
      * because treadmills and aerobic machines have fundamentally different start safety:
      *
-     * - **Treadmill / incline trainer**: arm the console in WARM_UP and stop. Writing
-     *   `WORKOUT_MODE=RUNNING` from the app does *not* move the belt — the MCU gates belt motion
-     *   on a rising edge of the read-only `START_REQUESTED` telemetry (set when the user presses
-     *   the physical Start key). Writing RUNNING anyway would just time out the confirmation poll
-     *   and surface as a (semantically wrong) "console didn't confirm the workout started"
-     *   degraded warning. Instead, the orchestrator parks in
+     * - **Treadmill / incline trainer**: remain in IDLE after connecting. Some V1 treadmill
+     *   controllers start the belt as soon as `WORKOUT_MODE=WARM_UP` is written, even though no
+     *   speed target was requested. The orchestrator can still wait in
      *   [com.nettarion.hyperborea.core.orchestration.OrchestratorState.AwaitingConsoleStart] and
-     *   the running [pollOnce] loop picks up `WORKOUT_MODE=RUNNING` once the MCU completes the
-     *   transition.
+     *   observe the MCU transition through the normal [pollOnce] loop when the user starts the
+     *   workout, without software causing belt motion during connection.
      * - **Bike / elliptical / rower**: drive the state machine ourselves —
      *   `IDLE → WARM_UP(10) → RUNNING(2)` with confirmation polling. `IDLE_MODE_LOCKOUT` must be
      *   disabled immediately before writing RUNNING (the firmware refuses the RUNNING transition
@@ -595,8 +592,7 @@ internal class V1Session(
      */
     private suspend fun transitionToActive() {
         if (detectedDeviceType == DeviceType.TREADMILL) {
-            val mode = writeAndConfirmWorkoutMode(WorkoutMode.WARM_UP) { it != WorkoutMode.IDLE }
-            logger.i(TAG, "Console state: IDLE → ${mode ?: WorkoutMode.UNKNOWN} (awaiting physical Start key)")
+            logger.i(TAG, "Treadmill connected in IDLE — awaiting physical Start key")
             _degradedReason.value = null
             return
         }
