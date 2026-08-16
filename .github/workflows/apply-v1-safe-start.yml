@@ -1,0 +1,70 @@
+name: Apply V1 treadmill safe-start patch
+
+on:
+  push:
+    branches:
+      - agent/v1-treadmill-safe-start
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: agent/v1-treadmill-safe-start
+      - name: Apply focused safe-start change
+        shell: python
+        run: |
+          from pathlib import Path
+
+          path = Path("hardware/fitpro/src/main/java/com/nettarion/hyperborea/hardware/fitpro/v1/V1Session.kt")
+          text = path.read_text()
+
+          old_doc = '''     * - **Treadmill / incline trainer**: arm the console in WARM_UP and stop. Writing
+     *   `WORKOUT_MODE=RUNNING` from the app does *not* move the belt — the MCU gates belt motion
+     *   on a rising edge of the read-only `START_REQUESTED` telemetry (set when the user presses
+     *   the physical Start key). Writing RUNNING anyway would just time out the confirmation poll
+     *   and surface as a (semantically wrong) "console didn't confirm the workout started"
+     *   degraded warning. Instead, the orchestrator parks in
+     *   [com.nettarion.hyperborea.core.orchestration.OrchestratorState.AwaitingConsoleStart] and
+     *   the running [pollOnce] loop picks up `WORKOUT_MODE=RUNNING` once the MCU completes the
+     *   transition.
+'''
+          new_doc = '''     * - **Treadmill / incline trainer**: remain in IDLE after connecting. Some V1 treadmill
+     *   controllers start the belt as soon as `WORKOUT_MODE=WARM_UP` is written, even though no
+     *   speed target was requested. The orchestrator can still wait in
+     *   [com.nettarion.hyperborea.core.orchestration.OrchestratorState.AwaitingConsoleStart] and
+     *   observe the MCU transition through the normal [pollOnce] loop when the user starts the
+     *   workout, without software causing belt motion during connection.
+'''
+          old_code = '''        if (detectedDeviceType == DeviceType.TREADMILL) {
+            val mode = writeAndConfirmWorkoutMode(WorkoutMode.WARM_UP) { it != WorkoutMode.IDLE }
+            logger.i(TAG, "Console state: IDLE → ${mode ?: WorkoutMode.UNKNOWN} (awaiting physical Start key)")
+            _degradedReason.value = null
+            return
+        }
+'''
+          new_code = '''        if (detectedDeviceType == DeviceType.TREADMILL) {
+            logger.i(TAG, "Treadmill connected in IDLE — awaiting physical Start key")
+            _degradedReason.value = null
+            return
+        }
+'''
+
+          if old_doc not in text:
+              raise SystemExit("Expected treadmill documentation block not found")
+          if old_code not in text:
+              raise SystemExit("Expected treadmill transition block not found")
+
+          path.write_text(text.replace(old_doc, new_doc).replace(old_code, new_code))
+      - name: Remove one-shot workflow and commit
+        run: |
+          rm .github/workflows/apply-v1-safe-start.yml
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add hardware/fitpro/src/main/java/com/nettarion/hyperborea/hardware/fitpro/v1/V1Session.kt .github/workflows/apply-v1-safe-start.yml
+          git commit -m "fix: keep V1 treadmills idle on connect"
+          git push origin HEAD:agent/v1-treadmill-safe-start
