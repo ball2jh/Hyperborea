@@ -1,6 +1,8 @@
 # Changelog
 
 ## [Unreleased]
+
+## [1.4.0] - 2026-08-19
 - **Pace on the speed tile.** The treadmill dashboard's speed tile now shows running pace above the per-hour value — min/km or min/mi following the units setting (e.g. 9.2 km/h reads "6:31 min/km"). Hidden while the belt is stopped or crawling.
 - **The blue incline goal now actually appears — and clears when reached.** On V2 consoles the incline-target field was never subscribed, so changing elevation showed no "→ goal" on the incline tile (speed worked because its field doubles as the belt-speed source). The target echo is now subscribed, and the app also surfaces the commanded target immediately — the goal appears the moment you press +/− (counting along during a hold) and disappears once the deck arrives.
 - **Treadmill speed steps in 0.1 km/h.** The default speed step for treadmills (catalog, type defaults, and uncatalogued machines) is now 0.1 instead of 0.5 — matching the controller's own speed grid and giving the +/− keys runner-grade precision. A per-device Speed Step saved in Settings → Device still wins. (Note: some controllers settle a commanded speed on their own internal grid — e.g. 1.0 km/h landing at 1.1; that's the machine's rounding and is shown as-is.)
