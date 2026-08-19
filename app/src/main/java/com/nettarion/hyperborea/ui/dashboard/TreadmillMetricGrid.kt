@@ -40,15 +40,13 @@ fun TreadmillMetricGrid(
     Column(modifier = modifier.fillMaxSize()) {
         // Hero row: incline presets | INCLINE | 400 m track | SPEED | speed presets
         Row(modifier = Modifier.weight(2f).fillMaxWidth()) {
-            val inclineValues = TreadmillPresets.inclinePresets(
-                minIncline = deviceInfo?.minIncline ?: 0f,
-                maxIncline = deviceInfo?.maxIncline ?: 12f,
-            )
             PresetColumn(
                 header = "Incline",
                 unit = "%",
-                labels = inclineValues.map { TreadmillPresets.formatValue(it) },
-                values = inclineValues,
+                entries = TreadmillPresets.inclinePresets(
+                    minIncline = deviceInfo?.minIncline ?: 0f,
+                    maxIncline = deviceInfo?.maxIncline ?: 12f,
+                ).map { PresetEntry(TreadmillPresets.formatValue(it), it) },
                 activeValue = exerciseData?.targetIncline ?: exerciseData?.incline,
                 activeTolerance = (deviceInfo?.inclineStep ?: 0.5f) / 2f,
                 enabled = controlsEnabled,
@@ -98,15 +96,13 @@ fun TreadmillMetricGrid(
                 supported = isSupported(Metric.SPEED),
             )
             VerticalDivider(thickness = 1.dp, color = colors.divider)
-            val speedPresets = TreadmillPresets.speedPresets(
-                maxSpeedKph = deviceInfo?.maxSpeed ?: 20f,
-                imperial = useImperial,
-            )
             PresetColumn(
                 header = "Speed",
                 unit = if (useImperial) "mph" else "km/h",
-                labels = speedPresets.map { it.display },
-                values = speedPresets.map { it.kph },
+                entries = TreadmillPresets.speedPresets(
+                    maxSpeedKph = deviceInfo?.maxSpeed ?: 20f,
+                    imperial = useImperial,
+                ).map { PresetEntry(it.display, it.kph) },
                 activeValue = exerciseData?.targetSpeed ?: exerciseData?.speed,
                 activeTolerance = (deviceInfo?.speedStep ?: 0.5f) / 2f,
                 enabled = controlsEnabled,

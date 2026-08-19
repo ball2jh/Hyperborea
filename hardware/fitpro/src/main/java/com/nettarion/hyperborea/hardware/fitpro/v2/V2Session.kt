@@ -710,8 +710,8 @@ internal class V2Session(
                 // one would pin the dashboard's SIM badge and incline goal on every V2 device
                 // from connect (bikes included). Only a target reported during an active workout
                 // counts.
-                val grade = _workoutMode.value?.let { V2WorkoutMode.fromRaw(it) }
-                if (grade == V2WorkoutMode.RUNNING || grade == V2WorkoutMode.PAUSED) {
+                val mode = _workoutMode.value?.let { V2WorkoutMode.fromRaw(it) }
+                if (mode == V2WorkoutMode.RUNNING || mode == V2WorkoutMode.PAUSED) {
                     accumulator.updateTargetIncline(value)
                 }
             }

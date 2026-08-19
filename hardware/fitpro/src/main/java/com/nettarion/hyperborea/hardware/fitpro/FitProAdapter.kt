@@ -414,22 +414,23 @@ class FitProAdapter @Inject constructor(
         }
         // A console that reports 0 for a bound hasn't measured it. These bounds now feed the
         // session's command clamps (not just the UI), so a trusted 0 would pin every speed or
-        // incline target to zero — treat non-positive maxima and an empty incline range as
-        // unreported and keep the catalog/type-default bound instead.
-        val reportedMaxSpeed = caps.maxSpeed?.takeIf { it > 0f }
-        val reportedMaxIncline = caps.maxIncline
-        val reportedMinIncline = caps.minIncline
-        val inclineRangeValid = reportedMaxIncline != null && reportedMinIncline != null &&
-            reportedMaxIncline > reportedMinIncline
+        // incline target to zero — treat a non-positive max speed, and an incline pair that
+        // doesn't describe a real range, as unreported and keep the catalog/type-default instead.
+        // The two incline bounds fall back independently, so a console that reports only one of
+        // them still contributes what it knows.
+        val maxSpeed = caps.maxSpeed?.takeIf { it > 0f } ?: base.maxSpeed
+        val maxIncline = caps.maxIncline ?: base.maxIncline
+        val minIncline = caps.minIncline ?: base.minIncline
+        val inclineRangeValid = maxIncline > minIncline
         return base.copy(
             name = name,
             type = type,
             supportedMetrics = typeDefaults?.supportedMetrics ?: base.supportedMetrics,
             minResistance = typeDefaults?.minResistance ?: base.minResistance,
             // MCU-reported bounds override; otherwise keep current (catalog/type-default).
-            maxIncline = if (inclineRangeValid) reportedMaxIncline!! else base.maxIncline,
-            minIncline = if (inclineRangeValid) reportedMinIncline!! else base.minIncline,
-            maxSpeed = reportedMaxSpeed ?: base.maxSpeed,
+            maxIncline = if (inclineRangeValid) maxIncline else base.maxIncline,
+            minIncline = if (inclineRangeValid) minIncline else base.minIncline,
+            maxSpeed = maxSpeed,
             maxResistance = caps.maxResistance ?: base.maxResistance,
             maxPower = caps.maxPower ?: base.maxPower,
         )

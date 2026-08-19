@@ -12,6 +12,7 @@ import com.nettarion.hyperborea.core.system.SystemController
 import com.nettarion.hyperborea.core.system.UsbDeviceInfo
 import com.nettarion.hyperborea.core.test.buildSystemSnapshot
 import com.nettarion.hyperborea.core.test.TestAppLogger
+import com.nettarion.hyperborea.hardware.fitpro.session.DeviceDatabase
 import com.nettarion.hyperborea.hardware.fitpro.session.FakeHidTransport
 import com.nettarion.hyperborea.hardware.fitpro.transport.HidTransportFactory
 import com.nettarion.hyperborea.hardware.fitpro.transport.HidTransportResult
@@ -604,6 +605,47 @@ class FitProAdapterTest {
         assertThat(info.maxIncline).isEqualTo(12f)
         // Uncatalogued device → type-derived name, not a hardcoded model name.
         assertThat(info.name).isEqualTo("FitPro Treadmill")
+    }
+
+    @Test
+    fun `a console reporting only a max incline still contributes it`() = runTest {
+        val adapter = createAdapter(this, productId = 3)
+        // MAX_GRADE_PERCENT declared and reported; MIN_GRADE_PERCENT never arrives. The reported
+        // max must still land — discarding both because one is missing loses real device data.
+        buildV2SupportedFeatures(
+            V2FeatureId.DEVICE_TYPE, V2FeatureId.MAX_GRADE_PERCENT, V2FeatureId.WORKOUT_STATE,
+        ).forEach { transport.emitIncoming(it) }
+        transport.emitIncoming(buildV2Event(V2FeatureId.DEVICE_TYPE, 4f)) // treadmill
+        transport.emitIncoming(buildV2Event(V2FeatureId.MAX_GRADE_PERCENT, 12f))
+
+        adapter.connect()
+        advanceUntilIdle()
+
+        val info = adapter.deviceInfo.value!!
+        assertThat(info.maxIncline).isEqualTo(12f)
+        assertThat(info.minIncline).isEqualTo(DeviceDatabase.defaultsForType(DeviceType.TREADMILL).minIncline)
+    }
+
+    @Test
+    fun `a console reporting a degenerate incline range keeps the type defaults`() = runTest {
+        val adapter = createAdapter(this, productId = 3)
+        // A bike reports 0..0 for grade — "not measured", not a real range. Trusting it would pin
+        // every incline target to zero, because these bounds now feed the session's clamps.
+        buildV2SupportedFeatures(
+            V2FeatureId.DEVICE_TYPE, V2FeatureId.MIN_GRADE_PERCENT,
+            V2FeatureId.MAX_GRADE_PERCENT, V2FeatureId.WORKOUT_STATE,
+        ).forEach { transport.emitIncoming(it) }
+        transport.emitIncoming(buildV2Event(V2FeatureId.DEVICE_TYPE, 7f)) // bike
+        transport.emitIncoming(buildV2Event(V2FeatureId.MIN_GRADE_PERCENT, 0f))
+        transport.emitIncoming(buildV2Event(V2FeatureId.MAX_GRADE_PERCENT, 0f))
+
+        adapter.connect()
+        advanceUntilIdle()
+
+        val defaults = DeviceDatabase.defaultsForType(DeviceType.BIKE)
+        val info = adapter.deviceInfo.value!!
+        assertThat(info.minIncline).isEqualTo(defaults.minIncline)
+        assertThat(info.maxIncline).isEqualTo(defaults.maxIncline)
     }
 
     @Test

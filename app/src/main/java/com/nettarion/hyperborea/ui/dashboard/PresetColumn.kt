@@ -23,6 +23,12 @@ import androidx.compose.ui.unit.dp
 import com.nettarion.hyperborea.ui.theme.LocalHyperboreaColors
 
 /**
+ * One quick-set button: what the user reads and what gets commanded. Kept as a pair so the label
+ * can be in the display unit (mph) while the target stays in the wire unit (km/h).
+ */
+internal data class PresetEntry(val label: String, val value: Float)
+
+/**
  * Technogym-style vertical column of quick-set buttons flanking the treadmill dashboard: tap a
  * value to command it as a single absolute target (the smooth path — the deck sweeps to it in one
  * motion). Enabled only while a workout is Running, same rule as the −/+ clusters; the entry
@@ -32,8 +38,7 @@ import com.nettarion.hyperborea.ui.theme.LocalHyperboreaColors
 internal fun PresetColumn(
     header: String,
     unit: String,
-    labels: List<String>,
-    values: List<Float>,
+    entries: List<PresetEntry>,
     activeValue: Float?,
     activeTolerance: Float,
     enabled: Boolean,
@@ -59,8 +64,7 @@ internal fun PresetColumn(
             color = colors.accentWarm,
         )
         Spacer(Modifier.height(6.dp))
-        labels.forEachIndexed { index, label ->
-            val value = values[index]
+        entries.forEach { (label, value) ->
             val active = enabled && activeValue != null &&
                 kotlin.math.abs(activeValue - value) <= activeTolerance
             Box(

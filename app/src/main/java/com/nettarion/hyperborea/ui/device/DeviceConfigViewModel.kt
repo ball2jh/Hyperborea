@@ -151,9 +151,13 @@ class DeviceConfigViewModel @Inject constructor(
         maxPower = maxPower.toIntOrNull() ?: 0,
         minPower = minPower.toIntOrNull() ?: 0,
         powerStep = powerStep.toIntOrNull() ?: 1,
-        resistanceStep = resistanceStep.toFloatOrNull() ?: 1f,
-        inclineStep = inclineStep.toFloatOrNull() ?: 0.5f,
-        speedStep = speedStep.toFloatOrNull() ?: 0.5f,
+        // Step sizes divide and drive the ± accumulators in the live hardware session, so a
+        // blank or zero field has to become the default rather than 0 — a zero step silently
+        // kills incline/speed control (including the console's own keys on host-routed
+        // treadmills). The session normalises again on the way in for configs saved before this.
+        resistanceStep = resistanceStep.toFloatOrNull()?.takeIf { it > 0f } ?: 1f,
+        inclineStep = inclineStep.toFloatOrNull()?.takeIf { it > 0f } ?: 0.5f,
+        speedStep = speedStep.toFloatOrNull()?.takeIf { it > 0f } ?: 0.5f,
         maxSpeed = maxSpeed.toFloatOrNull() ?: 0f,
     )
 

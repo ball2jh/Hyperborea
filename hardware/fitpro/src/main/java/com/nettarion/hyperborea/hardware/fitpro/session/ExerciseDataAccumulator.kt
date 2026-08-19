@@ -15,7 +15,10 @@ class ExerciseDataAccumulator(
     private var distance: Float? = null
     private var calories: Int? = null
     private var targetSpeed: Float? = null
-    private var targetIncline: Float? = null
+    // The only field written off the receive/poll loop: the session publishes a commanded incline
+    // target straight from the command coroutine (see BaseFitProSession.handleInclineCommand), so
+    // the loop's next snapshot() must see it.
+    @Volatile private var targetIncline: Float? = null
     private var targetPower: Int? = null
     private var targetResistance: Int? = null
     private var workoutMode: Int? = null

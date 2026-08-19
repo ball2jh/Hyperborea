@@ -43,20 +43,23 @@ internal abstract class BaseFitProSession(
      * of an immutable value: safe against the poll-loop/command-path readers.
      */
     @Volatile
-    protected var deviceInfo: DeviceInfo = initialDeviceInfo
+    protected var deviceInfo: DeviceInfo = initialDeviceInfo.sanitizedForControl()
         private set
 
     final override fun updateDeviceInfo(info: DeviceInfo) {
         val old = deviceInfo
+        val sanitized = info.sanitizedForControl()
         // Identity updates re-resolve per lifetime-stat event (odometer ticks) — skip the swap,
         // the subclass hook, and the log line when nothing actually changed.
-        if (info == old) return
-        deviceInfo = info
-        onDeviceInfoUpdated(old, info)
+        if (sanitized == old) return
+        deviceInfo = sanitized
+        onDeviceInfoUpdated(old, sanitized)
         logger.i(
             tag,
-            "Device info updated: inclineStep=${info.inclineStep} incline=${info.minIncline}..${info.maxIncline} " +
-                "speedStep=${info.speedStep} maxSpeed=${info.maxSpeed} maxResistance=${info.maxResistance}",
+            "Device info updated: inclineStep=${sanitized.inclineStep} " +
+                "incline=${sanitized.minIncline}..${sanitized.maxIncline} " +
+                "speedStep=${sanitized.speedStep} maxSpeed=${sanitized.maxSpeed} " +
+                "maxResistance=${sanitized.maxResistance}",
         )
     }
 
@@ -137,15 +140,17 @@ internal abstract class BaseFitProSession(
 
     /** Steps the accumulated incline target by one [DeviceInfo.inclineStep], clamped to the device's range. */
     protected fun nextAdjustedGrade(increase: Boolean): Float {
-        lastSentGrade += if (increase) deviceInfo.inclineStep else -deviceInfo.inclineStep
-        lastSentGrade = lastSentGrade.coerceIn(deviceInfo.minIncline, deviceInfo.maxIncline)
+        lastSentGrade = clampedInclineTarget(
+            lastSentGrade + if (increase) deviceInfo.inclineStep else -deviceInfo.inclineStep,
+        )
         return lastSentGrade
     }
 
     /** Steps the accumulated speed target by one [DeviceInfo.speedStep], clamped to 0..maxSpeed. */
     protected fun nextAdjustedSpeed(increase: Boolean): Float {
-        lastSentSpeed += if (increase) deviceInfo.speedStep else -deviceInfo.speedStep
-        lastSentSpeed = lastSentSpeed.coerceIn(0f, deviceInfo.maxSpeed)
+        lastSentSpeed = clampedSpeedTarget(
+            lastSentSpeed + if (increase) deviceInfo.speedStep else -deviceInfo.speedStep,
+        )
         return lastSentSpeed
     }
 
@@ -159,6 +164,20 @@ internal abstract class BaseFitProSession(
         // A non-positive max means "unknown / not speed-bounded" (rower type-defaults report 0)
         // — clamping to it would pin every target to zero; prod passed these through.
         return if (maxSpeed > 0f) kph.coerceIn(0f, maxSpeed) else kph.coerceAtLeast(0f)
+    }
+
+    /**
+     * The incline counterpart of [clampedSpeedTarget], shared by the absolute and relative incline
+     * paths so they can't disagree. An empty range means "unknown" (bike/rower type-defaults are
+     * 0..0) — clamping to it would pin every incline target to zero.
+     */
+    protected fun clampedInclineTarget(percent: Float): Float {
+        val info = deviceInfo
+        return if (info.maxIncline > info.minIncline) {
+            percent.coerceIn(info.minIncline, info.maxIncline)
+        } else {
+            percent
+        }
     }
 
     /** Protocol-specific grade-target write. Must not throw — wrap transport errors and log. */
@@ -181,14 +200,7 @@ internal abstract class BaseFitProSession(
      */
     protected suspend fun handleInclineCommand(command: DeviceCommand): Boolean = when (command) {
         is DeviceCommand.SetIncline -> {
-            val info = deviceInfo
-            val rounded = roundToStep(command.percent, info.inclineStep)
-            // An empty incline range means "unknown" (rower type-defaults are 0..0) — don't clamp.
-            lastSentGrade = if (info.maxIncline > info.minIncline) {
-                rounded.coerceIn(info.minIncline, info.maxIncline)
-            } else {
-                rounded
-            }
+            lastSentGrade = clampedInclineTarget(roundToStep(command.percent, deviceInfo.inclineStep))
             publishCommandedInclineTarget(lastSentGrade)
             gradeCoalescer.submit(lastSentGrade)
             true
@@ -233,3 +245,37 @@ internal abstract class BaseFitProSession(
         internal const val GRADE_WRITE_INTERVAL_MS = 750L
     }
 }
+
+/**
+ * Normalises a [DeviceInfo] into values the control paths can safely divide and clamp by.
+ *
+ * The device-config screen (Settings → Device) is free-text with no validation, so a saved config
+ * can carry a zero step or a reversed incline range — and since the session now takes its step
+ * sizes and bounds from that resolved config live, those values reach [BaseFitProSession.roundToStep]
+ * and the clamps directly. A zero step silently kills incline/speed control (a divide by zero
+ * rounds every target to 0, and the Adjust± accumulators stop moving — including the *physical*
+ * console keys on host-routed V2 treadmills); a reversed range makes `coerceIn` throw on every
+ * press. Normalise once, on the way in, so no caller has to defend itself.
+ */
+private fun DeviceInfo.sanitizedForControl(): DeviceInfo {
+    val incline = if (inclineStep > 0f) inclineStep else DEFAULT_INCLINE_STEP
+    val speed = if (speedStep > 0f) speedStep else DEFAULT_SPEED_STEP
+    // Bounds typed in the wrong order describe the range the user meant; order them rather than
+    // discarding both. An equal pair stays equal — that's the "unknown range" the clamps skip.
+    val lowIncline = minOf(minIncline, maxIncline)
+    val highIncline = maxOf(minIncline, maxIncline)
+    if (incline == inclineStep && speed == speedStep &&
+        lowIncline == minIncline && highIncline == maxIncline
+    ) {
+        return this
+    }
+    return copy(
+        inclineStep = incline,
+        speedStep = speed,
+        minIncline = lowIncline,
+        maxIncline = highIncline,
+    )
+}
+
+private const val DEFAULT_INCLINE_STEP = 0.5f
+private const val DEFAULT_SPEED_STEP = 0.5f

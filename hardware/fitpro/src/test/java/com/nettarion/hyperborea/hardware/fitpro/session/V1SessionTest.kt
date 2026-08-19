@@ -1120,6 +1120,60 @@ class V1SessionTest {
         assertThat(fields).containsExactly(V1DataField.KPH, 60f)
     }
 
+    // --- Degenerate device configs (Settings → Device is free-text and unvalidated) ---
+
+    @Test
+    fun `a saved incline step of zero falls back to the default step`() {
+        val session = createUnstartedSession()
+        session.updateDeviceInfo(buildDeviceInfo(inclineStep = 0f))
+
+        // Without the fallback, roundToStep divides by zero and rounds every target to 0.
+        assertThat(session.commandToFields(DeviceCommand.SetIncline(7.4f)))
+            .containsExactly(V1DataField.GRADE, 7.5f)
+        assertThat(session.commandToFields(DeviceCommand.AdjustIncline(increase = true)))
+            .containsExactly(V1DataField.GRADE, 8.0f)
+    }
+
+    @Test
+    fun `a saved speed step of zero falls back to the default step`() {
+        val session = createUnstartedSession()
+        session.updateDeviceInfo(buildDeviceInfo(speedStep = 0f))
+
+        assertThat(session.commandToFields(DeviceCommand.AdjustSpeed(increase = true)))
+            .containsExactly(V1DataField.KPH, 0.5f)
+    }
+
+    @Test
+    fun `incline bounds saved in the wrong order are ordered, not fatal`() {
+        val session = createUnstartedSession()
+        // Reversed range: coerceIn(0.2, -0.1) throws IllegalArgumentException on every press.
+        // Ordering them gives the range the user meant, so the clamp still bites at 0.2.
+        session.updateDeviceInfo(buildDeviceInfo(minIncline = 0.2f, maxIncline = -0.1f))
+
+        assertThat(session.commandToFields(DeviceCommand.AdjustIncline(increase = true)))
+            .containsExactly(V1DataField.GRADE, 0.2f)
+    }
+
+    @Test
+    fun `AdjustSpeed is not pinned to zero by an unknown maxSpeed`() {
+        val session = createUnstartedSession()
+        // A rower type-default (or a blank Max Speed field) reports 0 — "unknown", not "0 kph".
+        session.updateDeviceInfo(buildDeviceInfo(maxSpeed = 0f))
+
+        assertThat(session.commandToFields(DeviceCommand.AdjustSpeed(increase = true)))
+            .containsExactly(V1DataField.KPH, 0.5f)
+    }
+
+    @Test
+    fun `AdjustIncline is not pinned to zero by an unknown incline range`() {
+        val session = createUnstartedSession()
+        session.updateDeviceInfo(buildDeviceInfo(minIncline = 0f, maxIncline = 0f))
+
+        // Matches the SetIncline rule: an empty range means unreported, so don't clamp to it.
+        assertThat(session.commandToFields(DeviceCommand.AdjustIncline(increase = true)))
+            .containsExactly(V1DataField.GRADE, 0.5f)
+    }
+
     @Test
     fun `commandToFields AdjustIncline two increases accumulate`() {
         val session = createUnstartedSession()
