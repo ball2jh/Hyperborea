@@ -263,9 +263,13 @@ class V1SessionTest {
      * the MCU itself drives the WARM_UP → RUNNING transition once the physical Start key is pressed
      * (see [V1Session.transitionToActive]). So only two acks: REQUIRE_START_REQUESTED, WARM_UP.
      */
+    /**
+     * A treadmill's bring-up is only prepareConsole — transitionToActive leaves the console in
+     * IDLE (writing WARM_UP starts the belt on some V1 controllers), so there is no workout-mode
+     * round trip to answer.
+     */
     private suspend fun respondToTreadmillConsoleStartup() {
         transport.emitIncoming(buildReadWriteAck())         // prepareConsole: REQUIRE_START_REQUESTED write
-        transport.emitIncoming(buildWorkoutModeAck(10))     // transitionToActive: WARM_UP confirmed
     }
 
     /** A minimal ReadWriteData response — status DONE, empty payload (the caller ignores the value). */
@@ -479,11 +483,11 @@ class V1SessionTest {
     }
 
     @Test
-    fun `treadmill start writes REQUIRE_START_REQUESTED and WARM_UP but never IDLE_MODE_LOCKOUT or RUNNING`() = runTest {
-        // The MCU on a treadmill gates belt motion on the physical Start key; writing RUNNING from
-        // the app alone would only time out the confirmation poll and falsely surface as "degraded".
-        // The session must arm at WARM_UP and let the orchestrator wait for the physical key
-        // press to drive the WARM_UP → RUNNING transition via the WORKOUT_MODE poll.
+    fun `treadmill start writes REQUIRE_START_REQUESTED but never a workout mode or IDLE_MODE_LOCKOUT`() = runTest {
+        // Connecting must not move the belt. Some V1 treadmill controllers start it the moment
+        // WORKOUT_MODE=WARM_UP is written, with no speed ever requested — so the session leaves
+        // the console in IDLE and lets the orchestrator wait for the physical Start key, picking
+        // the transition up through the normal WORKOUT_MODE poll.
         val session = createSession(this)
 
         backgroundScope.launch {
@@ -500,10 +504,11 @@ class V1SessionTest {
         advanceUntilIdle()
 
         assertThat(session.sessionState.value).isEqualTo(SessionState.Streaming)
-        // Critical: we wrote WARM_UP but never RUNNING (the MCU does that on the physical Start key).
+        // Critical: no workout-mode write at all — not WARM_UP (which can start the belt) and not
+        // RUNNING (the MCU does that itself on the physical Start key).
         val workoutModeWrites = transport.writtenPackets.mapNotNull { it.workoutModeWriteValue() }
-        assertThat(workoutModeWrites).containsExactly(10)
-        // And critical: degraded must stay null — "armed and awaiting" is the expected steady state,
+        assertThat(workoutModeWrites).isEmpty()
+        // And critical: degraded must stay null — "idle and awaiting" is the expected steady state,
         // not a failure mode.
         assertThat(session.degradedReason.value).isNull()
         // And IDLE_MODE_LOCKOUT must never be written on a treadmill — locking idle-mode on a
@@ -869,6 +874,12 @@ class V1SessionTest {
 
     // --- Helper for streaming state ---
 
+    /** One incline press through the live path; returns the target it accumulated. */
+    private suspend fun V1Session.pressIncline(increase: Boolean): Float? {
+        writeFeature(DeviceCommand.AdjustIncline(increase = increase))
+        return exerciseData.value?.targetIncline
+    }
+
     private suspend fun TestScope.startStreamingSession(): V1Session {
         val session = createSession(this)
         backgroundScope.launch { respondToHandshake() }
@@ -1096,42 +1107,65 @@ class V1SessionTest {
     }
 
     @Test
-    fun `commandToFields AdjustIncline increase from zero`() {
-        val session = createUnstartedSession()
-        val fields = session.commandToFields(DeviceCommand.AdjustIncline(increase = true))
-        assertThat(fields).containsExactly(V1DataField.GRADE, 0.5f)
-    }
-
-    @Test
-    fun `updateDeviceInfo changes the incline step used by Adjust`() {
-        val session = createUnstartedSession() // catalog step 0.5
-        session.commandToFields(DeviceCommand.AdjustIncline(increase = true)) // → 0.5
-
-        session.updateDeviceInfo(buildDeviceInfo(inclineStep = 1.0f, maxIncline = 15f, minIncline = -3f))
-        val fields = session.commandToFields(DeviceCommand.AdjustIncline(increase = true))
-
-        assertThat(fields).containsExactly(V1DataField.GRADE, 1.5f) // 0.5 + the new 1.0 step
-    }
-
-    @Test
     fun `commandToFields SetTargetSpeed clamps to maxSpeed`() {
         val session = createUnstartedSession() // buildDeviceInfo maxSpeed = 60
         val fields = session.commandToFields(DeviceCommand.SetTargetSpeed(200f))
         assertThat(fields).containsExactly(V1DataField.KPH, 60f)
     }
 
+    // --- Incline targets: the live path (writeFeature → handleInclineCommand → coalescer) ---
+    // AdjustIncline never reaches commandToFields; it accumulates into an absolute target, which
+    // the session publishes on exerciseData as soon as the press lands. That published target is
+    // the accumulator's own value, so asserting on it tests the real stepping and clamping.
+
+    @Test
+    fun `AdjustIncline steps up from zero`() = runTest {
+        val session = startStreamingSession()
+        assertThat(session.pressIncline(increase = true)).isEqualTo(0.5f)
+    }
+
+    @Test
+    fun `AdjustIncline accumulates across presses`() = runTest {
+        val session = startStreamingSession()
+        session.pressIncline(increase = true)
+        assertThat(session.pressIncline(increase = true)).isEqualTo(1.0f)
+    }
+
+    @Test
+    fun `AdjustIncline is clamped at maxIncline`() = runTest {
+        val session = startStreamingSession() // buildDeviceInfo: -6..40
+        session.writeFeature(DeviceCommand.SetIncline(40.0f))
+        assertThat(session.pressIncline(increase = true)).isEqualTo(40.0f)
+    }
+
+    @Test
+    fun `AdjustIncline is clamped at minIncline`() = runTest {
+        val session = startStreamingSession()
+        session.writeFeature(DeviceCommand.SetIncline(-6.0f))
+        assertThat(session.pressIncline(increase = false)).isEqualTo(-6.0f)
+    }
+
+    @Test
+    fun `updateDeviceInfo changes the incline step used by Adjust`() = runTest {
+        val session = startStreamingSession() // catalog step 0.5
+        session.pressIncline(increase = true) // → 0.5
+
+        session.updateDeviceInfo(buildDeviceInfo(inclineStep = 1.0f, maxIncline = 15f, minIncline = -3f))
+
+        assertThat(session.pressIncline(increase = true)).isEqualTo(1.5f) // 0.5 + the new 1.0 step
+    }
+
     // --- Degenerate device configs (Settings → Device is free-text and unvalidated) ---
 
     @Test
-    fun `a saved incline step of zero falls back to the default step`() {
-        val session = createUnstartedSession()
+    fun `a saved incline step of zero falls back to the default step`() = runTest {
+        val session = startStreamingSession()
         session.updateDeviceInfo(buildDeviceInfo(inclineStep = 0f))
 
         // Without the fallback, roundToStep divides by zero and rounds every target to 0.
-        assertThat(session.commandToFields(DeviceCommand.SetIncline(7.4f)))
-            .containsExactly(V1DataField.GRADE, 7.5f)
-        assertThat(session.commandToFields(DeviceCommand.AdjustIncline(increase = true)))
-            .containsExactly(V1DataField.GRADE, 8.0f)
+        session.writeFeature(DeviceCommand.SetIncline(7.4f))
+        assertThat(session.exerciseData.value?.targetIncline).isEqualTo(7.5f)
+        assertThat(session.pressIncline(increase = true)).isEqualTo(8.0f)
     }
 
     @Test
@@ -1144,14 +1178,13 @@ class V1SessionTest {
     }
 
     @Test
-    fun `incline bounds saved in the wrong order are ordered, not fatal`() {
-        val session = createUnstartedSession()
+    fun `incline bounds saved in the wrong order are ordered, not fatal`() = runTest {
+        val session = startStreamingSession()
         // Reversed range: coerceIn(0.2, -0.1) throws IllegalArgumentException on every press.
         // Ordering them gives the range the user meant, so the clamp still bites at 0.2.
         session.updateDeviceInfo(buildDeviceInfo(minIncline = 0.2f, maxIncline = -0.1f))
 
-        assertThat(session.commandToFields(DeviceCommand.AdjustIncline(increase = true)))
-            .containsExactly(V1DataField.GRADE, 0.2f)
+        assertThat(session.pressIncline(increase = true)).isEqualTo(0.2f)
     }
 
     @Test
@@ -1165,37 +1198,12 @@ class V1SessionTest {
     }
 
     @Test
-    fun `AdjustIncline is not pinned to zero by an unknown incline range`() {
-        val session = createUnstartedSession()
+    fun `AdjustIncline is not pinned to zero by an unknown incline range`() = runTest {
+        val session = startStreamingSession()
         session.updateDeviceInfo(buildDeviceInfo(minIncline = 0f, maxIncline = 0f))
 
         // Matches the SetIncline rule: an empty range means unreported, so don't clamp to it.
-        assertThat(session.commandToFields(DeviceCommand.AdjustIncline(increase = true)))
-            .containsExactly(V1DataField.GRADE, 0.5f)
-    }
-
-    @Test
-    fun `commandToFields AdjustIncline two increases accumulate`() {
-        val session = createUnstartedSession()
-        session.commandToFields(DeviceCommand.AdjustIncline(increase = true))
-        val fields = session.commandToFields(DeviceCommand.AdjustIncline(increase = true))
-        assertThat(fields).containsExactly(V1DataField.GRADE, 1.0f)
-    }
-
-    @Test
-    fun `commandToFields AdjustIncline clamped at maxIncline`() {
-        val session = createUnstartedSession()
-        session.commandToFields(DeviceCommand.SetIncline(40.0f))
-        val fields = session.commandToFields(DeviceCommand.AdjustIncline(increase = true))
-        assertThat(fields).containsExactly(V1DataField.GRADE, 40.0f)
-    }
-
-    @Test
-    fun `commandToFields AdjustIncline clamped at minIncline`() {
-        val session = createUnstartedSession()
-        session.commandToFields(DeviceCommand.SetIncline(-6.0f))
-        val fields = session.commandToFields(DeviceCommand.AdjustIncline(increase = false))
-        assertThat(fields).containsExactly(V1DataField.GRADE, -6.0f)
+        assertThat(session.pressIncline(increase = true)).isEqualTo(0.5f)
     }
 
     @Test

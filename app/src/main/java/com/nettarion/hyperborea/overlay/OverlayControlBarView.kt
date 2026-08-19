@@ -15,6 +15,7 @@ import android.widget.LinearLayout
 import android.widget.TextView
 import com.nettarion.hyperborea.core.model.ExerciseData
 import com.nettarion.hyperborea.core.orchestration.OrchestratorState
+import com.nettarion.hyperborea.ui.util.HoldRepeat
 
 /**
  * "Control bar" overlay style: a floating treadmill remote — incline −/+, speed −/+, and
@@ -238,10 +239,14 @@ class OverlayControlBarView(
             gravity = Gravity.CENTER
             setPadding(dpToPx(12), dpToPx(8), dpToPx(12), dpToPx(8))
 
+            // Ramping repeat, same curve as the dashboard's ± clusters (see [HoldRepeat]): the
+            // tick counter resets on each fresh press in ACTION_DOWN.
+            var holdTick = 0
             val repeater = object : Runnable {
                 override fun run() {
                     onTick()
-                    holdHandler.postDelayed(this, HOLD_REPEAT_INTERVAL_MS)
+                    holdHandler.postDelayed(this, HoldRepeat.intervalMs(holdTick))
+                    holdTick++
                 }
             }
             setOnTouchListener { _, event ->
@@ -253,7 +258,8 @@ class OverlayControlBarView(
                 when (event.action) {
                     MotionEvent.ACTION_DOWN -> {
                         onTick()
-                        holdHandler.postDelayed(repeater, HOLD_REPEAT_INITIAL_MS)
+                        holdTick = 0
+                        holdHandler.postDelayed(repeater, HoldRepeat.INITIAL_MS)
                         true
                     }
                     MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
@@ -314,7 +320,5 @@ class OverlayControlBarView(
 
     companion object {
         private const val KM_TO_MI = 0.621371f
-        private const val HOLD_REPEAT_INITIAL_MS = 500L
-        private const val HOLD_REPEAT_INTERVAL_MS = 350L
     }
 }

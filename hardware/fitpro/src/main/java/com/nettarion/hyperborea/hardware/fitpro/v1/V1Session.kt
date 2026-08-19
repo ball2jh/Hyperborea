@@ -294,19 +294,20 @@ internal class V1Session(
         is DeviceCommand.SetResistance -> {
             ergExitFields() + mapOf(V1DataField.RESISTANCE to resistance.levelToRaw(command.level).toFloat())
         }
-        // Incline commands are intercepted in writeFeature (grade coalescer) and never reach this
-        // mapping from the live path; the branches stay for exhaustiveness and direct unit tests.
+        // The absolute grade write, composed here and performed by the coalescer via
+        // [writeGradeTarget]. Rounding is idempotent: handleInclineCommand has already stepped and
+        // clamped anything arriving from the live path. An incline target implies manual/SIM
+        // control, so it carries the ERG exit like every other manual-control command.
         is DeviceCommand.SetIncline -> {
-            lastSentGrade = roundToStep(command.percent, deviceInfo.inclineStep)
-            ergExitFields() + mapOf(V1DataField.GRADE to lastSentGrade)
+            ergExitFields() + mapOf(V1DataField.GRADE to roundToStep(command.percent, deviceInfo.inclineStep))
         }
         is DeviceCommand.SetTargetSpeed -> {
             lastSentSpeed = clampedSpeedTarget(command.kph)
             ergExitFields() + mapOf(V1DataField.KPH to lastSentSpeed)
         }
-        is DeviceCommand.AdjustIncline -> {
-            ergExitFields() + mapOf(V1DataField.GRADE to nextAdjustedGrade(command.increase))
-        }
+        // Relative incline never reaches this mapping: handleInclineCommand consumes it in
+        // writeFeature, accumulating it into an absolute target for the coalescer.
+        is DeviceCommand.AdjustIncline -> emptyMap()
         is DeviceCommand.AdjustSpeed -> {
             ergExitFields() + mapOf(V1DataField.KPH to nextAdjustedSpeed(command.increase))
         }
@@ -371,11 +372,9 @@ internal class V1Session(
      * re-queued older one.
      */
     override suspend fun writeGradeTarget(target: Float) {
+        val fields = commandToFields(DeviceCommand.SetIncline(target))
         pendingWriteMutex.withLock {
-            // Incline targets imply manual/SIM control: if the MCU is latched in constant-watts
-            // mode it must be cleared here too — coalesced grade writes bypass commandToFields,
-            // where every other manual-control command carries the ERG exit.
-            pendingWriteFields = pendingWriteFields + ergExitFields() + (V1DataField.GRADE to target)
+            pendingWriteFields = pendingWriteFields + fields
         }
     }
 

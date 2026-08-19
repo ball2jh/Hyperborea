@@ -53,6 +53,7 @@ import com.nettarion.hyperborea.core.adapter.AdapterState
 import com.nettarion.hyperborea.core.model.ExerciseData
 import com.nettarion.hyperborea.core.orchestration.OrchestratorState
 import com.nettarion.hyperborea.ui.theme.LocalHyperboreaColors
+import com.nettarion.hyperborea.ui.util.HoldRepeat
 import com.nettarion.hyperborea.ui.util.UnitFormatter
 import java.text.SimpleDateFormat
 import java.util.Date
@@ -343,10 +344,12 @@ private fun RepeatingAdjustButton(
                 detectTapGestures(onPress = {
                     onTick()
                     val repeat = scope.launch {
-                        delay(HOLD_REPEAT_INITIAL_MS)
+                        delay(HoldRepeat.INITIAL_MS)
+                        var tick = 0
                         while (true) {
                             onTick()
-                            delay(HOLD_REPEAT_INTERVAL_MS)
+                            delay(HoldRepeat.intervalMs(tick))
+                            tick++
                         }
                     }
                     try {
@@ -366,8 +369,6 @@ private fun RepeatingAdjustButton(
     }
 }
 
-private const val HOLD_REPEAT_INITIAL_MS = 500L
-private const val HOLD_REPEAT_INTERVAL_MS = 350L
 
 /** Right section: broadcast badges, the clock, and profile/settings icon buttons. */
 @Composable
