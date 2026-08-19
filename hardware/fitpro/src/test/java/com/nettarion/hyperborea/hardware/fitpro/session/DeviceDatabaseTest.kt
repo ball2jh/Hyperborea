@@ -62,6 +62,10 @@ class DeviceDatabaseTest {
         assertThat(info.minIncline).isEqualTo(-6f)
         assertThat(info.maxIncline).isEqualTo(40f)
         assertThat(info.maxSpeed).isEqualTo(24f)
+        // Belt speed steps in 0.1 kph on treadmills (runner-grade precision, matches the
+        // controller's own grid); every other type keeps 0.5.
+        assertThat(info.speedStep).isEqualTo(0.1f)
+        assertThat(DeviceDatabase.defaultsForType(DeviceType.BIKE).speedStep).isEqualTo(0.5f)
     }
 
     @Test

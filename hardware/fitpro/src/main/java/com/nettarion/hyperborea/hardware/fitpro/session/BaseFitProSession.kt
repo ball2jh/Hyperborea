@@ -1,6 +1,7 @@
 package com.nettarion.hyperborea.hardware.fitpro.session
 
 import com.nettarion.hyperborea.core.AppLogger
+import com.nettarion.hyperborea.core.model.DeviceCommand
 import com.nettarion.hyperborea.core.model.DeviceIdentity
 import com.nettarion.hyperborea.core.model.DeviceInfo
 import com.nettarion.hyperborea.core.model.DeviceType
@@ -28,10 +29,39 @@ internal abstract class BaseFitProSession(
     protected val transport: HidTransport,
     protected val logger: AppLogger,
     parentScope: CoroutineScope,
-    protected val deviceInfo: DeviceInfo,
+    initialDeviceInfo: DeviceInfo,
     protected val accumulator: ExerciseDataAccumulator,
     private val tag: String,
 ) : FitProSession {
+
+    /**
+     * Live device parameters (step sizes, incline/speed bounds, max resistance). Starts as the
+     * catalog/product-id guess the adapter constructed the session with; the adapter re-points it
+     * via [updateDeviceInfo] once the handshake identity resolves (user's saved config wins, else
+     * MCU-reported limits overlay) — without this the user's configured incline step and the real
+     * machine bounds would never reach [nextAdjustedGrade]/[roundToStep]. Volatile reference swap
+     * of an immutable value: safe against the poll-loop/command-path readers.
+     */
+    @Volatile
+    protected var deviceInfo: DeviceInfo = initialDeviceInfo
+        private set
+
+    final override fun updateDeviceInfo(info: DeviceInfo) {
+        val old = deviceInfo
+        // Identity updates re-resolve per lifetime-stat event (odometer ticks) — skip the swap,
+        // the subclass hook, and the log line when nothing actually changed.
+        if (info == old) return
+        deviceInfo = info
+        onDeviceInfoUpdated(old, info)
+        logger.i(
+            tag,
+            "Device info updated: inclineStep=${info.inclineStep} incline=${info.minIncline}..${info.maxIncline} " +
+                "speedStep=${info.speedStep} maxSpeed=${info.maxSpeed} maxResistance=${info.maxResistance}",
+        )
+    }
+
+    /** Hook for protocol-specific state derived from [deviceInfo] (e.g. V1's resistance converter). */
+    protected open fun onDeviceInfoUpdated(old: DeviceInfo, new: DeviceInfo) {}
 
     protected val _exerciseData = MutableStateFlow<ExerciseData?>(null)
     final override val exerciseData: StateFlow<ExerciseData?> = _exerciseData.asStateFlow()
@@ -119,6 +149,70 @@ internal abstract class BaseFitProSession(
         return lastSentSpeed
     }
 
+    /**
+     * Absolute speed targets can come from FTMS clients with no knowledge of the machine's range;
+     * clamp before writing. (No lower floor beyond 0: teardown paths legitimately write 0, and
+     * consoles reject sub-minimum values themselves.)
+     */
+    protected fun clampedSpeedTarget(kph: Float): Float {
+        val maxSpeed = deviceInfo.maxSpeed
+        // A non-positive max means "unknown / not speed-bounded" (rower type-defaults report 0)
+        // — clamping to it would pin every target to zero; prod passed these through.
+        return if (maxSpeed > 0f) kph.coerceIn(0f, maxSpeed) else kph.coerceAtLeast(0f)
+    }
+
+    /** Protocol-specific grade-target write. Must not throw — wrap transport errors and log. */
+    protected abstract suspend fun writeGradeTarget(target: Float)
+
+    /**
+     * Incline target writes go through a throttle-with-trailing-flush so a burst of stepped
+     * targets (held +/− button, Zwift SIM gradient stream) reaches the deck as one moving target
+     * per interval instead of a step-settle-step staircase — see [TargetWriteCoalescer].
+     */
+    protected val gradeCoalescer by lazy {
+        TargetWriteCoalescer(sessionScope, GRADE_WRITE_INTERVAL_MS) { writeGradeTarget(it) }
+    }
+
+    /**
+     * Shared handling for the two incline commands; returns true when consumed. Accumulation is
+     * deliberately synchronous and coalescing-independent: each Adjust press advances
+     * [lastSentGrade] by one step immediately, whether or not that particular value ever reaches
+     * the wire, so held buttons keep their one-press-one-step semantics.
+     */
+    protected suspend fun handleInclineCommand(command: DeviceCommand): Boolean = when (command) {
+        is DeviceCommand.SetIncline -> {
+            val info = deviceInfo
+            val rounded = roundToStep(command.percent, info.inclineStep)
+            // An empty incline range means "unknown" (rower type-defaults are 0..0) — don't clamp.
+            lastSentGrade = if (info.maxIncline > info.minIncline) {
+                rounded.coerceIn(info.minIncline, info.maxIncline)
+            } else {
+                rounded
+            }
+            publishCommandedInclineTarget(lastSentGrade)
+            gradeCoalescer.submit(lastSentGrade)
+            true
+        }
+        is DeviceCommand.AdjustIncline -> {
+            val target = nextAdjustedGrade(command.increase)
+            publishCommandedInclineTarget(target)
+            gradeCoalescer.submit(target)
+            true
+        }
+        else -> false
+    }
+
+    /**
+     * Surfaces the commanded incline target on [exerciseData] immediately: the dashboard's blue
+     * goal appears (and counts along during a held button) without waiting for a console echo —
+     * some consoles never send one — and even while the coalescer is suppressing intermediate
+     * wire writes. A later console-reported target event simply overwrites this.
+     */
+    private fun publishCommandedInclineTarget(target: Float) {
+        accumulator.updateTargetIncline(target)
+        _exerciseData.value = accumulator.snapshot()
+    }
+
     /** Call as the last step of [stop]: no session coroutine survives past teardown. */
     protected fun cancelSessionScope() {
         sessionScope.cancel()
@@ -129,5 +223,13 @@ internal abstract class BaseFitProSession(
         const val WORKOUT_NOT_CONFIRMED_REASON =
             "The console didn't confirm the workout started — resistance/speed may not respond"
         private const val TELEMETRY_LOG_INTERVAL_MS = 1000L
+
+        /**
+         * Minimum interval between incline target writes. Tunable 500–1000 ms: below ~500 ms the
+         * deck motor can catch (and settle at) each intermediate target on slow actuators; above
+         * ~1000 ms single Zwift gradient corrections start to feel laggy. Not yet measured against
+         * a specific deck — adjust from field testing.
+         */
+        internal const val GRADE_WRITE_INTERVAL_MS = 750L
     }
 }

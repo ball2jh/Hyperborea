@@ -215,7 +215,7 @@ class DemoHardwareAdapter(
             minIncline = -3f, maxIncline = 15f,
             maxPower = 2000, minPower = 0, powerStep = 1,
             resistanceStep = 1f, inclineStep = 0.5f,
-            speedStep = 0.5f, maxSpeed = 20f,
+            speedStep = 0.1f, maxSpeed = 20f,
             configKey = -999_999,
         )
 

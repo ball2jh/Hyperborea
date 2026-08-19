@@ -454,13 +454,18 @@ class FitProAdapterTest {
         // Initially uses DeviceDatabase fallback
         assertThat(adapter.deviceInfo.value!!.name).isEqualTo("FitPro Device")
 
-        // Save a custom config and refresh
-        val customInfo = adapter.deviceInfo.value!!.copy(name = "Renamed Bike", maxResistance = 32)
+        // Save a custom config and refresh — including the user-editable incline step, which
+        // must reach the live session (see the V1/V2 session updateDeviceInfo tests for the
+        // session-side half of that contract).
+        val customInfo = adapter.deviceInfo.value!!.copy(
+            name = "Renamed Bike", maxResistance = 32, inclineStep = 2.0f,
+        )
         fakeDeviceConfigRepo.configs[2117] = customInfo
         adapter.refreshDeviceInfo()
 
         assertThat(adapter.deviceInfo.value!!.name).isEqualTo("Renamed Bike")
         assertThat(adapter.deviceInfo.value!!.maxResistance).isEqualTo(32)
+        assertThat(adapter.deviceInfo.value!!.inclineStep).isEqualTo(2.0f)
     }
 
     // --- Helpers ---

@@ -274,7 +274,7 @@ class V2SessionTest {
         assertThat(subscribedFeatures()).containsExactly(
             V2FeatureId.SYSTEM_MODE, V2FeatureId.WORKOUT_STATE, V2FeatureId.CURRENT_CALORIES,
             V2FeatureId.PULSE, V2FeatureId.DISTANCE, V2FeatureId.TARGET_KPH, V2FeatureId.CURRENT_KPH,
-            V2FeatureId.CURRENT_GRADE, V2FeatureId.RUNNING_TIME,
+            V2FeatureId.TARGET_GRADE, V2FeatureId.CURRENT_GRADE, V2FeatureId.RUNNING_TIME,
         )
         // Critical treadmill behaviour: never write the workout state at arm time — only a start
         // request (READY_TO_START report / physical Start key) may drive it.
@@ -464,6 +464,226 @@ class V2SessionTest {
 
         val packet = written[0]
         assertThat(packet[3]).isEqualTo(V2FeatureId.TARGET_GRADE.wireLo)
+    }
+
+    @Test
+    fun `AdjustIncline hold burst coalesces TARGET_GRADE writes but preserves accumulation`() = runTest {
+        val session = createSession(this)
+        session.start()
+        advanceUntilIdle()
+
+        val countBefore = transport.writtenPackets.size
+        // Six presses at the UI's 350 ms hold-repeat spacing: steps 0.5 … 3.0.
+        repeat(6) {
+            session.writeFeature(DeviceCommand.AdjustIncline(increase = true))
+            advanceTimeBy(350)
+        }
+        advanceTimeBy(BaseFitProSession.GRADE_WRITE_INTERVAL_MS * 2) // run the trailing flush
+
+        val gradeWrites = transport.writtenPackets.drop(countBefore)
+            .filter { it.isFeatureWrite(V2FeatureId.TARGET_GRADE) }
+        // Coalesced: far fewer wire writes than presses…
+        assertThat(gradeWrites.size).isLessThan(6)
+        assertThat(gradeWrites.size).isAtLeast(2)
+        // …but no press is lost: the final write carries the fully accumulated 3.0 %.
+        assertThat(gradeWrites.last().featureWriteValue()).isEqualTo(3.0f)
+    }
+
+    @Test
+    fun `single AdjustIncline writes immediately`() = runTest {
+        val session = createSession(this)
+        session.start()
+        advanceUntilIdle()
+
+        val countBefore = transport.writtenPackets.size
+        session.writeFeature(DeviceCommand.AdjustIncline(increase = true))
+        runCurrent()
+
+        val gradeWrites = transport.writtenPackets.drop(countBefore)
+            .filter { it.isFeatureWrite(V2FeatureId.TARGET_GRADE) }
+        assertThat(gradeWrites).hasSize(1)
+        assertThat(gradeWrites[0].featureWriteValue()).isEqualTo(0.5f)
+    }
+
+    @Test
+    fun `duplicate SetIncline within a burst is deduped but a quiet-time resend writes again`() = runTest {
+        val session = createSession(this)
+        session.start()
+        advanceUntilIdle()
+
+        val countBefore = transport.writtenPackets.size
+        // Within the cooldown window: the duplicate is dropped at flush.
+        session.writeFeature(DeviceCommand.SetIncline(5.0f))
+        advanceTimeBy(100)
+        session.writeFeature(DeviceCommand.SetIncline(5.0f))
+        advanceTimeBy(BaseFitProSession.GRADE_WRITE_INTERVAL_MS * 2)
+        // After a quiet gap: the same value is re-asserted (console may have self-stepped away).
+        session.writeFeature(DeviceCommand.SetIncline(5.0f))
+        advanceTimeBy(BaseFitProSession.GRADE_WRITE_INTERVAL_MS * 2)
+
+        val gradeWrites = transport.writtenPackets.drop(countBefore)
+            .filter { it.isFeatureWrite(V2FeatureId.TARGET_GRADE) }
+        assertThat(gradeWrites).hasSize(2)
+    }
+
+    @Test
+    fun `idle TARGET_GRADE echo does not populate targetIncline`() = runTest {
+        // The console pushes current values on subscribe; an idle echo is a parked value, not a
+        // live target — it must not pin the SIM badge / incline goal on bikes from connect.
+        val session = createSession(this)
+        session.start()
+        advanceUntilIdle()
+
+        transport.emitIncoming(buildEventPacket(V2FeatureId.TARGET_GRADE, 0f))
+        runCurrent()
+        assertThat(session.exerciseData.value?.targetIncline).isNull()
+
+        // Once the workout is live, target echoes are real targets.
+        transport.emitIncoming(buildEventPacket(V2FeatureId.WORKOUT_STATE, V2WorkoutMode.RUNNING.raw))
+        transport.emitIncoming(buildEventPacket(V2FeatureId.TARGET_GRADE, 4.5f))
+        runCurrent()
+        assertThat(session.exerciseData.value?.targetIncline).isEqualTo(4.5f)
+    }
+
+    @Test
+    fun `degenerate device bounds do not clamp targets to zero`() = runTest {
+        // Rower-style DeviceInfo: maxSpeed 0 and an empty incline range mean "unknown", not "0".
+        val session = createSession(this)
+        session.start()
+        advanceUntilIdle()
+        session.updateDeviceInfo(
+            buildDeviceInfo(maxSpeed = 0f, minIncline = 0f, maxIncline = 0f),
+        )
+
+        val countBefore = transport.writtenPackets.size
+        session.writeFeature(DeviceCommand.SetTargetSpeed(12f))
+        session.writeFeature(DeviceCommand.SetIncline(5.0f))
+        runCurrent()
+
+        val kph = transport.writtenPackets.drop(countBefore)
+            .filter { it.isFeatureWrite(V2FeatureId.TARGET_KPH) }
+        val grade = transport.writtenPackets.drop(countBefore)
+            .filter { it.isFeatureWrite(V2FeatureId.TARGET_GRADE) }
+        assertThat(kph).hasSize(1)
+        assertThat(kph[0].featureWriteValue()).isEqualTo(12f)
+        assertThat(grade).hasSize(1)
+        assertThat(grade[0].featureWriteValue()).isEqualTo(5.0f)
+    }
+
+    @Test
+    fun `SetIncline is clamped to the device incline bounds`() = runTest {
+        val session = createSession(this) // buildDeviceInfo: -6..40
+        session.start()
+        advanceUntilIdle()
+
+        val countBefore = transport.writtenPackets.size
+        session.writeFeature(DeviceCommand.SetIncline(90f))
+        runCurrent()
+
+        val gradeWrites = transport.writtenPackets.drop(countBefore)
+            .filter { it.isFeatureWrite(V2FeatureId.TARGET_GRADE) }
+        assertThat(gradeWrites).hasSize(1)
+        assertThat(gradeWrites[0].featureWriteValue()).isEqualTo(40f)
+    }
+
+    @Test
+    fun `SetTargetSpeed is clamped to maxSpeed`() = runTest {
+        val session = createSession(this) // buildDeviceInfo: maxSpeed 60
+        session.start()
+        advanceUntilIdle()
+
+        val countBefore = transport.writtenPackets.size
+        session.writeFeature(DeviceCommand.SetTargetSpeed(200f))
+        runCurrent()
+
+        val kphWrites = transport.writtenPackets.drop(countBefore)
+            .filter { it.isFeatureWrite(V2FeatureId.TARGET_KPH) }
+        assertThat(kphWrites).hasSize(1)
+        assertThat(kphWrites[0].featureWriteValue()).isEqualTo(60f)
+    }
+
+    @Test
+    fun `stop mid-burst never writes a pending grade after the teardown zero`() = runTest {
+        val session = createSession(this)
+        // Belt machine so haltForTeardown runs (it owns the TARGET_GRADE=0 teardown write).
+        emitSupportedFeatures(V2FeatureId.TARGET_KPH, V2FeatureId.TARGET_GRADE, V2FeatureId.WORKOUT_STATE, V2FeatureId.KEY_COOKED)
+        session.start()
+        advanceUntilIdle()
+
+        // Open a burst with a pending flush waiting…
+        session.writeFeature(DeviceCommand.SetIncline(4.0f))
+        session.writeFeature(DeviceCommand.SetIncline(8.0f)) // pending
+        // …and stop before the cooldown expires.
+        session.stop()
+        advanceUntilIdle()
+
+        val gradeValues = transport.writtenPackets
+            .filter { it.isFeatureWrite(V2FeatureId.TARGET_GRADE) }
+            .map { it.featureWriteValue() }
+        // The pending 8.0 never lands; the last grade on the wire is the teardown zero.
+        assertThat(gradeValues).doesNotContain(8.0f)
+        assertThat(gradeValues.last()).isEqualTo(0f)
+    }
+
+    @Test
+    fun `updateDeviceInfo changes the Adjust step and bounds mid-session`() = runTest {
+        val session = createSession(this)
+        session.start()
+        advanceUntilIdle()
+
+        val countBefore = transport.writtenPackets.size
+        session.writeFeature(DeviceCommand.AdjustIncline(increase = true)) // catalog step 0.5
+        advanceTimeBy(BaseFitProSession.GRADE_WRITE_INTERVAL_MS + 100)
+
+        session.updateDeviceInfo(buildDeviceInfo(inclineStep = 1.0f, maxIncline = 15f, minIncline = -3f))
+        session.writeFeature(DeviceCommand.AdjustIncline(increase = true)) // now steps 1.0
+        advanceTimeBy(BaseFitProSession.GRADE_WRITE_INTERVAL_MS * 2)
+
+        val gradeValues = transport.writtenPackets.drop(countBefore)
+            .filter { it.isFeatureWrite(V2FeatureId.TARGET_GRADE) }
+            .map { it.featureWriteValue() }
+        assertThat(gradeValues).containsExactly(0.5f, 1.5f).inOrder()
+    }
+
+    @Test
+    fun `AdjustIncline publishes the commanded incline target without waiting for a console echo`() = runTest {
+        val session = createSession(this)
+        session.start()
+        advanceUntilIdle()
+
+        session.writeFeature(DeviceCommand.AdjustIncline(increase = true))
+        runCurrent()
+
+        // No TARGET_GRADE event was emitted by the fake console — the commanded value itself
+        // must surface so the dashboard's blue goal appears immediately.
+        assertThat(session.exerciseData.value?.targetIncline).isEqualTo(0.5f)
+    }
+
+    @Test
+    fun `TARGET_GRADE is subscribed when the console declares it`() = runTest {
+        val session = createSession(this)
+        emitSupportedFeatures(V2FeatureId.TARGET_GRADE, V2FeatureId.TARGET_KPH, V2FeatureId.WORKOUT_STATE)
+        session.start()
+        advanceUntilIdle()
+
+        assertThat(subscribedFeatures()).contains(V2FeatureId.TARGET_GRADE)
+    }
+
+    @Test
+    fun `incline writes to an undeclared TARGET_GRADE are skipped`() = runTest {
+        val session = createSession(this)
+        emitSupportedFeatures(V2FeatureId.TARGET_KPH, V2FeatureId.WORKOUT_STATE) // no TARGET_GRADE
+        session.start()
+        advanceUntilIdle()
+
+        val countBefore = transport.writtenPackets.size
+        session.writeFeature(DeviceCommand.SetIncline(5.0f))
+        session.writeFeature(DeviceCommand.AdjustIncline(increase = true))
+        advanceUntilIdle()
+
+        val gradeWrites = transport.writtenPackets.drop(countBefore)
+            .filter { it.isFeatureWrite(V2FeatureId.TARGET_GRADE) }
+        assertThat(gradeWrites).isEmpty()
     }
 
     @Test

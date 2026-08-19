@@ -98,6 +98,11 @@ enum class V2FeatureId(val code: Int) {
             // CURRENT_KPH, so we subscribe to it to read actual treadmill speed (see V2Session's
             // TARGET_KPH handling). Bikes/ellipticals keep it as a pure target — harmless to watch.
             TARGET_KPH,
+            // Incline-target echo: without this subscription the console never reports
+            // TARGET_GRADE, so ExerciseData.targetIncline stays null on V2 and the dashboard's
+            // blue incline goal can never appear (the speed goal works because TARGET_KPH above
+            // is subscribed). One low-volume event per incline change, like TARGET_KPH.
+            TARGET_GRADE,
             // Equipment limits — the device reports its own bounds (see V2Session capture).
             MIN_KPH, MAX_KPH, MIN_GRADE_PERCENT, MAX_GRADE_PERCENT, MAX_RPM, MAX_WATTS,
             MAX_USER_WEIGHT_KG, MAX_GEAR,

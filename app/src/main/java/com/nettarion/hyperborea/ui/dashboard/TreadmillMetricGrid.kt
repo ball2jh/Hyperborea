@@ -5,35 +5,61 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.width
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.VerticalDivider
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
+import com.nettarion.hyperborea.core.model.DeviceInfo
 import com.nettarion.hyperborea.core.model.ExerciseData
 import com.nettarion.hyperborea.core.model.Metric
 import com.nettarion.hyperborea.ui.theme.LocalHyperboreaColors
 import com.nettarion.hyperborea.ui.util.UnitFormatter
 
 /**
- * Treadmill-specific dashboard: incline and speed as the hero tiles flanking a live 400 m track
- * widget, with the secondary metrics in a row along the bottom. Bikes and other equipment keep
- * [MetricGrid].
+ * Treadmill-specific dashboard: quick-set preset columns on the outer edges (incline left, speed
+ * right — Technogym-style), incline and speed hero tiles flanking a live 400 m track widget, and
+ * the secondary metrics in a row along the bottom. Bikes and other equipment keep [MetricGrid].
  */
 @Composable
 fun TreadmillMetricGrid(
     exerciseData: ExerciseData?,
-    supportedMetrics: Set<Metric>?,
+    deviceInfo: DeviceInfo?,
     useImperial: Boolean,
+    controlsEnabled: Boolean,
+    onSetIncline: (Float) -> Unit,
+    onSetSpeed: (Float) -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val colors = LocalHyperboreaColors.current
+    val supportedMetrics = deviceInfo?.supportedMetrics
     fun isSupported(metric: Metric): Boolean = supportedMetrics?.contains(metric) != false
 
     Column(modifier = modifier.fillMaxSize()) {
-        // Hero row: INCLINE | 400 m track | SPEED
+        // Hero row: incline presets | INCLINE | 400 m track | SPEED | speed presets
         Row(modifier = Modifier.weight(2f).fillMaxWidth()) {
+            val inclineValues = TreadmillPresets.inclinePresets(
+                minIncline = deviceInfo?.minIncline ?: 0f,
+                maxIncline = deviceInfo?.maxIncline ?: 12f,
+            )
+            PresetColumn(
+                header = "Incline",
+                unit = "%",
+                labels = inclineValues.map { TreadmillPresets.formatValue(it) },
+                values = inclineValues,
+                activeValue = exerciseData?.targetIncline ?: exerciseData?.incline,
+                activeTolerance = (deviceInfo?.inclineStep ?: 0.5f) / 2f,
+                enabled = controlsEnabled,
+                onSelect = onSetIncline,
+                modifier = Modifier.width(108.dp),
+            )
+            VerticalDivider(thickness = 1.dp, color = colors.divider)
+            // The incline goal shows only while en route: hidden once the deck arrives within
+            // tolerance. (Speed deliberately keeps its goal visible — machines quantize commanded
+            // speeds to their own grid, and users preferred seeing the commanded value as-is.)
+            val inclineTolerance = maxOf((deviceInfo?.inclineStep ?: 0.5f) / 2f, 0.2f)
             MetricCell(
                 value = exerciseData?.incline?.let { "%.1f".format(it) },
                 unit = "%",
@@ -42,7 +68,9 @@ fun TreadmillMetricGrid(
                 valueStyle = MaterialTheme.typography.displayLarge,
                 unitStyle = MaterialTheme.typography.headlineLarge,
                 valueColor = colors.accentWarm,
-                target = exerciseData?.targetIncline?.let { "%.1f".format(it) },
+                target = exerciseData?.targetIncline
+                    ?.takeIf { goalVisible(it, exerciseData.incline, inclineTolerance) }
+                    ?.let { "%.1f".format(it) },
                 supported = isSupported(Metric.INCLINE),
             )
             VerticalDivider(thickness = 1.dp, color = colors.divider)
@@ -62,10 +90,28 @@ fun TreadmillMetricGrid(
                 valueStyle = MaterialTheme.typography.displayLarge,
                 unitStyle = MaterialTheme.typography.headlineLarge,
                 valueColor = colors.accentWarm,
+                // Runners think in pace: min/km (or min/mi) above the raw per-hour speed.
+                overline = exerciseData?.speed?.let { UnitFormatter.paceDisplay(it, useImperial) },
                 target = exerciseData?.targetSpeed?.let {
                     "%.1f".format(if (useImperial) it * UnitFormatter.KM_TO_MI else it)
                 },
                 supported = isSupported(Metric.SPEED),
+            )
+            VerticalDivider(thickness = 1.dp, color = colors.divider)
+            val speedPresets = TreadmillPresets.speedPresets(
+                maxSpeedKph = deviceInfo?.maxSpeed ?: 20f,
+                imperial = useImperial,
+            )
+            PresetColumn(
+                header = "Speed",
+                unit = if (useImperial) "mph" else "km/h",
+                labels = speedPresets.map { it.display },
+                values = speedPresets.map { it.kph },
+                activeValue = exerciseData?.targetSpeed ?: exerciseData?.speed,
+                activeTolerance = (deviceInfo?.speedStep ?: 0.5f) / 2f,
+                enabled = controlsEnabled,
+                onSelect = onSetSpeed,
+                modifier = Modifier.width(108.dp),
             )
         }
         HorizontalDivider(thickness = 1.dp, color = colors.divider)

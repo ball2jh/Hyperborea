@@ -1103,6 +1103,24 @@ class V1SessionTest {
     }
 
     @Test
+    fun `updateDeviceInfo changes the incline step used by Adjust`() {
+        val session = createUnstartedSession() // catalog step 0.5
+        session.commandToFields(DeviceCommand.AdjustIncline(increase = true)) // → 0.5
+
+        session.updateDeviceInfo(buildDeviceInfo(inclineStep = 1.0f, maxIncline = 15f, minIncline = -3f))
+        val fields = session.commandToFields(DeviceCommand.AdjustIncline(increase = true))
+
+        assertThat(fields).containsExactly(V1DataField.GRADE, 1.5f) // 0.5 + the new 1.0 step
+    }
+
+    @Test
+    fun `commandToFields SetTargetSpeed clamps to maxSpeed`() {
+        val session = createUnstartedSession() // buildDeviceInfo maxSpeed = 60
+        val fields = session.commandToFields(DeviceCommand.SetTargetSpeed(200f))
+        assertThat(fields).containsExactly(V1DataField.KPH, 60f)
+    }
+
+    @Test
     fun `commandToFields AdjustIncline two increases accumulate`() {
         val session = createUnstartedSession()
         session.commandToFields(DeviceCommand.AdjustIncline(increase = true))

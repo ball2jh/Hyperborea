@@ -39,7 +39,15 @@ internal class V1Session(
     @Volatile private var pendingCalibration: CompletableDeferred<Unit>? = null
     private var consecutivePollErrors = 0
     private var securityBlockReverifies = 0
-    private val resistance = ResistanceConverter(deviceInfo.maxResistance)
+    // Rebuilt when the adapter pushes resolved DeviceInfo (same staleness class as inclineStep:
+    // the constructor value is only the catalog/product-id guess).
+    @Volatile private var resistance = ResistanceConverter(deviceInfo.maxResistance)
+
+    override fun onDeviceInfoUpdated(old: DeviceInfo, new: DeviceInfo) {
+        if (old.maxResistance != new.maxResistance) {
+            resistance = ResistanceConverter(new.maxResistance)
+        }
+    }
 
     /** Device capabilities read from MCU during handshake. */
     var capabilities: V1Capabilities? = null
@@ -127,6 +135,9 @@ internal class V1Session(
     }
 
     override suspend fun stop() {
+        // First: no coalesced grade flush may enqueue after this point — gracefulEndForDisconnect
+        // writes GRADE = 0 on belt machines and nothing may land after it.
+        gradeCoalescer.close()
         // Stop the poll loop and wait (briefly) for it to actually exit before we touch the transport
         // — gracefulEndForDisconnect does its own request/response round-trips and must not race the
         // poll's reads. Bounded so a wedged MCU read can't hang teardown.
@@ -268,6 +279,10 @@ internal class V1Session(
 
         if (_sessionState.value !is SessionState.Streaming) return
 
+        // Incline targets route through the grade coalescer (burst → one moving target per
+        // interval); the coalescer's writes land in pendingWriteFields via writeGradeTarget.
+        if (handleInclineCommand(command)) return
+
         val fields = commandToFields(command)
 
         pendingWriteMutex.withLock {
@@ -279,13 +294,15 @@ internal class V1Session(
         is DeviceCommand.SetResistance -> {
             ergExitFields() + mapOf(V1DataField.RESISTANCE to resistance.levelToRaw(command.level).toFloat())
         }
+        // Incline commands are intercepted in writeFeature (grade coalescer) and never reach this
+        // mapping from the live path; the branches stay for exhaustiveness and direct unit tests.
         is DeviceCommand.SetIncline -> {
             lastSentGrade = roundToStep(command.percent, deviceInfo.inclineStep)
             ergExitFields() + mapOf(V1DataField.GRADE to lastSentGrade)
         }
         is DeviceCommand.SetTargetSpeed -> {
-            lastSentSpeed = command.kph
-            ergExitFields() + mapOf(V1DataField.KPH to command.kph)
+            lastSentSpeed = clampedSpeedTarget(command.kph)
+            ergExitFields() + mapOf(V1DataField.KPH to lastSentSpeed)
         }
         is DeviceCommand.AdjustIncline -> {
             ergExitFields() + mapOf(V1DataField.GRADE to nextAdjustedGrade(command.increase))
@@ -345,6 +362,21 @@ internal class V1Session(
         mapOf(V1DataField.IS_CONSTANT_WATTS_MODE to 0f)
     } else {
         emptyMap()
+    }
+
+    /**
+     * The coalescer's write primitive: enqueue for the next ≤100 ms poll, same path as every other
+     * V1 write. A failed poll re-queues its drained fields as `writeFields + pendingWriteFields`
+     * (right side wins), so a newer coalesced grade enqueued mid-poll is never clobbered by the
+     * re-queued older one.
+     */
+    override suspend fun writeGradeTarget(target: Float) {
+        pendingWriteMutex.withLock {
+            // Incline targets imply manual/SIM control: if the MCU is latched in constant-watts
+            // mode it must be cleared here too — coalesced grade writes bypass commandToFields,
+            // where every other manual-control command carries the ERG exit.
+            pendingWriteFields = pendingWriteFields + ergExitFields() + (V1DataField.GRADE to target)
+        }
     }
 
     private suspend fun handshake() {

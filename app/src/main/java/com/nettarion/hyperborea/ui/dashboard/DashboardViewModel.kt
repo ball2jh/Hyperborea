@@ -143,6 +143,12 @@ class DashboardViewModel @Inject constructor(
     /** Treadmill speed step from the StatusBar cluster; the hardware session handles step/clamp. */
     fun adjustSpeed(increase: Boolean) = sendHardwareCommand(DeviceCommand.AdjustSpeed(increase))
 
+    /** Preset column tap: one absolute incline target — the deck sweeps to it in a single motion. */
+    fun setInclineTarget(percent: Float) = sendHardwareCommand(DeviceCommand.SetIncline(percent))
+
+    /** Preset column tap: one absolute belt-speed target (km/h; session clamps to the machine). */
+    fun setSpeedTarget(kph: Float) = sendHardwareCommand(DeviceCommand.SetTargetSpeed(kph))
+
     private fun sendHardwareCommand(command: DeviceCommand) {
         logger.i(TAG, "User action: $command")
         viewModelScope.launch {

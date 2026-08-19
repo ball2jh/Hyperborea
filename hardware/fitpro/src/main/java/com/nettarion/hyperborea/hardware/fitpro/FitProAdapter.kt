@@ -300,10 +300,15 @@ class FitProAdapter @Inject constructor(
 
     private suspend fun updateIdentity(identity: DeviceIdentity?) {
         _deviceIdentity.value = identity
-        _deviceInfo.value = when {
+        val info = when {
             identity == null -> null
             else -> resolveDeviceInfo(identity)
         }
+        _deviceInfo.value = info
+        // Keep the live session's step sizes and clamp bounds in sync — without this the user's
+        // configured incline step and the MCU-reported limits never reach the session's
+        // Adjust/round/clamp logic (it would keep the construction-time catalog guess forever).
+        if (info != null) session?.updateDeviceInfo(info)
         // Log catalog summary for diagnostics
         val partNum = identity?.partNumber?.toIntOrNull()
         if (partNum != null) {
@@ -340,8 +345,12 @@ class FitProAdapter @Inject constructor(
 
     override suspend fun refreshDeviceInfo() {
         val identity = _deviceIdentity.value ?: return
-        _deviceInfo.value = resolveDeviceInfo(identity)
-        logger.i(TAG, "Refreshed device info: ${_deviceInfo.value?.name}")
+        val info = resolveDeviceInfo(identity)
+        _deviceInfo.value = info
+        // A freshly saved device config takes effect in the live session immediately (custom
+        // incline/speed steps, bounds) rather than on the next reconnect.
+        session?.updateDeviceInfo(info)
+        logger.i(TAG, "Refreshed device info: ${info.name}")
     }
 
     override suspend fun sendCommand(command: DeviceCommand) {
@@ -403,15 +412,24 @@ class FitProAdapter @Inject constructor(
         } else {
             base.name
         }
+        // A console that reports 0 for a bound hasn't measured it. These bounds now feed the
+        // session's command clamps (not just the UI), so a trusted 0 would pin every speed or
+        // incline target to zero — treat non-positive maxima and an empty incline range as
+        // unreported and keep the catalog/type-default bound instead.
+        val reportedMaxSpeed = caps.maxSpeed?.takeIf { it > 0f }
+        val reportedMaxIncline = caps.maxIncline
+        val reportedMinIncline = caps.minIncline
+        val inclineRangeValid = reportedMaxIncline != null && reportedMinIncline != null &&
+            reportedMaxIncline > reportedMinIncline
         return base.copy(
             name = name,
             type = type,
             supportedMetrics = typeDefaults?.supportedMetrics ?: base.supportedMetrics,
             minResistance = typeDefaults?.minResistance ?: base.minResistance,
             // MCU-reported bounds override; otherwise keep current (catalog/type-default).
-            maxIncline = caps.maxIncline ?: base.maxIncline,
-            minIncline = caps.minIncline ?: base.minIncline,
-            maxSpeed = caps.maxSpeed ?: base.maxSpeed,
+            maxIncline = if (inclineRangeValid) reportedMaxIncline!! else base.maxIncline,
+            minIncline = if (inclineRangeValid) reportedMinIncline!! else base.minIncline,
+            maxSpeed = reportedMaxSpeed ?: base.maxSpeed,
             maxResistance = caps.maxResistance ?: base.maxResistance,
             maxPower = caps.maxPower ?: base.maxPower,
         )
@@ -436,6 +454,7 @@ class FitProAdapter @Inject constructor(
             maxIncline = typeDefaults.maxIncline,
             maxSpeed = typeDefaults.maxSpeed,
             maxPower = typeDefaults.maxPower,
+            speedStep = typeDefaults.speedStep,
         )
     }
 

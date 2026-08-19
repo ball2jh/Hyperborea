@@ -20,6 +20,18 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import com.nettarion.hyperborea.ui.theme.LocalHyperboreaColors
 
+/**
+ * Whether a blue "→ goal" is worth showing: only while the target meaningfully differs from the
+ * actual. Hides the goal once reached — including on machines that quantize the commanded value
+ * to their own grid (e.g. a 1.0 km/h target settling at 1.1 on an imperial-native MCU), which is
+ * why callers pass a tolerance with a floor above that quantization error.
+ */
+internal fun goalVisible(target: Float?, actual: Float?, tolerance: Float): Boolean {
+    if (target == null) return false
+    if (actual == null) return true
+    return kotlin.math.abs(target - actual) > tolerance
+}
+
 /** Elapsed-time display shared by the metric grids: `m:ss`, growing to `h:mm:ss` past an hour. */
 internal fun formatTime(elapsedSeconds: Long): String {
     val hours = elapsedSeconds / 3600
@@ -45,6 +57,8 @@ fun MetricCell(
     valueColor: Color = Color.Unspecified,
     target: String? = null,
     supported: Boolean = true,
+    overline: String? = null,
+    overlineStyle: TextStyle = MaterialTheme.typography.headlineSmall,
 ) {
     val colors = LocalHyperboreaColors.current
     val displayValue = value ?: "\u2014"
@@ -66,6 +80,14 @@ fun MetricCell(
             modifier = Modifier.align(Alignment.Center),
             horizontalAlignment = Alignment.CenterHorizontally,
         ) {
+            if (overline != null) {
+                Text(
+                    text = overline,
+                    style = overlineStyle,
+                    color = colors.textMedium,
+                )
+                Spacer(Modifier.height(4.dp))
+            }
             Row {
                 Text(
                     text = displayValue,
