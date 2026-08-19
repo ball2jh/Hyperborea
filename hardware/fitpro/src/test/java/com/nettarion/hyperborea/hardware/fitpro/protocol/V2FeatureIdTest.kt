@@ -87,16 +87,18 @@ class V2FeatureIdTest {
     }
 
     @Test
-    fun `subscribable includes TARGET_KPH and the reported limits but not target grade`() {
+    fun `subscribable includes the target echoes and the reported limits`() {
         // Belt machines report actual belt speed in the writable TARGET_KPH field (CURRENT_KPH is
-        // never sent), so we subscribe to it. The device also reports its own physical limits.
+        // never sent), so we subscribe to it. TARGET_GRADE is subscribed for the incline-target
+        // echo — without it targetIncline never populates on V2 and the dashboard's incline goal
+        // can't render. The device also reports its own physical limits.
         assertThat(V2FeatureId.subscribable).contains(V2FeatureId.TARGET_KPH)
+        assertThat(V2FeatureId.subscribable).contains(V2FeatureId.TARGET_GRADE)
         assertThat(V2FeatureId.subscribable).containsAtLeast(
             V2FeatureId.MAX_KPH, V2FeatureId.MIN_KPH,
             V2FeatureId.MAX_GRADE_PERCENT, V2FeatureId.MIN_GRADE_PERCENT,
             V2FeatureId.MAX_RESISTANCE, V2FeatureId.MAX_WATTS,
         )
-        assertThat(V2FeatureId.subscribable).doesNotContain(V2FeatureId.TARGET_GRADE)
         assertThat(V2FeatureId.subscribable).doesNotContain(V2FeatureId.START_REQUESTED)
     }
 

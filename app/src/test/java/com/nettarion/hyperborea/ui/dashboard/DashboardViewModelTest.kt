@@ -443,4 +443,17 @@ class DashboardViewModelTest {
             DeviceCommand.AdjustSpeed(increase = false),
         ).inOrder()
     }
+
+    @Test
+    fun `preset setters forward absolute targets to hardware`() = runTest {
+        createViewModel()
+
+        viewModel.setInclineTarget(10f)
+        viewModel.setSpeedTarget(9.66f)
+
+        assertThat(sentCommands).containsExactly(
+            DeviceCommand.SetIncline(10f),
+            DeviceCommand.SetTargetSpeed(9.66f),
+        ).inOrder()
+    }
 }

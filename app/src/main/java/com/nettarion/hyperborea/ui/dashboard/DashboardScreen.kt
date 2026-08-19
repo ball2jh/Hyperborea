@@ -121,8 +121,11 @@ fun DashboardScreen(
             if (isTreadmill) {
                 TreadmillMetricGrid(
                     exerciseData = uiState.exerciseData,
-                    supportedMetrics = uiState.deviceInfo?.supportedMetrics,
+                    deviceInfo = uiState.deviceInfo,
                     useImperial = uiState.useImperial,
+                    controlsEnabled = uiState.orchestratorState is OrchestratorState.Running,
+                    onSetIncline = viewModel::setInclineTarget,
+                    onSetSpeed = viewModel::setSpeedTarget,
                     modifier = Modifier.weight(1f),
                 )
             } else {

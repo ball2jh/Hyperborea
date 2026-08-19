@@ -70,9 +70,17 @@ object DeviceDatabase {
         powerStep = 1,
         resistanceStep = 1.0f,
         inclineStep = 0.5f,
-        speedStep = 0.5f,
+        speedStep = defaultSpeedStep(type),
         maxSpeed = defaultMaxSpeed(type),
     )
+
+    /**
+     * Belt speed steps in 0.1 kph on treadmills — the machine's own grid is that fine (imperial
+     * controllers quantize commanded speeds to 0.1 mph), and coarser 0.5 steps make the +/− keys
+     * overshoot the pace a runner actually wants. Non-belt "speed" is virtual; 0.5 is plenty.
+     */
+    private fun defaultSpeedStep(type: DeviceType): Float =
+        if (type == DeviceType.TREADMILL) 0.1f else 0.5f
 
     /**
      * Returns a one-line diagnostic string for a part number, or null if not in catalog.
@@ -161,7 +169,7 @@ object DeviceDatabase {
             maxIncline = if (minInc != 0 || maxInc != 0) maxInc.toFloat() else null,
             maxSpeed = if (maxSpd > 0) maxSpd / 10f else null,
             inclineStep = 0.5f,
-            speedStep = 0.5f,
+            speedStep = defaultSpeedStep(type ?: DeviceType.BIKE),
             powerCurveIndex = if (curveIdx < 0) null else curveIdx,
         )
     }

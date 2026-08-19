@@ -141,6 +141,9 @@ internal class V2Session(
     }
 
     override suspend fun stop() {
+        // First: no coalesced grade flush may land after the teardown writes below (which include
+        // TARGET_GRADE = 0). close() also waits out any in-flight coalesced write.
+        gradeCoalescer.close()
         receiveJob?.cancel()
         receiveJob = null
         startRequestJob?.cancel()
@@ -258,23 +261,29 @@ internal class V2Session(
     override suspend fun writeFeature(command: DeviceCommand) {
         if (_sessionState.value !is SessionState.Streaming) return
 
+        // Incline targets route through the grade coalescer (burst → one moving target per
+        // interval) instead of the direct write below. Same declared-feature gate first.
+        if (command is DeviceCommand.SetIncline || command is DeviceCommand.AdjustIncline) {
+            val declared = declaredFeatures
+            if (declared != null && V2FeatureId.TARGET_GRADE !in declared) {
+                logger.d(TAG, "Skipping ${command::class.simpleName}: ${V2FeatureId.TARGET_GRADE} not declared by this console")
+                return
+            }
+            handleInclineCommand(command)
+            return
+        }
+
         val message = when (command) {
             is DeviceCommand.SetResistance -> V2Message.Outgoing.WriteFeature(
                 V2FeatureId.TARGET_RESISTANCE,
                 command.level.toFloat(),
             )
-            is DeviceCommand.SetIncline -> {
-                lastSentGrade = roundToStep(command.percent, deviceInfo.inclineStep)
-                V2Message.Outgoing.WriteFeature(V2FeatureId.TARGET_GRADE, lastSentGrade)
-            }
+            // Handled above via the coalescer — unreachable here, kept for exhaustiveness.
+            is DeviceCommand.SetIncline, is DeviceCommand.AdjustIncline -> return
             is DeviceCommand.SetTargetSpeed -> {
-                lastSentSpeed = command.kph
-                V2Message.Outgoing.WriteFeature(V2FeatureId.TARGET_KPH, command.kph)
+                lastSentSpeed = clampedSpeedTarget(command.kph)
+                V2Message.Outgoing.WriteFeature(V2FeatureId.TARGET_KPH, lastSentSpeed)
             }
-            is DeviceCommand.AdjustIncline -> V2Message.Outgoing.WriteFeature(
-                V2FeatureId.TARGET_GRADE,
-                nextAdjustedGrade(command.increase),
-            )
             is DeviceCommand.AdjustSpeed -> V2Message.Outgoing.WriteFeature(
                 V2FeatureId.TARGET_KPH,
                 nextAdjustedSpeed(command.increase),
@@ -338,6 +347,16 @@ internal class V2Session(
             throw e
         } catch (e: Exception) {
             logger.e(TAG, "Failed to write feature", e)
+        }
+    }
+
+    override suspend fun writeGradeTarget(target: Float) {
+        try {
+            transport.write(V2Codec.encode(V2Message.Outgoing.WriteFeature(V2FeatureId.TARGET_GRADE, target)))
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            logger.e(TAG, "Failed to write grade target", e)
         }
     }
 
@@ -685,7 +704,17 @@ internal class V2Session(
                     accumulator.updateSpeed(value)
                 }
             }
-            V2FeatureId.TARGET_GRADE -> accumulator.updateTargetIncline(value)
+            V2FeatureId.TARGET_GRADE -> {
+                // Subscribed features push their current value right after the subscribe — an
+                // idle-time echo is the console's parked value, not a live target. Treating it as
+                // one would pin the dashboard's SIM badge and incline goal on every V2 device
+                // from connect (bikes included). Only a target reported during an active workout
+                // counts.
+                val grade = _workoutMode.value?.let { V2WorkoutMode.fromRaw(it) }
+                if (grade == V2WorkoutMode.RUNNING || grade == V2WorkoutMode.PAUSED) {
+                    accumulator.updateTargetIncline(value)
+                }
+            }
             V2FeatureId.SYSTEM_MODE -> { /* System on/standby/sleep — not the workout state, and not exercise data */ }
             // Write-only — never subscribed, but a console may echo writes back.
             V2FeatureId.HEART_BEAT_INTERVAL, V2FeatureId.IDLE_SYSTEM_MODE_LOCK,

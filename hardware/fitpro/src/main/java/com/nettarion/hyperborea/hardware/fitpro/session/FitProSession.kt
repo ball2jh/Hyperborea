@@ -3,6 +3,7 @@ package com.nettarion.hyperborea.hardware.fitpro.session
 import com.nettarion.hyperborea.core.model.DeviceCapabilities
 import com.nettarion.hyperborea.core.model.DeviceCommand
 import com.nettarion.hyperborea.core.model.DeviceIdentity
+import com.nettarion.hyperborea.core.model.DeviceInfo
 import com.nettarion.hyperborea.core.model.DeviceType
 import com.nettarion.hyperborea.core.model.ExerciseData
 import kotlinx.coroutines.flow.StateFlow
@@ -35,6 +36,14 @@ interface FitProSession {
     suspend fun identify(): DeviceIdentity?
     suspend fun calibrate()
     suspend fun writeFeature(command: DeviceCommand)
+
+    /**
+     * Re-points the session at a newly resolved [DeviceInfo] (the user's saved device config, or
+     * catalog + MCU-limit overlay). The adapter calls this whenever it re-resolves its public
+     * device info so the session's step sizes and clamp bounds stay in sync — most importantly the
+     * user-configurable incline step.
+     */
+    fun updateDeviceInfo(info: DeviceInfo)
 }
 
 sealed interface SessionState {

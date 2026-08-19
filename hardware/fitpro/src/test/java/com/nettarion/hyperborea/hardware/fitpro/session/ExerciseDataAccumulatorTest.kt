@@ -286,4 +286,5 @@ class ExerciseDataAccumulatorTest {
         val acc = ExerciseDataAccumulator(clock = { fakeTime }, initialElapsedSeconds = 60L)
         assertThat(acc.snapshot().elapsedTime).isEqualTo(60)
     }
+
 }

@@ -46,4 +46,19 @@ object UnitFormatter {
     fun elevationDisplay(meters: Float, imperial: Boolean): String =
         if (imperial) "%.0f ft".format(meters * M_TO_FT)
         else "%.0f m".format(meters)
+
+    /**
+     * Running pace for a belt speed — "6:30 min/km" (or min/mi when imperial). Null when the
+     * belt is (near-)stopped or the pace would be slower than 30 min per unit: those values read
+     * as noise, not a pace.
+     */
+    fun paceDisplay(kph: Float, imperial: Boolean): String? {
+        val perHour = if (imperial) kph * KM_TO_MI else kph
+        if (perHour < 0.1f) return null
+        val secondsPerUnit = (3600f / perHour).roundToInt()
+        if (secondsPerUnit > 30 * 60) return null
+        val minutes = secondsPerUnit / 60
+        val seconds = secondsPerUnit % 60
+        return "%d:%02d %s".format(minutes, seconds, if (imperial) "min/mi" else "min/km")
+    }
 }
