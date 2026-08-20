@@ -10,7 +10,7 @@ internal object TrackMath {
     // Standard outdoor 400 m track (inner measuring line): two 84.39 m straightaways joined by
     // two semicircular curves of 36.50 m radius.
     const val STRAIGHT_METERS = 84.39f
-    const val CURVE_RADIUS_METERS = 36.50f
+    const val CURVE_RADIUS_METERS = 36.80f
 
     /**
      * Width : height of the track's bounding box — (straight + two curve radii) : (curve
