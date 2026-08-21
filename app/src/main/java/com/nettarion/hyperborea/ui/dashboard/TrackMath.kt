@@ -7,8 +7,9 @@ package com.nettarion.hyperborea.ui.dashboard
 internal object TrackMath {
     const val LAP_METERS = 400f
 
-    // Standard outdoor 400 m track (inner measuring line): two 84.39 m straightaways joined by
-    // two semicircular curves of 36.50 m radius.
+    // Standard outdoor 400 m track measuring line: two 84.39 m straightaways joined by two
+    // semicircular curves. The measuring line is 30 cm outside the 36.50 m inner curb, so its
+    // effective curve radius is 36.80 m.
     const val STRAIGHT_METERS = 84.39f
     const val CURVE_RADIUS_METERS = 36.80f
 

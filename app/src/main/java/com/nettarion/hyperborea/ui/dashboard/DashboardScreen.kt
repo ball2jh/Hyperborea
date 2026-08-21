@@ -138,8 +138,8 @@ fun DashboardScreen(
             }
         }
 
-        // Treadmill safety overlay: equipment is armed (broadcasts live), MCU is parked in
-        // WARM_UP waiting for the physical Start key. The compact StatusBar status text is too
+        // Treadmill safety overlay: equipment is armed (broadcasts live) and safely parked while
+        // waiting for the physical Start key. The compact StatusBar status text is too
         // subtle at 1920×1080 arm's-length; this is the visible cue.
         val awaiting = uiState.orchestratorState as? OrchestratorState.AwaitingConsoleStart
         if (awaiting != null) {
@@ -255,9 +255,8 @@ fun DashboardScreen(
 
 /**
  * Centered overlay shown while the orchestrator is in [OrchestratorState.AwaitingConsoleStart]:
- * the treadmill is armed in WARM_UP and broadcasting, and we're waiting for the user to press the
- * console's START so the MCU reports WORKOUT_MODE=RUNNING (which begins recording). WARM_UP is a
- * real phase — the belt may already be moving — so the copy must not claim the belt is stopped.
+ * the treadmill is safely parked and broadcasting, and we're waiting for the user to press the
+ * console's START so the session can enter WORKOUT_MODE=RUNNING (which begins recording).
  * The StatusBar's 48 dp status indicator is too small to register at the console's
  * 1920×1080 arm's-length viewing distance; this card is the visible cue.
  */

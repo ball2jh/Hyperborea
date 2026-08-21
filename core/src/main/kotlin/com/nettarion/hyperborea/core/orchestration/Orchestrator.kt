@@ -280,9 +280,9 @@ class Orchestrator(
                 }
         }
 
-        // Treadmills park in AwaitingConsoleStart: the MCU gates belt motion on the physical Start
-        // key, so the WORKOUT_MODE poll (handled below) drives the AwaitingConsoleStart → Running
-        // promotion when the user presses it. Other devices go straight to Running.
+        // Treadmills park in AwaitingConsoleStart: the physical Start key gates the session's
+        // WORKOUT_MODE=RUNNING command, and the readback below drives the promotion to Running.
+        // Other devices go straight to Running.
         if (deviceInfo.type == DeviceType.TREADMILL) {
             _state.value = OrchestratorState.AwaitingConsoleStart(CONSOLE_START_MESSAGE)
             logger.i(TAG, "Treadmill armed — awaiting physical Start key")
@@ -352,8 +352,8 @@ class Orchestrator(
                             mutex.withLock {
                                 if (_state.value.isWorkoutActive()) {
                                     // Re-derive the state from device type + current
-                                    // WORKOUT_MODE so a treadmill that's still WARM_UP lands
-                                    // back in AwaitingConsoleStart, not Running.
+                                    // WORKOUT_MODE so a treadmill that has not reached RUNNING
+                                    // lands back in AwaitingConsoleStart, not Running.
                                     val newType = hardwareAdapter.deviceInfo.value?.type
                                     val mode = hardwareAdapter.exerciseData.value?.workoutMode
                                         ?: WorkoutModeInterpreter.WORKOUT_MODE_IDLE

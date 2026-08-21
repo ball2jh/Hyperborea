@@ -64,8 +64,16 @@ class TrackMathTest {
 
     @Test
     fun `track aspect ratio matches standard 400m geometry`() {
-        // Bounding box: (84.39 + 2×36.50) wide by (2×36.50) tall.
-        assertThat(TrackMath.TRACK_ASPECT_RATIO).isWithin(1e-3f).of(157.39f / 73.0f)
+        // Bounding box: (84.39 + 2×36.80) wide by (2×36.80) tall.
+        assertThat(TrackMath.TRACK_ASPECT_RATIO).isWithin(1e-3f).of(157.99f / 73.60f)
+    }
+
+    @Test
+    fun `straights and measuring-line curves total 400 meters`() {
+        val trackMeters = 2f * TrackMath.STRAIGHT_METERS +
+            2f * Math.PI.toFloat() * TrackMath.CURVE_RADIUS_METERS
+
+        assertThat(trackMeters).isWithin(0.01f).of(TrackMath.LAP_METERS)
     }
 
     @Test

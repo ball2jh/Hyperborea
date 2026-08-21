@@ -53,8 +53,8 @@ fun RunningTrackWidget(
     Box(modifier = modifier.fillMaxSize()) {
         Canvas(modifier = Modifier.fillMaxSize().padding(24.dp)) {
             val stroke = 14.dp.toPx()
-            // Fit the real track proportions (84.39 m straights, 36.50 m curve radius) into the
-            // canvas, letterboxed and centered, so the stadium never stretches with the cell.
+            // Fit the real track proportions (84.39 m straights, 36.80 m measuring-line radius)
+            // into the canvas, letterboxed and centered, so the stadium never stretches with the cell.
             val availableWidth = size.width - stroke
             val availableHeight = size.height - stroke
             val trackWidth: Float

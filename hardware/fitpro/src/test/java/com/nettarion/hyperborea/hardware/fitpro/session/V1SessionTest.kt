@@ -258,16 +258,7 @@ class V1SessionTest {
         transport.emitIncoming(buildWorkoutModeAck(2))      // transitionToActive: RUNNING confirmed
     }
 
-    /**
-     * Treadmill variant: transitionToActive() only writes WORKOUT_MODE=WARM_UP and waits there —
-     * the MCU itself drives the WARM_UP → RUNNING transition once the physical Start key is pressed
-     * (see [V1Session.transitionToActive]). So only two acks: REQUIRE_START_REQUESTED, WARM_UP.
-     */
-    /**
-     * A treadmill's bring-up is only prepareConsole — transitionToActive leaves the console in
-     * IDLE (writing WARM_UP starts the belt on some V1 controllers), so there is no workout-mode
-     * round trip to answer.
-     */
+    /** Treadmill startup stays in IDLE; only REQUIRE_START_REQUESTED needs an acknowledgement. */
     private suspend fun respondToTreadmillConsoleStartup() {
         transport.emitIncoming(buildReadWriteAck())         // prepareConsole: REQUIRE_START_REQUESTED write
     }
@@ -483,11 +474,9 @@ class V1SessionTest {
     }
 
     @Test
-    fun `treadmill start writes REQUIRE_START_REQUESTED but never a workout mode or IDLE_MODE_LOCKOUT`() = runTest {
-        // Connecting must not move the belt. Some V1 treadmill controllers start it the moment
-        // WORKOUT_MODE=WARM_UP is written, with no speed ever requested — so the session leaves
-        // the console in IDLE and lets the orchestrator wait for the physical Start key, picking
-        // the transition up through the normal WORKOUT_MODE poll.
+    fun `treadmill start stays idle and never writes a workout mode or IDLE_MODE_LOCKOUT`() = runTest {
+        // Connecting must not write WARM_UP or RUNNING: some V1 controllers start their belt as
+        // soon as WARM_UP arrives, before the user has explicitly pressed Start.
         val session = createSession(this)
 
         backgroundScope.launch {
@@ -504,16 +493,44 @@ class V1SessionTest {
         advanceUntilIdle()
 
         assertThat(session.sessionState.value).isEqualTo(SessionState.Streaming)
-        // Critical: no workout-mode write at all — not WARM_UP (which can start the belt) and not
-        // RUNNING (the MCU does that itself on the physical Start key).
         val workoutModeWrites = transport.writtenPackets.mapNotNull { it.workoutModeWriteValue() }
         assertThat(workoutModeWrites).isEmpty()
-        // And critical: degraded must stay null — "idle and awaiting" is the expected steady state,
-        // not a failure mode.
+        // Waiting in IDLE for the physical button is expected, not a degraded state.
         assertThat(session.degradedReason.value).isNull()
-        // And IDLE_MODE_LOCKOUT must never be written on a treadmill — locking idle-mode on a
-        // belt machine fights the MCU's own start-key safety interlock.
+        // IDLE_MODE_LOCKOUT must stay untouched because the treadmill MCU owns the safety interlock.
         assertThat(transport.writtenPackets.none { it.isIdleModeLockoutWrite() }).isTrue()
+    }
+
+    @Test
+    fun `treadmill START_REQUESTED queues RUNNING after explicit Start`() = runTest {
+        val session = startStreamingTreadmillSession()
+        val writesBefore = transport.writtenPackets.size
+
+        backgroundScope.launch {
+            transport.emitIncoming(buildTreadmillStartResponse(startRequested = true))
+        }
+        advanceTimeBy(300)
+        advanceUntilIdle()
+
+        val newWorkoutModeWrites = transport.writtenPackets.drop(writesBefore)
+            .mapNotNull { it.workoutModeWriteValue() }
+        assertThat(newWorkoutModeWrites).containsExactly(2)
+    }
+
+    @Test
+    fun `treadmill physical Start key queues RUNNING when START_REQUESTED is absent`() = runTest {
+        val session = startStreamingTreadmillSession()
+        val writesBefore = transport.writtenPackets.size
+
+        backgroundScope.launch {
+            transport.emitIncoming(buildTreadmillStartResponse(keyCode = 2))
+        }
+        advanceTimeBy(300)
+        advanceUntilIdle()
+
+        val newWorkoutModeWrites = transport.writtenPackets.drop(writesBefore)
+            .mapNotNull { it.workoutModeWriteValue() }
+        assertThat(newWorkoutModeWrites).containsExactly(2)
     }
 
     @Test
@@ -939,6 +956,33 @@ class V1SessionTest {
 
         val totalLen = 4 + fieldData.size + 1
         val header = byteArrayOf(0x07, totalLen.toByte(), 0x02, 0x02) // status=DONE
+        val withoutChecksum = header + fieldData
+        return withoutChecksum + V1Codec.checksum(withoutChecksum)
+    }
+
+    /** Full treadmill poll response with the two firmware variants of an explicit Start signal. */
+    private fun buildTreadmillStartResponse(
+        startRequested: Boolean = false,
+        keyCode: Int = 0,
+    ): ByteArray {
+        val pollFields = V1DataField.periodicReadFields.sortedBy { it.fieldIndex }
+        val fieldData = ByteArray(pollFields.sumOf { it.sizeBytes })
+        var offset = 0
+        for (field in pollFields) {
+            when (field) {
+                V1DataField.KEY_OBJECT -> {
+                    fieldData[offset] = (keyCode and 0xFF).toByte()
+                    fieldData[offset + 1] = ((keyCode shr 8) and 0xFF).toByte()
+                }
+                V1DataField.WORKOUT_MODE -> fieldData[offset] = 1 // IDLE
+                V1DataField.START_REQUESTED -> fieldData[offset] = if (startRequested) 1 else 0
+                else -> { /* leave zero */ }
+            }
+            offset += field.sizeBytes
+        }
+
+        val totalLen = 4 + fieldData.size + 1
+        val header = byteArrayOf(0x07, totalLen.toByte(), 0x02, 0x02)
         val withoutChecksum = header + fieldData
         return withoutChecksum + V1Codec.checksum(withoutChecksum)
     }

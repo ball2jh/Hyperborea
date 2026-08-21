@@ -9,6 +9,7 @@ import com.nettarion.hyperborea.core.model.DeviceType
 import com.nettarion.hyperborea.core.model.ExerciseData
 import com.nettarion.hyperborea.core.model.isBeltBased
 import com.nettarion.hyperborea.hardware.fitpro.session.BaseFitProSession
+import com.nettarion.hyperborea.hardware.fitpro.session.ConsoleKey
 import com.nettarion.hyperborea.hardware.fitpro.session.DeviceDatabase
 import com.nettarion.hyperborea.hardware.fitpro.session.ExerciseDataAccumulator
 import com.nettarion.hyperborea.hardware.fitpro.session.PowerEstimator
@@ -92,6 +93,9 @@ internal class V1Session(
 
     /** Tracks whether the previous poll's response was flagged truncated, so we log only on the edge. */
     private var lastTruncatedSeen: Boolean = false
+
+    /** Edge detector for the V1 controller's app-mediated physical Start signal. */
+    private var lastStartRequested: Boolean = false
 
     /**
      * Whether the MCU is in constant-watts (ERG) mode. Updated from the IS_CONSTANT_WATTS_MODE
@@ -611,8 +615,8 @@ internal class V1Session(
      *   controllers start the belt as soon as `WORKOUT_MODE=WARM_UP` is written, even though no
      *   speed target was requested. The orchestrator can still wait in
      *   [com.nettarion.hyperborea.core.orchestration.OrchestratorState.AwaitingConsoleStart] and
-     *   observe the MCU transition through the normal [pollOnce] loop when the user starts the
-     *   workout, without software causing belt motion during connection.
+     *   answer the controller's explicit `START_REQUESTED` signal (or `KEY_OBJECT` fallback) by
+     *   writing `WORKOUT_MODE=RUNNING`; no workout-mode write happens before the physical press.
      * - **Bike / elliptical / rower**: drive the state machine ourselves —
      *   `IDLE → WARM_UP(10) → RUNNING(2)` with confirmation polling. `IDLE_MODE_LOCKOUT` must be
      *   disabled immediately before writing RUNNING (the firmware refuses the RUNNING transition
@@ -856,6 +860,7 @@ internal class V1Session(
                     }
                     accumulator.updateWorkoutMode(mode)
                 }
+                V1DataField.START_REQUESTED -> handleStartRequested(value != 0f)
                 V1DataField.IS_CONSTANT_WATTS_MODE -> {
                     val engaged = value != 0f
                     if (engaged != mcuErgMode) {
@@ -876,7 +881,6 @@ internal class V1Session(
                 V1DataField.AVERAGE_GRADE,
                 V1DataField.LAP_TIME,
                 V1DataField.RECOVERABLE_PAUSED_TIME,
-                V1DataField.START_REQUESTED,
                 V1DataField.GOAL_TIME,
                 V1DataField.FIVE_HUNDRED_SPLIT,
                 V1DataField.AVG_FIVE_HUNDRED_SPLIT,
@@ -908,15 +912,28 @@ internal class V1Session(
         }
     }
 
-    /**
-     * Logs each fresh press of the console membrane keypad (edge detection in the base). The
-     * equipment's own MCU acts on every one of these keys directly (changing
-     * resistance/incline/speed, transitioning the workout state machine on START/STOP, etc.) and
-     * the new state flows up through normal polling — so we don't drive anything from key presses;
-     * decoding them is pure diagnostics.
-     */
+    /** Passes fresh membrane-keypad presses through the base session's edge detector. */
     private fun handleKeyObject(keyObject: KeyObject?) {
         onKeypadCode(keyObject?.code ?: 0, heldMs = keyObject?.timeHeld ?: 0)
+    }
+
+    private fun handleStartRequested(requested: Boolean) {
+        if (requested && !lastStartRequested) requestTreadmillStart("START_REQUESTED")
+        lastStartRequested = requested
+    }
+
+    override fun onConsoleKeyPressed(key: ConsoleKey) {
+        // Most V1 keys are acted on directly by the MCU. Some treadmill firmware reports Start as
+        // KEY_OBJECT without asserting START_REQUESTED, so answer that explicit press as a fallback.
+        if (key == ConsoleKey.START) requestTreadmillStart("physical Start key")
+    }
+
+    private fun requestTreadmillStart(source: String) {
+        if (detectedDeviceType != DeviceType.TREADMILL) return
+        if (accumulator.snapshot().workoutMode == WorkoutMode.RUNNING.raw.toInt()) return
+
+        logger.i(TAG, "$source received while treadmill is idle — queueing WORKOUT_MODE=RUNNING")
+        sessionScope.launch { writeFeature(DeviceCommand.ResumeWorkout) }
     }
 
     private fun estimatePowerIfNeeded() {
@@ -1047,8 +1064,8 @@ internal class V1Session(
         private const val FIELD_ENABLED = 1f
         private const val FIELD_DISABLED = 0f
 
-        // KEY_OBJECT key codes for the console-keypad buttons we decode for diagnostics.
-        // Hyperborea acts on none of them directly — the MCU does the work and the resulting
-        // state flows up through the WORKOUT_MODE poll.
+        // KEY_OBJECT key codes are mapped centrally by FitProKeypad. V1 normally observes them;
+        // treadmill Start is the one host-routed fallback because not every controller asserts
+        // START_REQUESTED.
     }
 }

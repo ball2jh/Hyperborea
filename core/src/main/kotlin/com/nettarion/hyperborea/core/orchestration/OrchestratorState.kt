@@ -5,12 +5,10 @@ sealed interface OrchestratorState {
     data class Preparing(val step: String) : OrchestratorState
 
     /**
-     * Equipment is connected, the console is armed (WORKOUT_MODE = WARM_UP), and broadcasts are
-     * live — but the workout has not started yet because the MCU gates belt motion on the
-     * physical Start key (treadmill / incline-trainer safety convention; the read-only
-     * `START_REQUESTED` telemetry field rises on the key press, and only then does the MCU
-     * complete the WARM_UP → RUNNING transition). The workout-mode monitor promotes this state
-     * to [Running] when it observes `WORKOUT_MODE = RUNNING` on the wire.
+     * Equipment is connected, the treadmill console is safely parked before the run, and
+     * broadcasts are live. The physical Start key is the safety gate: after that explicit press,
+     * the protocol session and MCU complete the transition to `WORKOUT_MODE = RUNNING`. The
+     * workout-mode monitor then promotes this state to [Running].
      */
     data class AwaitingConsoleStart(val message: String) : OrchestratorState
 

@@ -123,7 +123,7 @@ internal abstract class BaseFitProSession(
         if (key != null) onConsoleKeyPressed(key)
     }
 
-    /** What a fresh press does is protocol-specific; the default is observe-only (V1's MCU self-acts). */
+    /** What a fresh press does is protocol-specific; the default is observe-only. */
     protected open fun onConsoleKeyPressed(key: ConsoleKey) {}
 
     /** Logs the current telemetry snapshot at most once per second — both receive paths call this per sample. */

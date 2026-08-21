@@ -4,9 +4,10 @@ package com.nettarion.hyperborea.hardware.fitpro.v1
  * FitPro V1 console workout state — the value of the [V1DataField.WORKOUT_MODE] bitfield.
  *
  * The MCU runs the workout state machine; the app drives transitions by writing this field, and
- * reads it back to see the current state. A workout is brought up `IDLE → WARM_UP → RUNNING`
- * (`RUNNING ↔ PAUSE` during the workout); `DMK` is the safety-key-removed state. Wire values are
- * the raw byte the [V1Converter.BYTE] converter carries.
+ * reads it back to see the current state. Non-belt machines are brought up
+ * `IDLE → WARM_UP → RUNNING`; treadmills remain IDLE until an explicit physical Start and then
+ * enter RUNNING. `RUNNING ↔ PAUSE` covers workout pauses, and `DMK` is the safety-key-removed
+ * state. Wire values are the raw byte the [V1Converter.BYTE] converter carries.
  */
 enum class WorkoutMode(val raw: Float) {
     UNKNOWN(0f),

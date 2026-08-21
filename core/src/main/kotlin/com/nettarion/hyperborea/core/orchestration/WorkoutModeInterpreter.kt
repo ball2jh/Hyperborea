@@ -6,16 +6,15 @@ import com.nettarion.hyperborea.core.AppLogger
  * Translates the console's polled WORKOUT_MODE into orchestrator actions:
  *
  *  - RUNNING while armed ([OrchestratorState.AwaitingConsoleStart]) → promote to Running (the
- *    user pressed the physical Start key; the MCU completed the WARM_UP → RUNNING transition).
+ *    user pressed the physical Start key and the protocol session/MCU completed the transition).
  *  - DMK while Running → pause (safety key removed). From AwaitingConsoleStart it's ignored —
  *    the console's own "INSERT SAFETY KEY" hardware indicator covers that case.
  *  - IDLE from Paused → resume (safety key re-inserted); from Running/armed → stop (the user
  *    pressed the physical Stop key; symmetrical with app-side Stop).
  *
- * Stateful in one way: some belt machines refuse the app's WARM_UP write outright and keep
- * reporting idle until the physical Start key is pressed — for those, an idle report while armed
- * is the normal parked state, not the user pressing Stop, so stopping is gated on the console
- * having confirmed leaving idle at least once since [reset].
+ * Stateful in one way: belt machines can remain idle until the physical Start key is pressed. An
+ * idle report while armed is therefore the normal parked state, not the user pressing Stop, so
+ * stopping is gated on the console having confirmed leaving idle at least once since [reset].
  */
 internal class WorkoutModeInterpreter(private val logger: AppLogger) {
 
