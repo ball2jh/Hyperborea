@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+## [1.4.1] - 2026-08-20
+- **V1 treadmill physical Start works again without bringing back the connect-time belt hazard.** Version 1.4.0 correctly stopped writing `WARM_UP` while connecting, because some controllers interpret that write as an immediate belt start, but it left the controller's explicit start request unanswered. Hyperborea now keeps the treadmill safely idle until the physical Start press, then answers `START_REQUESTED` with `WORKOUT_MODE=RUNNING`; a keypad-event fallback covers firmware that reports the Start button without asserting the request field.
+- **The running-track animation now uses the true 400 m measuring line.** The curve radius is 36.80 m—the standard 36.50 m inner-curb radius plus the 30 cm lane-one measurement offset—so the 84.39 m straights and curves total 400 m and the on-screen oval has the correct proportions.
+
 ## [1.4.0] - 2026-08-19
 - **Pace on the speed tile.** The treadmill dashboard's speed tile now shows running pace above the per-hour value — min/km or min/mi following the units setting (e.g. 9.2 km/h reads "6:31 min/km"). Hidden while the belt is stopped or crawling.
 - **The blue incline goal now actually appears — and clears when reached.** On V2 consoles the incline-target field was never subscribed, so changing elevation showed no "→ goal" on the incline tile (speed worked because its field doubles as the belt-speed source). The target echo is now subscribed, and the app also surfaces the commanded target immediately — the goal appears the moment you press +/− (counting along during a hold) and disappears once the deck arrives.
