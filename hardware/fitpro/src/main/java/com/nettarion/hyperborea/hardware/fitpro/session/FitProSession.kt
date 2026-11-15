@@ -31,6 +31,8 @@ interface FitProSession {
      */
     val deviceCapabilities: DeviceCapabilities?
 
+    fun setConsoleControlListener(listener: suspend (DeviceCommand) -> Unit) {}
+
     suspend fun start()
     suspend fun stop()
     suspend fun identify(): DeviceIdentity?

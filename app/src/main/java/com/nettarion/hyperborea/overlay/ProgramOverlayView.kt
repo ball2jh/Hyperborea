@@ -105,9 +105,9 @@ internal class ProgramOverlayView(
         caption.text = model.caption
         number.setTextColor(if (model.warning) OverlayPalette.AMBER else OverlayPalette.TEXT_HIGH)
         caption.setTextColor(if (model.warning) OverlayPalette.AMBER else SECONDARY)
-        speedFrom.text = "From ${model.currentSpeed} ${model.speedUnit}"
+        speedFrom.text = "${if (model.manualSpeed) "Manual" else "From"} ${model.currentSpeed} ${model.speedUnit}"
         speedTo.text = targetText(model.targetSpeed, " ${model.speedUnit}")
-        inclineFrom.text = "From ${model.currentIncline}%"
+        inclineFrom.text = "${if (model.manualIncline) "Manual" else "From"} ${model.currentIncline}%"
         inclineTo.text = targetText(model.targetIncline, "%")
         pause.text = if (workout is OrchestratorState.Paused) "▶  Resume" else "Ⅱ  Pause"
         val actionable = workout is OrchestratorState.Running || workout is OrchestratorState.Paused

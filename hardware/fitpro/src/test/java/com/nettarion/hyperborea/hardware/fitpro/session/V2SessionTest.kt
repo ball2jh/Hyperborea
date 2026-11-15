@@ -1230,6 +1230,23 @@ class V2SessionTest {
     }
 
     @Test
+    fun `physical target key notifies program before host writes the adjustment`() = runTest {
+        val session = createSession(this)
+        emitSupportedFeatures(V2FeatureId.TARGET_KPH, V2FeatureId.WORKOUT_STATE)
+        session.start(); advanceUntilIdle()
+        transport.emitIncoming(buildEventPacket(V2FeatureId.WORKOUT_STATE, V2WorkoutMode.RUNNING.raw)); runCurrent()
+        val baseline = transport.writtenPackets.size
+        val received = mutableListOf<DeviceCommand>()
+        val allow = kotlinx.coroutines.CompletableDeferred<Unit>()
+        session.setConsoleControlListener { received += it; allow.await() }
+        transport.emitIncoming(buildEventPacket(V2FeatureId.KEY_COOKED, 3f)); runCurrent()
+        assertThat(received).containsExactly(DeviceCommand.AdjustSpeed(true))
+        assertThat(transport.writtenPackets.drop(baseline).none { it.isFeatureWrite(V2FeatureId.TARGET_KPH) }).isTrue()
+        allow.complete(Unit); runCurrent()
+        assertThat(transport.writtenPackets.drop(baseline).filter { it.isFeatureWrite(V2FeatureId.TARGET_KPH) }).hasSize(1)
+    }
+
+    @Test
     fun `host-driven console routes speed incline and Stop keys while RUNNING`() = runTest {
         // The console forwards keys but drives nothing itself, so the host answers them.
         val session = createSession(this)
@@ -1264,6 +1281,8 @@ class V2SessionTest {
         advanceUntilIdle()
         transport.emitIncoming(buildEventPacket(V2FeatureId.WORKOUT_STATE, V2WorkoutMode.RUNNING.raw))
         runCurrent()
+        val received = mutableListOf<DeviceCommand>()
+        session.setConsoleControlListener { received += it }
         val baseline = transport.writtenPackets.size
 
         transport.emitIncoming(buildEventPacket(V2FeatureId.KEY_COOKED, 3f)) // speed up
@@ -1272,6 +1291,7 @@ class V2SessionTest {
         transport.emitIncoming(buildEventPacket(V2FeatureId.KEY_COOKED, 5f)) // incline up
         runCurrent()
 
+        assertThat(received).containsExactly(DeviceCommand.AdjustSpeed(true), DeviceCommand.AdjustIncline(true)).inOrder()
         val writes = transport.writtenPackets.drop(baseline)
         assertThat(writes.none { it.isFeatureWrite(V2FeatureId.TARGET_KPH) }).isTrue()
         assertThat(writes.none { it.isFeatureWrite(V2FeatureId.TARGET_GRADE) }).isTrue()

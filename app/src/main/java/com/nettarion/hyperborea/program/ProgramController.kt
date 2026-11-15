@@ -35,10 +35,13 @@ class ProgramController @Inject constructor(
     private var telemetry: Job? = null
     @Volatile private var lastTelemetry = 0L
     @Volatile private var launching = false
-    private var sent: ProgramTarget? = null
+    private var sentSpeed: Float? = null
+    private var sentIncline: Float? = null
+    private fun clearSent() { sentSpeed = null; sentIncline = null }
 
     fun startMonitoring() {
         if (ticker?.isActive == true) return
+        hardware.setConsoleControlListener(::manualControl)
         telemetry = scope.launch { hardware.exerciseData.collect { if (it != null) lastTelemetry = SystemClock.elapsedRealtime() } }
         ticker = scope.launch {
             var previous = SystemClock.elapsedRealtime()
@@ -64,7 +67,7 @@ class ProgramController @Inject constructor(
             val device = hardware.deviceInfo.value ?: error("Waiting for treadmill identification.")
             program.validationError(device)?.let { error(it) }
             cues.stop()
-            engine = ProgramEngine(program); sent = null; _state.value = engine?.state
+            engine = ProgramEngine(program); clearSent(); _state.value = engine?.state
             _canResumeProgram.value = false
             launching = mode == ProgramStartMode.NEW_WORKOUT
             mode
@@ -80,8 +83,16 @@ class ProgramController @Inject constructor(
         if (command !is DeviceCommand.SetTargetSpeed && command !is DeviceCommand.AdjustSpeed && command !is DeviceCommand.SetIncline && command !is DeviceCommand.AdjustIncline && command !is DeviceCommand.PauseWorkout && command !is DeviceCommand.ResumeWorkout) return
         mutex.withLock {
             val active = engine?.takeIf { it.state.active } ?: return@withLock
-            active.hold(true, "Manual control · resume program when ready")
-            sent = null; _state.value = engine?.state; cues.stop()
+            when (command) {
+                is DeviceCommand.SetTargetSpeed, is DeviceCommand.AdjustSpeed -> {
+                    active.overrideForBlock(speed = true); sentSpeed = null
+                }
+                is DeviceCommand.SetIncline, is DeviceCommand.AdjustIncline -> {
+                    active.overrideForBlock(incline = true); sentIncline = null
+                }
+                else -> { active.hold(true, "Manual control · resume program when ready"); clearSent(); cues.stop() }
+            }
+            _state.value = active.state
         }
     }
 
@@ -92,13 +103,13 @@ class ProgramController @Inject constructor(
 
     suspend fun resumeProgram() = mutex.withLock {
         if (equipmentReady(SystemClock.elapsedRealtime()) && engine?.state?.status == ProgramStatus.MANUAL) {
-            sent = null; applyEvents(engine!!.begin()); _state.value = engine?.state
+            clearSent(); applyEvents(engine!!.begin()); _state.value = engine?.state
         }
     }
 
     suspend fun clearFinished() = mutex.withLock {
         _canResumeProgram.value = false
-        if (engine?.state?.active != true) { engine = null; _state.value = null; sent = null; cues.stop() }
+        if (engine?.state?.active != true) { engine = null; _state.value = null; clearSent(); cues.stop() }
     }
 
     suspend fun cancel() = mutex.withLock {
@@ -106,7 +117,7 @@ class ProgramController @Inject constructor(
         engine?.takeIf { it.state.active }?.end(ProgramStatus.CANCELLED, "Program ended")
         _state.value = engine?.state; cues.stop()
     }
-    suspend fun stopMonitoring() { ticker?.cancelAndJoin(); telemetry?.cancelAndJoin(); cancel(); cues.close(); ticker = null; telemetry = null }
+    suspend fun stopMonitoring() { hardware.setConsoleControlListener {}; ticker?.cancelAndJoin(); telemetry?.cancelAndJoin(); cancel(); cues.close(); ticker = null; telemetry = null }
 
     private suspend fun tick(delta: Long, now: Long) {
         var completed = false
@@ -119,7 +130,7 @@ class ProgramController @Inject constructor(
                     if (!equipmentReady(now) || delta > ProgramEngine.MAX_TICK_MILLIS) {
                         e.hold(true, "Connection or timing interrupted · resume program when ready"); cues.stop()
                     } else if (e.state.status != ProgramStatus.MANUAL) {
-                        if (e.state.status == ProgramStatus.READY || e.state.status == ProgramStatus.PAUSED) { sent = null; applyEvents(e.begin()) }
+                        if (e.state.status == ProgramStatus.READY || e.state.status == ProgramStatus.PAUSED) { clearSent(); applyEvents(e.begin()) }
                         else completed = applyEvents(e.advance(delta.coerceAtLeast(0)))
                     }
                 }
@@ -153,10 +164,16 @@ class ProgramController @Inject constructor(
                     event.target.speedKph.coerceIn(.5f, info.maxSpeed),
                     quantize(event.target.inclinePercent, if (ramping) .01f else info.inclineStep).coerceIn(info.minIncline, info.maxIncline),
                 )
-                if (target.speedKph != sent?.speedKph && !orchestrator.sendProgramCommand(DeviceCommand.SetTargetSpeed(target.speedKph))) return false
-                if (target.inclinePercent != sent?.inclinePercent && !orchestrator.sendProgramCommand(DeviceCommand.SetIncline(target.inclinePercent, snapToStep = !ramping))) return false
-                if (target != sent) logger.i(TAG, "Program target: $target")
-                sent = target
+                if (event.controlSpeed && target.speedKph != sentSpeed) {
+                    if (!orchestrator.sendProgramCommand(DeviceCommand.SetTargetSpeed(target.speedKph))) return false
+                    sentSpeed = target.speedKph
+                    logger.i(TAG, "Program speed: $sentSpeed")
+                }
+                if (event.controlIncline && target.inclinePercent != sentIncline) {
+                    if (!orchestrator.sendProgramCommand(DeviceCommand.SetIncline(target.inclinePercent, snapToStep = !ramping))) return false
+                    sentIncline = target.inclinePercent
+                    logger.i(TAG, "Program incline: $sentIncline")
+                }
             }
             ProgramEvent.Finished -> return true // Let the final acknowledgement finish naturally.
         }

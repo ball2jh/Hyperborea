@@ -609,7 +609,7 @@ internal class V2Session(
         }
     }
 
-    private fun handleIncoming(data: ByteArray) {
+    private suspend fun handleIncoming(data: ByteArray) {
         val message = V2Codec.decode(data) ?: return
 
         when (message) {
@@ -648,7 +648,7 @@ internal class V2Session(
         }
     }
 
-    private fun applyEvent(feature: V2FeatureId, value: Float) {
+    private suspend fun applyEvent(feature: V2FeatureId, value: Float) {
         when (feature) {
             V2FeatureId.DEVICE_TYPE -> _reportedDeviceType.value = value
             V2FeatureId.KEY_COOKED -> onKeypadCode(value.toInt())

@@ -4,6 +4,55 @@ import com.google.common.truth.Truth.assertThat
 import org.junit.Test
 
 class ProgramEngineTest {
+    @Test fun `speed override keeps clock and incline ramp running until the next block`() {
+        val p = program(ramp = true).copy(blocks = program(ramp = true).blocks + ProgramBlock(name = "Recover", durationSeconds = 10, speedKph = 5f))
+        val e = loopingEngine(p)
+        repeat(12) { e.advance(1000) }
+        e.overrideForBlock(speed = true)
+        val events = (1..7).flatMap { e.advance(1000) }.filterIsInstance<ProgramEvent.Target>()
+        assertThat(e.state.elapsedMillis).isEqualTo(19000)
+        assertThat(e.state.status).isEqualTo(ProgramStatus.RUNNING)
+        assertThat(events).isNotEmpty()
+        assertThat(events.all { !it.controlSpeed && it.controlIncline }).isTrue()
+        assertThat(events.last().target.inclinePercent).isGreaterThan(events.first().target.inclinePercent)
+        val boundary = e.advance(1000).filterIsInstance<ProgramEvent.Target>().single()
+        assertThat(boundary.controlSpeed).isTrue()
+        assertThat(e.state.manualSpeed).isFalse()
+    }
+
+    @Test fun `incline override leaves speed automated and both overrides survive pause`() {
+        val e = loopingEngine(program(ramp = true))
+        repeat(12) { e.advance(1000) }; e.overrideForBlock(incline = true)
+        val event = e.advance(1000).filterIsInstance<ProgramEvent.Target>().single()
+        assertThat(event.controlSpeed).isTrue(); assertThat(event.controlIncline).isFalse()
+        e.overrideForBlock(speed = true); e.hold(); e.begin()
+        assertThat(e.state.manualSpeed && e.state.manualIncline).isTrue()
+        val targets = (1..3).flatMap { e.advance(1000) }.filterIsInstance<ProgramEvent.Target>()
+        assertThat(targets).isEmpty()
+    }
+
+    @Test fun `late manual override restarts three full warnings before same target block reclaims axis`() {
+        val p = WorkoutProgram(blocks = listOf(ProgramBlock(durationSeconds = 10), ProgramBlock(durationSeconds = 10)))
+        val e = loopingEngine(p)
+        repeat(9) { e.advance(1000) }; e.advance(500)
+        e.overrideForBlock(speed = true)
+        val events = (1..30).flatMap { e.advance(100) }
+        assertThat(events.filterIsInstance<ProgramEvent.Cue>()).containsExactly(ProgramEvent.Cue(3), ProgramEvent.Cue(2), ProgramEvent.Cue(1), ProgramEvent.Cue(0)).inOrder()
+        assertThat(e.state.blockIndex).isEqualTo(1)
+        assertThat(e.state.elapsedMillis).isEqualTo(10000)
+        assertThat(events.filterIsInstance<ProgramEvent.Target>().last().controlSpeed).isTrue()
+    }
+
+    @Test fun `single block loop reclaims both manual axes with warnings`() {
+        val e = loopingEngine(WorkoutProgram(loop = true, blocks = listOf(ProgramBlock(durationSeconds = 10))))
+        repeat(8) { e.advance(1000) }; e.overrideForBlock(speed = true, incline = true)
+        val events = (1..30).flatMap { e.advance(100) }
+        assertThat(events.filterIsInstance<ProgramEvent.Cue>()).containsExactly(ProgramEvent.Cue(3), ProgramEvent.Cue(2), ProgramEvent.Cue(1), ProgramEvent.Cue(0)).inOrder()
+        assertThat(e.state.completedLoops).isEqualTo(1)
+        assertThat(e.state.manualSpeed || e.state.manualIncline).isFalse()
+        assertThat(events.filterIsInstance<ProgramEvent.Target>().single()).isEqualTo(ProgramEvent.Target(ProgramTarget(8f, 0f)))
+    }
+
     @Test fun `program validation rejects every non treadmill equipment type`() {
         for (type in com.nettarion.hyperborea.core.model.DeviceType.entries) {
             val device = com.nettarion.hyperborea.core.model.DeviceInfo.DEFAULT_INDOOR_BIKE.copy(type = type)

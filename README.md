@@ -168,9 +168,13 @@ Incline block settings keep their usual steps, while ramp commands retain finer 
 Held incline +/− controls select a destination immediately; the deck receives the final target
 after release and a short quiet interval, avoiding a command for every intermediate selection.
 Media sound must be available before automatic targets are applied. Pause freezes the program;
-manual speed/incline control (including external app commands) suspends automation until
-**Resume program**, which gives a fresh countdown. Connection/timing interruptions also suspend
-automation rather than fast-forwarding through missed changes. Single-pass programs stop the workout at
+manual speed/incline adjustments (app, widget, physical console keys, or external commands) hold
+only the adjusted axis for the rest of the current block. Program time and the other axis continue.
+The next block restores automation after a full 3–2–1 warning; a late adjustment extends the current
+block enough to give all three beeps. The dashboard strip shows block progress, separate live/next
+speed and incline rows, and which axis is manual. Unavailable audio and connection/timing interruptions
+still hold the whole program until **Resume program** gives a fresh countdown, rather than
+fast-forwarding through missed changes. Single-pass programs stop the workout at
 the end of the final block after a visible and audible 3–2–1 stop warning. Looping programs
 repeat until stopped. Programs do not
 automatically resume after process death.

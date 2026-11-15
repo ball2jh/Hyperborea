@@ -15,11 +15,13 @@ internal data class ProgramOverlayPresentation(
     val currentIncline: String,
     val targetIncline: String,
     val warning: Boolean,
+    val manualSpeed: Boolean = false,
+    val manualIncline: Boolean = false,
 )
 
 /** Live measurements are kept distinct from planned targets, including while starting or paused. */
 internal fun programOverlayPresentation(run: ProgramRunState, data: ExerciseData?, imperial: Boolean): ProgramOverlayPresentation {
-    val ramping = run.block.ramp && run.blockIndex > 0
+    val ramping = run.block.ramp && run.blockIndex > 0 && !(run.manualSpeed && run.manualIncline)
     val ending = run.blockIndex == run.program.blocks.lastIndex
     val running = run.status == ProgramStatus.RUNNING
     val stopping = running && ending && !run.program.loop && (!ramping || run.countdown != null)
@@ -29,6 +31,10 @@ internal fun programOverlayPresentation(run: ProgramRunState, data: ExerciseData
         ramping && run.countdown == null -> ProgramTarget(run.block.speedKph, run.block.inclinePercent)
         else -> run.nextTarget ?: run.target
     }
+    val visibleTarget = target.copy(
+        speedKph = if (run.manualSpeed && !stopping) { if (running) run.nextTarget?.speedKph ?: if (ending && !run.program.loop) 0f else run.block.speedKph else data?.speed ?: run.target.speedKph } else target.speedKph,
+        inclinePercent = if (run.manualIncline) { if (running) run.nextTarget?.inclinePercent ?: data?.incline ?: run.target.inclinePercent else data?.incline ?: run.target.inclinePercent } else target.inclinePercent,
+    )
     val blockRemaining = ((run.program.blocks.take(run.blockIndex + 1).sumOf { it.durationSeconds } * 1000L - run.elapsedMillis + 999) / 1000).toInt().coerceAtLeast(0)
     val seconds = if (ramping && run.countdown == null) blockRemaining else run.countdown ?: run.nextChangeSeconds
     val (value, caption) = when (run.status) {
@@ -53,5 +59,5 @@ internal fun programOverlayPresentation(run: ProgramRunState, data: ExerciseData
     }
     fun number(value: Float?) = value?.takeIf { it.isFinite() }?.let { String.format(Locale.US, "%.1f", it) } ?: "—"
     fun speed(value: Float?) = number(value?.times(if (imperial) .621371f else 1f))
-    return ProgramOverlayPresentation(value, caption, speed(data?.speed), speed(target.speedKph), if (imperial) "mph" else "km/h", number(data?.incline), number(target.inclinePercent), (running || run.status == ProgramStatus.COUNTDOWN) && run.countdown != null)
+    return ProgramOverlayPresentation(value, caption, speed(data?.speed), speed(visibleTarget.speedKph), if (imperial) "mph" else "km/h", number(data?.incline), number(visibleTarget.inclinePercent), (running || run.status == ProgramStatus.COUNTDOWN) && run.countdown != null, run.manualSpeed, run.manualIncline)
 }

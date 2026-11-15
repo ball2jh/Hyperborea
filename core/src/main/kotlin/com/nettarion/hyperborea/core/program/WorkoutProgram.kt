@@ -80,6 +80,8 @@ data class ProgramRunState(
     val countdown: Int? = null,
     val message: String = "Press the physical console START key",
     val completedLoops: Long = 0,
+    val manualSpeed: Boolean = false,
+    val manualIncline: Boolean = false,
 ) {
     val active: Boolean get() = status !in setOf(ProgramStatus.COMPLETE, ProgramStatus.CANCELLED, ProgramStatus.ERROR)
     val remainingSeconds: Int get() = (program.totalSeconds - elapsedMillis / 1000).toInt().coerceAtLeast(0)

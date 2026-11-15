@@ -6,6 +6,27 @@ import com.nettarion.hyperborea.core.program.*
 import org.junit.Test
 
 class ProgramOverlayPresentationTest {
+    @Test fun `manual final ramp never suggests returning speed to its overridden endpoint`() {
+        val p = WorkoutProgram()
+        val ui = programOverlayPresentation(ProgramRunState(p, status = ProgramStatus.RUNNING,
+            blockIndex = 2, manualSpeed = true, manualIncline = true, nextChangeSeconds = 8),
+            ExerciseData.ZERO.copy(speed = 6f, incline = 2f), false)
+        assertThat(ui.targetSpeed).isEqualTo("0.0")
+        assertThat(ui.targetIncline).isEqualTo("2.0")
+        assertThat(ui.caption).isEqualTo("seconds to stop")
+    }
+    @Test fun `overridden ramp axis shows live value and next block target`() {
+        val p = WorkoutProgram()
+        val state = ProgramRunState(status = ProgramStatus.RUNNING, blockIndex = 1,
+            program = p.copy(blocks = p.blocks.mapIndexed { i, b -> if (i == 1) b.copy(ramp = true) else b }),
+            target = ProgramTarget(6f, .5f), nextTarget = ProgramTarget(4f, 0f), manualSpeed = true)
+        val ui = programOverlayPresentation(state, ExerciseData.ZERO.copy(speed = 7f, incline = .5f), false)
+        assertThat(ui.currentSpeed).isEqualTo("7.0")
+        assertThat(ui.targetSpeed).isEqualTo("4.0")
+        assertThat(ui.targetIncline).isEqualTo("1.0")
+        assertThat(ui.manualSpeed).isTrue()
+        assertThat(ui.manualIncline).isFalse()
+    }
     @Test fun `loop boundary shows repeat and the first target instead of a belt stop`() {
         val p = WorkoutProgram(loop = true)
         val state = ProgramRunState(p, status = ProgramStatus.RUNNING, blockIndex = 2, nextTarget = ProgramTarget(5f, 0f), nextChangeSeconds = 3, countdown = 3)

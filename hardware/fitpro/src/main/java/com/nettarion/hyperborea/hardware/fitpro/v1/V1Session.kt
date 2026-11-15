@@ -918,7 +918,7 @@ internal class V1Session(
     }
 
     /** Passes fresh membrane-keypad presses through the base session's edge detector. */
-    private fun handleKeyObject(keyObject: KeyObject?) {
+    private suspend fun handleKeyObject(keyObject: KeyObject?) {
         onKeypadCode(keyObject?.code ?: 0, heldMs = keyObject?.timeHeld ?: 0)
     }
 

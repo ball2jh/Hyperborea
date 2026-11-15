@@ -5,7 +5,7 @@ import kotlin.math.ceil
 sealed interface ProgramEvent {
     /** 3/2/1 are countdown tones; 0 is the distinct target-change tone. */
     data class Cue(val count: Int) : ProgramEvent
-    data class Target(val target: ProgramTarget) : ProgramEvent
+    data class Target(val target: ProgramTarget, val controlSpeed: Boolean = true, val controlIncline: Boolean = true) : ProgramEvent
     data object Finished : ProgramEvent
 }
 
@@ -17,7 +17,7 @@ class ProgramEngine(program: WorkoutProgram) {
     private var leadInMillis = 3000L
     private var boundaryPaddingMillis = 0L
     private var lastCue: Pair<Int, Int>? = null
-    private var lastTarget: ProgramTarget? = null
+    private var lastTarget: ProgramEvent.Target? = null
 
     companion object {
         // A larger step can jump across two countdown buckets and omit a warning beep.
@@ -32,11 +32,25 @@ class ProgramEngine(program: WorkoutProgram) {
         val remaining = state.program.blocks.take(state.blockIndex + 1).sumOf { it.durationSeconds } * 1000L - state.elapsedMillis
         // Resuming in the last seconds of a block must still give the next change all three cues.
         boundaryPaddingMillis = if (state.elapsedMillis > 0 && (next == null ||
-            next.speedKph != current.speedKph || next.inclinePercent != current.inclinePercent)) (3000L - remaining).coerceAtLeast(0) else 0
+            next.speedKph != current.speedKph || next.inclinePercent != current.inclinePercent || state.manualSpeed || state.manualIncline)) (3000L - remaining).coerceAtLeast(0) else 0
         lastCue = null
         lastTarget = null
         state = state.copy(status = ProgramStatus.COUNTDOWN, countdown = 3, nextTarget = state.target, nextChangeSeconds = 3, message = "Targets change in 3")
         return listOf(ProgramEvent.Cue(3))
+    }
+
+    /** A user adjustment owns just that axis until the next block, without freezing the clock. */
+    fun overrideForBlock(speed: Boolean = false, incline: Boolean = false) {
+        if (!state.active) return
+        state = state.copy(manualSpeed = state.manualSpeed || speed, manualIncline = state.manualIncline || incline)
+        val remaining = state.program.blocks.take(state.blockIndex + 1).sumOf { it.durationSeconds } * 1000L - state.elapsedMillis
+        // A late adjustment restarts the warning, delaying the boundary rather than reclaiming
+        // the user's target with only one or two beeps. Subsequent held-key edits restart it again.
+        if (remaining + boundaryPaddingMillis < 3000) {
+            boundaryPaddingMillis = (3000 - remaining).coerceAtLeast(0)
+            lastCue = null
+            state = state.copy(countdown = null)
+        }
     }
 
     fun hold(manual: Boolean = false, message: String = "Program paused") {
@@ -89,6 +103,8 @@ class ProgramEngine(program: WorkoutProgram) {
             if (state.elapsedMillis < start + block.durationSeconds * 1000L) true
             else { start += block.durationSeconds * 1000L; false }
         }
+        val reclaiming = (wrapped || index != previousIndex) && (state.manualSpeed || state.manualIncline)
+        if (wrapped || index != previousIndex) state = state.copy(manualSpeed = false, manualIncline = false)
         val block = program.blocks[index]
         val previous = program.blocks.getOrNull(index - 1)
         val fraction = ((state.elapsedMillis - start) / 1000L).toFloat() / block.durationSeconds
@@ -99,19 +115,20 @@ class ProgramEngine(program: WorkoutProgram) {
         ) else ProgramTarget(block.speedKph, block.inclinePercent)
         val loopingBoundary = program.loop && index == program.blocks.lastIndex
         val nextBlock = program.blocks.getOrNull(index + 1) ?: program.blocks.first().takeIf { program.loop }
-        val next = nextBlock?.takeIf { it.speedKph != block.speedKph || it.inclinePercent != block.inclinePercent }
+        val next = nextBlock?.takeIf { it.speedKph != block.speedKph || it.inclinePercent != block.inclinePercent || state.manualSpeed || state.manualIncline }
         val ending = !program.loop && index == program.blocks.lastIndex
         val seconds = if (next != null || ending || loopingBoundary) ceil((start + block.durationSeconds * 1000L - state.elapsedMillis + boundaryPaddingMillis) / 1000.0).toInt() else null
         val count = seconds?.takeIf { (next != null || ending) && !finishedLeadIn && it in 1..3 }
         val transitionFrom = if (wrapped) program.blocks.last() else previous
-        if ((wrapped || index != previousIndex) && transitionFrom != null && (transitionFrom.speedKph != block.speedKph || transitionFrom.inclinePercent != block.inclinePercent)) events += ProgramEvent.Cue(0)
+        if ((wrapped || index != previousIndex) && transitionFrom != null && (transitionFrom.speedKph != block.speedKph || transitionFrom.inclinePercent != block.inclinePercent || reclaiming)) events += ProgramEvent.Cue(0)
         if (count != null && lastCue != (index to count)) {
             events += ProgramEvent.Cue(count)
             lastCue = index to count
         }
-        if (target != lastTarget) {
-            events += ProgramEvent.Target(target)
-            lastTarget = target
+        val command = ProgramEvent.Target(target, !state.manualSpeed, !state.manualIncline)
+        if (command != lastTarget) {
+            if (command.controlSpeed || command.controlIncline) events += command
+            lastTarget = command
         }
         state = state.copy(blockIndex = index, target = target, nextTarget = next?.let { ProgramTarget(it.speedKph, it.inclinePercent) }, nextChangeSeconds = seconds, countdown = count, message = if (ending && count != null) "Belt stops in $count" else block.name)
         return events

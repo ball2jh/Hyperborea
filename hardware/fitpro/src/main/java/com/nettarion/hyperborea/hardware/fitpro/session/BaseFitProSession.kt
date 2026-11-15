@@ -116,12 +116,25 @@ internal abstract class BaseFitProSession(
      * only when the code changes to a new non-zero value, mapping it via [FitProKeypad] and
      * handing fresh presses to [onConsoleKeyPressed].
      */
-    protected fun onKeypadCode(code: Int, heldMs: Int? = null) {
+    private var consoleControlListener: suspend (DeviceCommand) -> Unit = {}
+    final override fun setConsoleControlListener(listener: suspend (DeviceCommand) -> Unit) { consoleControlListener = listener }
+
+    protected suspend fun onKeypadCode(code: Int, heldMs: Int? = null) {
         if (code == lastKeyCode) return
         lastKeyCode = code
         if (code == 0) return
         val key = FitProKeypad.consoleKeyFromCode(code)
         logger.d(tag, "Console keypad: code=$code${heldMs?.let { " held=${it}ms" } ?: ""}${key?.let { " ($it)" } ?: ""}")
+        if (detectedDeviceType == DeviceType.TREADMILL) {
+            val command = when (key) {
+                ConsoleKey.SPEED_UP -> DeviceCommand.AdjustSpeed(true)
+                ConsoleKey.SPEED_DOWN -> DeviceCommand.AdjustSpeed(false)
+                ConsoleKey.INCLINE_UP -> DeviceCommand.AdjustIncline(true)
+                ConsoleKey.INCLINE_DOWN -> DeviceCommand.AdjustIncline(false)
+                else -> null
+            }
+            if (command != null) consoleControlListener(command)
+        }
         if (key != null) onConsoleKeyPressed(key)
     }
 
