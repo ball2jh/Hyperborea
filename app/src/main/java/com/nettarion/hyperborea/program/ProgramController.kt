@@ -41,7 +41,13 @@ class ProgramController @Inject constructor(
 
     fun startMonitoring() {
         if (ticker?.isActive == true) return
-        hardware.setConsoleControlListener(::manualControl)
+        hardware.setConsoleControlListener { command ->
+            if (command is DeviceCommand.ResumeWorkout) {
+                // This callback is a physical Start edge, not a workout-mode/timeout report.
+                // Initial starts remain gated by the protocol; only an existing pause resumes here.
+                if (orchestrator.state.value is OrchestratorState.Paused) orchestrator.resume()
+            } else manualControl(command)
+        }
         telemetry = scope.launch { hardware.exerciseData.collect { if (it != null) lastTelemetry = SystemClock.elapsedRealtime() } }
         ticker = scope.launch {
             var previous = SystemClock.elapsedRealtime()

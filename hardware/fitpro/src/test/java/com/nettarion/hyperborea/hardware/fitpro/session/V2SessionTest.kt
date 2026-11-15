@@ -34,6 +34,54 @@ class V2SessionTest {
             transport, logger, scope.backgroundScope, buildDeviceInfo(maxResistance = 24),
         )
 
+    @Test fun `paused treadmill ignores ready timeout and speed commands until physical Start`() = runTest {
+        val session = startTreadmillSession()
+        transport.emitIncoming(buildEventPacket(V2FeatureId.WORKOUT_STATE, V2WorkoutMode.RUNNING.raw)); runCurrent()
+        session.writeFeature(DeviceCommand.PauseWorkout)
+        transport.emitIncoming(buildEventPacket(V2FeatureId.WORKOUT_STATE, V2WorkoutMode.PAUSED.raw)); runCurrent()
+        val baseline = transport.writtenPackets.size
+        advanceTimeBy(600_000)
+        transport.emitIncoming(buildEventPacket(V2FeatureId.WORKOUT_STATE, V2WorkoutMode.RESULTS.raw))
+        transport.emitIncoming(buildEventPacket(V2FeatureId.WORKOUT_STATE, V2WorkoutMode.READY_TO_START.raw)); runCurrent()
+        session.writeFeature(DeviceCommand.SetTargetSpeed(8f))
+        session.writeFeature(DeviceCommand.AdjustSpeed(true)); runCurrent()
+        val writes = transport.writtenPackets.drop(baseline)
+        assertThat(writes.none { it.workoutStateWriteValue() == V2WorkoutMode.RUNNING.raw }).isTrue()
+        assertThat(writes.none { it.isFeatureWrite(V2FeatureId.TARGET_KPH) }).isTrue()
+        // Explicit physical Start is still accepted; READY alone was not authorization.
+        val physicalCommands = mutableListOf<DeviceCommand>()
+        session.setConsoleControlListener { physicalCommands += it }
+        transport.emitIncoming(buildEventPacket(V2FeatureId.KEY_COOKED, 2f)); runCurrent()
+        assertThat(transport.writtenPackets.drop(baseline).any { it.workoutStateWriteValue() == V2WorkoutMode.RUNNING.raw }).isTrue()
+        assertThat(physicalCommands).containsExactly(DeviceCommand.ResumeWorkout)
+    }
+
+    @Test fun `self driving treadmill rejects ready after pause but accepts explicit app Resume`() = runTest {
+        val session = createSession(this)
+        emitSupportedFeatures(V2FeatureId.TARGET_KPH, V2FeatureId.WORKOUT_STATE, V2FeatureId.START_REQUESTED)
+        session.start(); advanceUntilIdle()
+        transport.emitIncoming(buildEventPacket(V2FeatureId.WORKOUT_STATE, V2WorkoutMode.RUNNING.raw)); runCurrent()
+        session.writeFeature(DeviceCommand.PauseWorkout)
+        transport.emitIncoming(buildEventPacket(V2FeatureId.WORKOUT_STATE, V2WorkoutMode.PAUSED.raw)); runCurrent()
+        val baseline = transport.writtenPackets.size
+        transport.emitIncoming(buildEventPacket(V2FeatureId.WORKOUT_STATE, V2WorkoutMode.READY_TO_START.raw)); runCurrent()
+        assertThat(transport.writtenPackets.drop(baseline).none { it.isFeatureWrite(V2FeatureId.START_REQUESTED) }).isTrue()
+        session.writeFeature(DeviceCommand.ResumeWorkout)
+        transport.emitIncoming(buildEventPacket(V2FeatureId.WORKOUT_STATE, V2WorkoutMode.RUNNING.raw)); runCurrent()
+        assertThat(session.exerciseData.value?.workoutMode).isEqualTo(2)
+    }
+
+    @Test fun `unrequested treadmill RUNNING report after pause reasserts pause without any running write`() = runTest {
+        val session = startTreadmillSession()
+        transport.emitIncoming(buildEventPacket(V2FeatureId.WORKOUT_STATE, V2WorkoutMode.RUNNING.raw)); runCurrent()
+        session.writeFeature(DeviceCommand.PauseWorkout)
+        transport.emitIncoming(buildEventPacket(V2FeatureId.WORKOUT_STATE, V2WorkoutMode.PAUSED.raw)); runCurrent()
+        val baseline = transport.writtenPackets.size
+        transport.emitIncoming(buildEventPacket(V2FeatureId.WORKOUT_STATE, V2WorkoutMode.RUNNING.raw)); runCurrent()
+        assertThat(transport.writtenPackets.drop(baseline).mapNotNull { it.workoutStateWriteValue() }).containsExactly(V2WorkoutMode.PAUSED.raw)
+        assertThat(session.exerciseData.value?.workoutMode).isEqualTo(3)
+    }
+
     @Test fun `bike retains immediate stepped incline resistance ERG and telemetry`() = runTest {
         verifyNonTreadmillControls(7f, DeviceType.BIKE)
     }

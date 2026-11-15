@@ -28,6 +28,33 @@ class V1SessionTest {
             buildDeviceInfo(maxResistance = 24),
         )
 
+    @Test fun `unrequested V1 treadmill RUNNING after pause is rejected until explicit Resume`() = runTest {
+        val session = startStreamingTreadmillSession()
+        session.writeFeature(DeviceCommand.PauseWorkout)
+        val baseline = transport.writtenPackets.size
+        backgroundScope.launch { transport.emitIncoming(buildTreadmillStartResponse(workoutMode = 2)) }
+        advanceTimeBy(300); advanceUntilIdle()
+        assertThat(session.exerciseData.value?.workoutMode).isEqualTo(3)
+        assertThat(transport.writtenPackets.drop(baseline).mapNotNull { it.workoutModeWriteValue() }).doesNotContain(2)
+        session.writeFeature(DeviceCommand.ResumeWorkout)
+        backgroundScope.launch { transport.emitIncoming(buildTreadmillStartResponse(workoutMode = 2)) }
+        advanceTimeBy(300); advanceUntilIdle()
+        assertThat(session.exerciseData.value?.workoutMode).isEqualTo(2)
+        assertThat(transport.writtenPackets.drop(baseline).mapNotNull { it.workoutModeWriteValue() }).contains(2)
+    }
+
+    @Test fun `paused treadmill does not accept START_REQUESTED without physical Start`() = runTest {
+        val session = startStreamingTreadmillSession()
+        session.writeFeature(DeviceCommand.PauseWorkout)
+        val baseline = transport.writtenPackets.size
+        backgroundScope.launch { transport.emitIncoming(buildTreadmillStartResponse(startRequested = true)) }
+        advanceTimeBy(300); advanceUntilIdle()
+        assertThat(transport.writtenPackets.drop(baseline).mapNotNull { it.workoutModeWriteValue() }).doesNotContain(2)
+        backgroundScope.launch { transport.emitIncoming(buildTreadmillStartResponse(keyCode = 2)) }
+        advanceTimeBy(300); advanceUntilIdle()
+        assertThat(transport.writtenPackets.drop(baseline).mapNotNull { it.workoutModeWriteValue() }).contains(2)
+    }
+
     @Test
     fun `start opens transport`() = runTest {
         val session = createSession(this)
@@ -985,6 +1012,7 @@ class V1SessionTest {
     private fun buildTreadmillStartResponse(
         startRequested: Boolean = false,
         keyCode: Int = 0,
+        workoutMode: Int = 1,
     ): ByteArray {
         val pollFields = V1DataField.periodicReadFields.sortedBy { it.fieldIndex }
         val fieldData = ByteArray(pollFields.sumOf { it.sizeBytes })
@@ -995,7 +1023,7 @@ class V1SessionTest {
                     fieldData[offset] = (keyCode and 0xFF).toByte()
                     fieldData[offset + 1] = ((keyCode shr 8) and 0xFF).toByte()
                 }
-                V1DataField.WORKOUT_MODE -> fieldData[offset] = 1 // IDLE
+                V1DataField.WORKOUT_MODE -> fieldData[offset] = workoutMode.toByte()
                 V1DataField.START_REQUESTED -> fieldData[offset] = if (startRequested) 1 else 0
                 else -> { /* leave zero */ }
             }

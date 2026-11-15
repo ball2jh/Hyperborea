@@ -107,6 +107,13 @@ internal abstract class BaseFitProSession(
     /** Grip HR is a noisy analog contact reading — both protocols gate + smooth it with this. */
     protected val gripHeartRate = GripHeartRateFilter()
 
+    // Paused/DMK is latched until an explicit Resume command or physical Start key. An idle,
+    // START_REQUESTED, or READY_TO_START report alone cannot authorize a paused belt to restart.
+    @Volatile protected var beltRestartRequiresUser = false
+    protected fun latchBeltPause() {
+        if (detectedDeviceType.isBeltBased) beltRestartRequiresUser = true
+    }
+
     private var lastKeyCode = 0
     private var lastLogTimeMs = 0L
 
@@ -127,6 +134,7 @@ internal abstract class BaseFitProSession(
         logger.d(tag, "Console keypad: code=$code${heldMs?.let { " held=${it}ms" } ?: ""}${key?.let { " ($it)" } ?: ""}")
         if (detectedDeviceType == DeviceType.TREADMILL) {
             val command = when (key) {
+                ConsoleKey.START -> DeviceCommand.ResumeWorkout
                 ConsoleKey.SPEED_UP -> DeviceCommand.AdjustSpeed(true)
                 ConsoleKey.SPEED_DOWN -> DeviceCommand.AdjustSpeed(false)
                 ConsoleKey.INCLINE_UP -> DeviceCommand.AdjustIncline(true)
@@ -135,6 +143,8 @@ internal abstract class BaseFitProSession(
             }
             if (command != null) consoleControlListener(command)
         }
+        if (key == ConsoleKey.STOP) latchBeltPause()
+        if (key == ConsoleKey.START) beltRestartRequiresUser = false
         if (key != null) onConsoleKeyPressed(key)
     }
 

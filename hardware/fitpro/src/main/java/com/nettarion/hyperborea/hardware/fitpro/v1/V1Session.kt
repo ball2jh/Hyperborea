@@ -282,7 +282,15 @@ internal class V1Session(
         }
 
         if (_sessionState.value !is SessionState.Streaming) return
-        if (command is DeviceCommand.PauseWorkout && detectedDeviceType.isBeltBased) gradeCoalescer.cancelPending()
+        if (command is DeviceCommand.PauseWorkout && detectedDeviceType.isBeltBased) {
+            latchBeltPause()
+            gradeCoalescer.cancelPending()
+        }
+        if (command is DeviceCommand.ResumeWorkout) beltRestartRequiresUser = false
+        if (beltRestartRequiresUser && (command is DeviceCommand.SetTargetSpeed || command is DeviceCommand.AdjustSpeed)) {
+            logger.w(TAG, "Ignoring belt-speed target while paused — explicit Resume or physical Start required")
+            return
+        }
 
         // Incline targets route through the grade coalescer (burst → one moving target per
         // interval); the coalescer's writes land in pendingWriteFields via writeGradeTarget.
@@ -849,10 +857,19 @@ internal class V1Session(
                 V1DataField.CURRENT_TIME -> accumulator.updateElapsedTime(value.toLong())
                 V1DataField.WORKOUT_MODE -> {
                     val mode = value.toInt()
+                    if (mode == WorkoutMode.RUNNING.raw.toInt() && beltRestartRequiresUser) {
+                        logger.w(TAG, "Unrequested RUNNING report while paused — reasserting belt pause")
+                        accumulator.pause()
+                        accumulator.updateWorkoutMode(WorkoutMode.PAUSE.raw.toInt())
+                        sessionScope.launch { writeFeature(DeviceCommand.PauseWorkout) }
+                        continue
+                    }
                     val previousMode = accumulator.snapshot().workoutMode
                     if (previousMode != mode) {
                         when (WorkoutMode.fromRaw(mode)) {
+                            WorkoutMode.DMK -> latchBeltPause()
                             WorkoutMode.PAUSE -> {
+                                latchBeltPause()
                                 if (detectedDeviceType.isBeltBased) sessionScope.launch { gradeCoalescer.cancelPending() }
                                 accumulator.pause()
                             }
@@ -935,6 +952,10 @@ internal class V1Session(
 
     private fun requestTreadmillStart(source: String) {
         if (detectedDeviceType != DeviceType.TREADMILL) return
+        if (beltRestartRequiresUser) {
+            logger.w(TAG, "Ignoring start report while belt is paused — explicit Resume or physical Start required ($source)")
+            return
+        }
         if (accumulator.snapshot().workoutMode == WorkoutMode.RUNNING.raw.toInt()) return
 
         logger.i(TAG, "$source received while treadmill is idle — queueing WORKOUT_MODE=RUNNING")

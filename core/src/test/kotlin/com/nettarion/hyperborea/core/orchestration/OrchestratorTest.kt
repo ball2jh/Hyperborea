@@ -45,6 +45,67 @@ import org.junit.Test
 @OptIn(ExperimentalCoroutinesApi::class)
 class OrchestratorTest {
 
+    @Test fun `paused treadmill disconnect ends session without automatic reconnect or Resume`() = runTest {
+        val env = TestEnv(this)
+        env.hardware.deviceInfo.value = buildDeviceInfo(type = DeviceType.TREADMILL)
+        env.orchestrator.start()
+        env.hardware.exerciseData.value = ExerciseData.ZERO.copy(workoutMode = 2); advanceUntilIdle()
+        env.orchestrator.pause()
+        env.hardware.mutableState.value = AdapterState.Error("USB disconnected")
+        advanceUntilIdle()
+        assertThat(env.orchestrator.state.value).isEqualTo(OrchestratorState.Idle)
+        assertThat(env.hardware.connectCallCount).isEqualTo(1)
+        assertThat(env.hardware.receivedCommands).doesNotContain(DeviceCommand.ResumeWorkout)
+    }
+
+    @Test fun `treadmill pause timeout ends recording without restarting the belt`() = runTest {
+        val env = TestEnv(this)
+        (env.profileRepository.activeProfile as MutableStateFlow<Profile?>).value = Profile(id = 1, name = "Runner")
+        env.hardware.deviceInfo.value = buildDeviceInfo(type = DeviceType.TREADMILL)
+        env.orchestrator.start()
+        env.hardware.exerciseData.value = ExerciseData.ZERO.copy(workoutMode = 2, elapsedTime = 1, speed = 5f, power = 100)
+        advanceUntilIdle()
+        env.hardware.exerciseData.value = ExerciseData.ZERO.copy(workoutMode = 2, elapsedTime = 120, speed = 5f, power = 100)
+        advanceUntilIdle()
+        env.orchestrator.pause()
+        val baseline = env.hardware.receivedCommands.size
+        // V2 RESULTS/NONE after the MCU pause timer expires translates to V1 IDLE(1).
+        env.hardware.exerciseData.value = ExerciseData.ZERO.copy(workoutMode = 1, elapsedTime = 120)
+        advanceUntilIdle()
+        assertThat(env.orchestrator.state.value).isEqualTo(OrchestratorState.Idle)
+        assertThat(env.hardware.receivedCommands.drop(baseline)).doesNotContain(DeviceCommand.ResumeWorkout)
+        assertThat(env.hardware.disconnectCalled).isTrue()
+        assertThat(env.rideRecorder.lastSavedRideId.value).isEqualTo(0)
+    }
+
+    @Test fun `reinserting treadmill safety key never automatically resumes belt`() = runTest {
+        val env = TestEnv(this)
+        env.hardware.deviceInfo.value = buildDeviceInfo(type = DeviceType.TREADMILL)
+        env.orchestrator.start()
+        for (mode in listOf(2, 8, 1)) {
+            env.hardware.exerciseData.value = ExerciseData.ZERO.copy(workoutMode = mode)
+            advanceUntilIdle()
+        }
+        assertThat(env.orchestrator.state.value).isEqualTo(OrchestratorState.Idle)
+        assertThat(env.hardware.receivedCommands).doesNotContain(DeviceCommand.ResumeWorkout)
+    }
+
+    @Test fun `treadmill console pause blocks program targets and RUNNING telemetry cannot authorize resume`() = runTest {
+        val env = TestEnv(this)
+        env.hardware.deviceInfo.value = buildDeviceInfo(type = DeviceType.TREADMILL)
+        env.orchestrator.start()
+        env.hardware.exerciseData.value = ExerciseData.ZERO.copy(workoutMode = 2); advanceUntilIdle()
+        env.hardware.exerciseData.value = ExerciseData.ZERO.copy(workoutMode = 3); advanceUntilIdle()
+        assertThat(env.orchestrator.state.value).isEqualTo(OrchestratorState.Paused)
+        assertThat(env.orchestrator.sendProgramCommand(DeviceCommand.SetTargetSpeed(8f))).isFalse()
+        // Even stale/unsolicited RUNNING telemetry cannot substitute for a human Resume.
+        env.hardware.exerciseData.value = ExerciseData.ZERO.copy(workoutMode = 2); advanceUntilIdle()
+        assertThat(env.orchestrator.state.value).isEqualTo(OrchestratorState.Paused)
+        assertThat(env.hardware.receivedCommands).doesNotContain(DeviceCommand.ResumeWorkout)
+        env.orchestrator.resume()
+        assertThat(env.orchestrator.state.value).isEqualTo(OrchestratorState.Running())
+    }
+
     @Test fun `treadmill program targets cannot be sent to other equipment types`() = runTest {
         for (type in listOf(DeviceType.BIKE, DeviceType.ELLIPTICAL, DeviceType.ROWER)) {
             val env = TestEnv(this)

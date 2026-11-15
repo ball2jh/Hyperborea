@@ -298,13 +298,13 @@ class Orchestrator(
         workoutModeMonitorJob = scope.launch {
             hardwareAdapter.exerciseData.filterNotNull()
                 .collect { data ->
-                    when (val action = workoutModeInterpreter.interpret(data.workoutMode, _state.value)) {
+                    when (val action = workoutModeInterpreter.interpret(data.workoutMode, _state.value, hardwareAdapter.deviceInfo.value?.type)) {
                         is WorkoutModeInterpreter.Action.PromoteToRunning -> {
                             logger.i(TAG, "Console Start pressed — entering Running")
                             enterRunning()
                         }
-                        is WorkoutModeInterpreter.Action.PauseForSafetyKey -> {
-                            logger.w(TAG, "Safety key removed — pausing")
+                        is WorkoutModeInterpreter.Action.PauseFromConsole -> {
+                            logger.w(TAG, "Console pause or safety interlock — pausing")
                             _state.value = OrchestratorState.Paused
                         }
                         is WorkoutModeInterpreter.Action.ResumeFromSafetyKey -> {
@@ -329,6 +329,13 @@ class Orchestrator(
             hardwareAdapter.state.collect { hwState ->
                 if ((hwState is AdapterState.Error || hwState is AdapterState.Inactive)
                     && _state.value.isWorkoutActive() && !isReconnecting) {
+                    if (deviceInfo.type == DeviceType.TREADMILL && _state.value is OrchestratorState.Paused) {
+                        // Rebuilding a protocol session would discard its pause latch. End safely
+                        // rather than allowing a reconnect/start report to restart a paused belt.
+                        logger.w(TAG, "Paused treadmill disconnected — ending workout without automatic reconnect")
+                        scope.launch { stop(saveRide = true) }
+                        return@collect
+                    }
                     isReconnecting = true
                     try {
                         val reason = if (hwState is AdapterState.Error) hwState.message else "Hardware disconnected"

@@ -1,6 +1,7 @@
 # Changelog
 
 ## [Unreleased]
+- **Prevent treadmill restart after pause timeout.** An idle/results report while paused used to send ResumeWorkout as if a safety key had been reinserted. Treadmills now stop/save instead. V1/V2 belt sessions latch pause until explicit Resume or physical Start, reject unsolicited start reports and speed targets while paused, and reassert pause on unrequested RUNNING reports. Console pauses also pause orchestration and program targets.
 - V2 treadmills receive a one-hour pause timeout instead of the stock ten-minute limit, including consoles that start themselves after a physical Start acknowledgement. Other equipment keeps its existing timeout settings.
 - Program mode uses the existing dashboard strip for block progress, separate current/next speed and incline rows, and manual-axis status. A manual speed or incline edit holds just that axis until the next block; the other axis and clock continue. Automation returns with a full countdown, including after a late edit or loop boundary.
 - Keep delayed/fine incline control and program target writes treadmill-only; preserve bike, elliptical and rower control behaviour.

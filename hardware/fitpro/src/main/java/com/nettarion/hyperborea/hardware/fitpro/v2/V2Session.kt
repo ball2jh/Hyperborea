@@ -260,7 +260,16 @@ internal class V2Session(
 
     override suspend fun writeFeature(command: DeviceCommand) {
         if (_sessionState.value !is SessionState.Streaming) return
-        if (command is DeviceCommand.PauseWorkout && detectedDeviceType.isBeltBased) gradeCoalescer.cancelPending()
+        if (command is DeviceCommand.PauseWorkout && detectedDeviceType.isBeltBased) {
+            latchBeltPause()
+            startRequestJob?.cancel()
+            gradeCoalescer.cancelPending()
+        }
+        if (command is DeviceCommand.ResumeWorkout) beltRestartRequiresUser = false
+        if (beltRestartRequiresUser && (command is DeviceCommand.SetTargetSpeed || command is DeviceCommand.AdjustSpeed)) {
+            logger.w(TAG, "Ignoring belt-speed target while paused — explicit Resume or physical Start required")
+            return
+        }
 
         // Incline targets route through the grade coalescer (burst → one moving target per
         // interval) instead of the direct write below. Same declared-feature gate first.
@@ -423,6 +432,10 @@ internal class V2Session(
      */
     private fun requestWorkoutStart(trigger: String) {
         if (detectedDeviceType != DeviceType.TREADMILL) return
+        if (beltRestartRequiresUser) {
+            logger.w(TAG, "Ignoring start report while belt is paused — explicit Resume or physical Start required ($trigger)")
+            return
+        }
         if (_sessionState.value !is SessionState.Streaming) return
         val from = _workoutMode.value?.let { V2WorkoutMode.fromRaw(it) }
         if (from == V2WorkoutMode.RUNNING) return
@@ -734,6 +747,13 @@ internal class V2Session(
                 val previous = _workoutMode.value?.let { V2WorkoutMode.fromRaw(it) }
                 _workoutMode.value = value
                 val mode = V2WorkoutMode.fromRaw(value)
+                if (beltRestartRequiresUser && mode == V2WorkoutMode.RUNNING) {
+                    logger.w(TAG, "Unrequested RUNNING report while paused — reasserting belt pause")
+                    _workoutMode.value = V2WorkoutMode.PAUSED.raw
+                    writeFeature(DeviceCommand.PauseWorkout)
+                    accumulator.updateWorkoutMode(V1_WORKOUT_MODE_PAUSE)
+                    return
+                }
                 // Info-level on purpose: which states a console actually reports (and when) is
                 // the load-bearing fact in field logs — e.g. whether READY_TO_START follows a
                 // Start-key press. Low volume: V2 events fire on change only.
@@ -744,7 +764,9 @@ internal class V2Session(
                     // just our own Pause/Resume commands. The accumulator guards make the
                     // overlap with writeFeature's pause()/resume() calls harmless.
                     when (mode) {
+                        V2WorkoutMode.OFF_MACHINE -> latchBeltPause()
                         V2WorkoutMode.PAUSED -> {
+                            latchBeltPause()
                             if (detectedDeviceType.isBeltBased) sessionScope.launch { gradeCoalescer.cancelPending() }
                             accumulator.pause()
                         }
