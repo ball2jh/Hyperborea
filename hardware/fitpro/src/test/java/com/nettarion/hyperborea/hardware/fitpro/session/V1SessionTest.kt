@@ -665,11 +665,23 @@ class V1SessionTest {
 
     @Test
     fun `fine incline targets bypass UI stepping in V1 field mapping`() = runTest {
-        val session = startStreamingSession()
+        val session = startStreamingTreadmillSession()
         val fields = session.commandToFields(DeviceCommand.SetIncline(1.23f, snapToStep = false))
         assertThat(fields[V1DataField.GRADE]!!).isWithin(.0001f).of(1.23f)
         val selected = session.commandToFields(DeviceCommand.SetIncline(1.23f))
         assertThat(selected[V1DataField.GRADE]).isEqualTo(1f)
+    }
+
+    @Test fun `V1 bike retains stepped incline and queues a single tap without the treadmill delay`() = runTest {
+        val session = startStreamingSession()
+        assertThat(session.commandToFields(DeviceCommand.SetIncline(1.23f, snapToStep = false))[V1DataField.GRADE]).isEqualTo(1f)
+        val baseline = transport.writtenPackets.size
+        session.writeFeature(DeviceCommand.AdjustIncline(true))
+        backgroundScope.launch { respondWithDataResponse() }
+        advanceTimeBy(200)
+        assertThat(transport.writtenPackets.drop(baseline).any {
+            it.size > 6 && it[2] == 2.toByte() && it[3] == 1.toByte() && it[4] == 2.toByte() && it[5] == 50.toByte() && it[6] == 0.toByte()
+        }).isTrue()
     }
 
     @Test

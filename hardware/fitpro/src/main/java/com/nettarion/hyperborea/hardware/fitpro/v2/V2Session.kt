@@ -260,7 +260,7 @@ internal class V2Session(
 
     override suspend fun writeFeature(command: DeviceCommand) {
         if (_sessionState.value !is SessionState.Streaming) return
-        if (command is DeviceCommand.PauseWorkout) gradeCoalescer.cancelPending()
+        if (command is DeviceCommand.PauseWorkout && detectedDeviceType.isBeltBased) gradeCoalescer.cancelPending()
 
         // Incline targets route through the grade coalescer (burst → one moving target per
         // interval) instead of the direct write below. Same declared-feature gate first.
@@ -739,7 +739,7 @@ internal class V2Session(
                     // overlap with writeFeature's pause()/resume() calls harmless.
                     when (mode) {
                         V2WorkoutMode.PAUSED -> {
-                            sessionScope.launch { gradeCoalescer.cancelPending() }
+                            if (detectedDeviceType.isBeltBased) sessionScope.launch { gradeCoalescer.cancelPending() }
                             accumulator.pause()
                         }
                         V2WorkoutMode.RUNNING -> {

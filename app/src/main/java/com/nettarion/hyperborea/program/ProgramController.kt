@@ -79,13 +79,15 @@ class ProgramController @Inject constructor(
     suspend fun manualControl(command: DeviceCommand) {
         if (command !is DeviceCommand.SetTargetSpeed && command !is DeviceCommand.AdjustSpeed && command !is DeviceCommand.SetIncline && command !is DeviceCommand.AdjustIncline && command !is DeviceCommand.PauseWorkout && command !is DeviceCommand.ResumeWorkout) return
         mutex.withLock {
-            engine?.takeIf { it.state.active }?.hold(true, "Manual control · resume program when ready")
+            val active = engine?.takeIf { it.state.active } ?: return@withLock
+            active.hold(true, "Manual control · resume program when ready")
             sent = null; _state.value = engine?.state; cues.stop()
         }
     }
 
     private fun equipmentReady(now: Long): Boolean =
         (orchestrator.state.value as? OrchestratorState.Running)?.let { it.degraded == null } == true &&
+            hardware.deviceInfo.value?.type == com.nettarion.hyperborea.core.model.DeviceType.TREADMILL &&
             hardware.state.value is AdapterState.Active && now - lastTelemetry <= 5000
 
     suspend fun resumeProgram() = mutex.withLock {

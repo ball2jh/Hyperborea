@@ -282,7 +282,7 @@ internal class V1Session(
         }
 
         if (_sessionState.value !is SessionState.Streaming) return
-        if (command is DeviceCommand.PauseWorkout) gradeCoalescer.cancelPending()
+        if (command is DeviceCommand.PauseWorkout && detectedDeviceType.isBeltBased) gradeCoalescer.cancelPending()
 
         // Incline targets route through the grade coalescer (burst → one moving target per
         // interval); the coalescer's writes land in pendingWriteFields via writeGradeTarget.
@@ -304,7 +304,7 @@ internal class V1Session(
         // clamped anything arriving from the live path. An incline target implies manual/SIM
         // control, so it carries the ERG exit like every other manual-control command.
         is DeviceCommand.SetIncline -> {
-            ergExitFields() + mapOf(V1DataField.GRADE to roundToStep(command.percent, if (command.snapToStep) deviceInfo.inclineStep else .01f))
+            ergExitFields() + mapOf(V1DataField.GRADE to roundToStep(command.percent, if (command.snapToStep || !detectedDeviceType.isBeltBased) deviceInfo.inclineStep else .01f))
         }
         is DeviceCommand.SetTargetSpeed -> {
             lastSentSpeed = clampedSpeedTarget(command.kph)
@@ -853,7 +853,7 @@ internal class V1Session(
                     if (previousMode != mode) {
                         when (WorkoutMode.fromRaw(mode)) {
                             WorkoutMode.PAUSE -> {
-                                sessionScope.launch { gradeCoalescer.cancelPending() }
+                                if (detectedDeviceType.isBeltBased) sessionScope.launch { gradeCoalescer.cancelPending() }
                                 accumulator.pause()
                             }
                             WorkoutMode.RUNNING -> {

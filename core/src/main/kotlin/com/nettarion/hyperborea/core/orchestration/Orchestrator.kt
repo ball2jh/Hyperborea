@@ -473,6 +473,7 @@ class Orchestrator(
     suspend fun sendProgramCommand(command: DeviceCommand): Boolean = mutex.withLock {
         require(command is DeviceCommand.SetTargetSpeed || command is DeviceCommand.SetIncline)
         val running = _state.value as? OrchestratorState.Running ?: return@withLock false
+        if (hardwareAdapter.deviceInfo.value?.type != DeviceType.TREADMILL) return@withLock false
         if (running.degraded != null || hardwareAdapter.state.value !is AdapterState.Active) return@withLock false
         hardwareAdapter.sendCommand(command)
         true

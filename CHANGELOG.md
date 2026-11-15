@@ -1,6 +1,7 @@
 # Changelog
 
 ## [Unreleased]
+- Keep delayed/fine incline control and program target writes treadmill-only; preserve bike, elliptical and rower control behaviour.
 - Added a saved Loop program toggle in the editor: repeat the full program until stopped, with target-change warnings at the return to the first block, per-loop progress, and a repeat countdown in the widget. Existing programs remain single-pass.
 - Incline ramps retain hundredth-percent command precision between block endpoints, instead of rounding every update to the UI step. Held incline selections send one final destination after release; Pause/Stop cancel queued incline writes. Physical motion still depends on the equipment controller.
 - Program widgets use the Next target layout: a prominent change countdown, separate speed and incline rows with live readings and upcoming targets, and Pause/Stop controls. Removed the program name and duplicate metrics from the floating program view.

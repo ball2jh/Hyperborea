@@ -45,17 +45,34 @@ import org.junit.Test
 @OptIn(ExperimentalCoroutinesApi::class)
 class OrchestratorTest {
 
+    @Test fun `treadmill program targets cannot be sent to other equipment types`() = runTest {
+        for (type in listOf(DeviceType.BIKE, DeviceType.ELLIPTICAL, DeviceType.ROWER)) {
+            val env = TestEnv(this)
+            env.hardware.deviceInfo.value = buildDeviceInfo(type = type)
+            env.orchestrator.start()
+            assertThat(env.orchestrator.sendProgramCommand(DeviceCommand.SetTargetSpeed(8f))).isFalse()
+            assertThat(env.orchestrator.sendProgramCommand(DeviceCommand.SetIncline(3f, snapToStep = false))).isFalse()
+            assertThat(env.hardware.receivedCommands).doesNotContain(DeviceCommand.SetTargetSpeed(8f))
+            env.orchestrator.stop(saveRide = false)
+        }
+    }
+
     @Test
     fun `program commands require a running non degraded workout and stop stays authoritative`() = runTest {
         val env = TestEnv(this)
+        env.hardware.deviceInfo.value = buildDeviceInfo(type = DeviceType.TREADMILL)
         val command = DeviceCommand.SetTargetSpeed(8f)
         assertThat(env.orchestrator.sendProgramCommand(command)).isFalse()
         env.orchestrator.start()
+        env.hardware.exerciseData.value = ExerciseData.ZERO.copy(workoutMode = 2)
+        advanceUntilIdle()
         assertThat(env.orchestrator.sendProgramCommand(command)).isTrue()
         env.orchestrator.pause()
         assertThat(env.orchestrator.sendProgramCommand(command)).isFalse()
         env.orchestrator.resume()
         assertThat(env.orchestrator.sendProgramCommand(command)).isTrue()
+        env.hardware.deviceInfo.value = buildDeviceInfo(type = DeviceType.BIKE)
+        assertThat(env.orchestrator.sendProgramCommand(command)).isFalse()
         env.orchestrator.stop()
         assertThat(env.orchestrator.sendProgramCommand(command)).isFalse()
     }

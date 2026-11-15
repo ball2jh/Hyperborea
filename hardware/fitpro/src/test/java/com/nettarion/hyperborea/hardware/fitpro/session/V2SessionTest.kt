@@ -34,6 +34,59 @@ class V2SessionTest {
             transport, logger, scope.backgroundScope, buildDeviceInfo(maxResistance = 24),
         )
 
+    @Test fun `bike retains immediate stepped incline resistance ERG and telemetry`() = runTest {
+        verifyNonTreadmillControls(7f, DeviceType.BIKE)
+    }
+
+    @Test fun `elliptical retains immediate stepped incline resistance ERG and telemetry`() = runTest {
+        verifyNonTreadmillControls(6f, DeviceType.ELLIPTICAL)
+    }
+
+    @Test fun `rower retains immediate stepped incline resistance ERG and telemetry`() = runTest {
+        verifyNonTreadmillControls(20f, DeviceType.ROWER)
+    }
+
+    private suspend fun TestScope.verifyNonTreadmillControls(code: Float, type: DeviceType) {
+        val session = createSession(this)
+        emitSupportedFeatures(V2FeatureId.DEVICE_TYPE, V2FeatureId.TARGET_GRADE, V2FeatureId.TARGET_RESISTANCE,
+            V2FeatureId.GOAL_WATTS, V2FeatureId.WORKOUT_STATE, V2FeatureId.CURRENT_KPH, V2FeatureId.RPM, V2FeatureId.WATTS)
+        transport.emitIncoming(buildEventPacket(V2FeatureId.DEVICE_TYPE, code))
+        transport.emitIncoming(buildEventPacket(V2FeatureId.WORKOUT_STATE, V2WorkoutMode.RUNNING.raw))
+        session.start()
+        advanceUntilIdle()
+        assertThat(session.detectedDeviceType).isEqualTo(type)
+        val baseline = transport.writtenPackets.size
+        session.writeFeature(DeviceCommand.AdjustIncline(true))
+        runCurrent()
+        val immediate = transport.writtenPackets.drop(baseline).filter { it.isFeatureWrite(V2FeatureId.TARGET_GRADE) }
+        assertThat(immediate).hasSize(1)
+        assertThat(immediate.single().featureWriteValue()).isEqualTo(.5f)
+        session.writeFeature(DeviceCommand.SetResistance(12))
+        session.writeFeature(DeviceCommand.SetTargetPower(180))
+        val writes = transport.writtenPackets.drop(baseline)
+        assertThat(writes.single { it.isFeatureWrite(V2FeatureId.TARGET_RESISTANCE) }.featureWriteValue()).isEqualTo(12f)
+        assertThat(writes.single { it.isFeatureWrite(V2FeatureId.GOAL_WATTS) }.featureWriteValue()).isEqualTo(180f)
+        transport.emitIncoming(buildEventPacket(V2FeatureId.CURRENT_KPH, 25f))
+        transport.emitIncoming(buildEventPacket(V2FeatureId.RPM, 85f))
+        transport.emitIncoming(buildEventPacket(V2FeatureId.WATTS, 200f))
+        runCurrent()
+        assertThat(session.exerciseData.value?.speed).isEqualTo(25f)
+        assertThat(session.exerciseData.value?.cadence).isEqualTo(85)
+        assertThat(session.exerciseData.value?.power).isEqualTo(200)
+        advanceTimeBy(BaseFitProSession.GRADE_WRITE_INTERVAL_MS + 1)
+        session.writeFeature(DeviceCommand.SetIncline(1.23f, snapToStep = false))
+        assertThat(transport.writtenPackets.last { it.isFeatureWrite(V2FeatureId.TARGET_GRADE) }.featureWriteValue()).isEqualTo(1f)
+    }
+
+    private suspend fun TestScope.startTreadmillSession(): V2Session {
+        val session = createSession(this)
+        emitSupportedFeatures(V2FeatureId.TARGET_KPH, V2FeatureId.TARGET_GRADE, V2FeatureId.WORKOUT_STATE)
+        session.start()
+        advanceUntilIdle()
+        assertThat(session.detectedDeviceType).isEqualTo(DeviceType.TREADMILL)
+        return session
+    }
+
     @Test
     fun `start transitions through CONNECTING to STREAMING`() = runTest {
         val session = createSession(this)
@@ -468,9 +521,7 @@ class V2SessionTest {
 
     @Test
     fun `AdjustIncline hold burst coalesces TARGET_GRADE writes but preserves accumulation`() = runTest {
-        val session = createSession(this)
-        session.start()
-        advanceUntilIdle()
+        val session = startTreadmillSession()
 
         val countBefore = transport.writtenPackets.size
         // Six presses at the UI's 350 ms hold-repeat spacing: steps 0.5 … 3.0.
@@ -490,9 +541,7 @@ class V2SessionTest {
 
     @Test
     fun `single AdjustIncline writes after the selection settles`() = runTest {
-        val session = createSession(this)
-        session.start()
-        advanceUntilIdle()
+        val session = startTreadmillSession()
 
         val countBefore = transport.writtenPackets.size
         session.writeFeature(DeviceCommand.AdjustIncline(increase = true))
@@ -508,9 +557,7 @@ class V2SessionTest {
 
     @Test
     fun `pause cancels a held incline selection before its delayed motor write`() = runTest {
-        val session = createSession(this)
-        session.start()
-        advanceUntilIdle()
+        val session = startTreadmillSession()
         val baseline = transport.writtenPackets.size
         session.writeFeature(DeviceCommand.AdjustIncline(increase = true))
         session.writeFeature(DeviceCommand.PauseWorkout)
@@ -520,9 +567,7 @@ class V2SessionTest {
 
     @Test
     fun `console initiated pause cancels a held incline selection`() = runTest {
-        val session = createSession(this)
-        session.start()
-        advanceUntilIdle()
+        val session = startTreadmillSession()
         transport.emitIncoming(buildEventPacket(V2FeatureId.WORKOUT_STATE, V2WorkoutMode.RUNNING.raw))
         runCurrent()
         val baseline = transport.writtenPackets.size
@@ -575,9 +620,7 @@ class V2SessionTest {
 
     @Test
     fun `ramp incline retains fine precision while selections keep the configured step`() = runTest {
-        val session = createSession(this)
-        session.start()
-        advanceUntilIdle()
+        val session = startTreadmillSession()
         val countBefore = transport.writtenPackets.size
         session.writeFeature(DeviceCommand.SetIncline(1.23f, snapToStep = false))
         advanceTimeBy(BaseFitProSession.GRADE_WRITE_INTERVAL_MS * 2)

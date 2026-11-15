@@ -4,6 +4,12 @@ import com.google.common.truth.Truth.assertThat
 import org.junit.Test
 
 class ProgramEngineTest {
+    @Test fun `program validation rejects every non treadmill equipment type`() {
+        for (type in com.nettarion.hyperborea.core.model.DeviceType.entries) {
+            val device = com.nettarion.hyperborea.core.model.DeviceInfo.DEFAULT_INDOOR_BIKE.copy(type = type)
+            assertThat(WorkoutProgram().validationError(device) == null).isEqualTo(type == com.nettarion.hyperborea.core.model.DeviceType.TREADMILL)
+        }
+    }
     private fun loopingEngine(p: WorkoutProgram = program().copy(loop = true)) = ProgramEngine(p).apply { begin(); repeat(3) { advance(1000) } }
 
     @Test fun `loop repeats from the first block without completing or adding another startup delay`() {

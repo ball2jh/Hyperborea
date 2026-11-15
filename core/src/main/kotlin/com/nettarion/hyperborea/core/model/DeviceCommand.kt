@@ -2,7 +2,7 @@ package com.nettarion.hyperborea.core.model
 
 sealed interface DeviceCommand {
     data class SetResistance(val level: Int) : DeviceCommand
-    /** Program ramps retain hundredth-percent wire precision; ordinary selections use the device step. */
+    /** Treadmill program ramps retain hundredth-percent wire precision; other selections use the device step. */
     data class SetIncline(val percent: Float, val snapToStep: Boolean = true) : DeviceCommand
     data class SetTargetSpeed(val kph: Float) : DeviceCommand
     data class SetTargetPower(val watts: Int) : DeviceCommand

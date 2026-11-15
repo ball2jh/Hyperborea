@@ -6,6 +6,7 @@ import com.nettarion.hyperborea.core.model.DeviceIdentity
 import com.nettarion.hyperborea.core.model.DeviceInfo
 import com.nettarion.hyperborea.core.model.DeviceType
 import com.nettarion.hyperborea.core.model.ExerciseData
+import com.nettarion.hyperborea.core.model.isBeltBased
 import com.nettarion.hyperborea.hardware.fitpro.transport.HidTransport
 import kotlin.math.roundToInt
 import kotlinx.coroutines.CoroutineScope
@@ -188,8 +189,8 @@ internal abstract class BaseFitProSession(
 
     /**
      * Incline target writes go through a throttle-with-trailing-flush so a burst of stepped
-     * targets reaches the deck at a bounded rate. Relative button selections use a trailing
-     * quiet interval; absolute targets and fine program ramps use leading/trailing throttling.
+     * targets reaches the equipment at a bounded rate. Treadmill relative selections use a
+     * trailing quiet interval; other targets keep leading/trailing throttling.
      */
     protected val gradeCoalescer by lazy {
         TargetWriteCoalescer(sessionScope, GRADE_WRITE_INTERVAL_MS) { writeGradeTarget(it) }
@@ -203,8 +204,8 @@ internal abstract class BaseFitProSession(
      */
     protected suspend fun handleInclineCommand(command: DeviceCommand): Boolean = when (command) {
         is DeviceCommand.SetIncline -> {
-            lastGradeWasFine = !command.snapToStep
-            lastSentGrade = clampedInclineTarget(roundToStep(command.percent, if (command.snapToStep) deviceInfo.inclineStep else .01f))
+            lastGradeWasFine = detectedDeviceType.isBeltBased && !command.snapToStep
+            lastSentGrade = clampedInclineTarget(roundToStep(command.percent, if (lastGradeWasFine) .01f else deviceInfo.inclineStep))
             publishCommandedInclineTarget(lastSentGrade)
             gradeCoalescer.submit(lastSentGrade)
             true
@@ -214,7 +215,7 @@ internal abstract class BaseFitProSession(
             publishCommandedInclineTarget(target)
             // Select a destination in normal UI steps, then move to it once the held/repeated
             // selection ends instead of settling at every intermediate half-percent.
-            gradeCoalescer.submit(target, deferUntilQuiet = true)
+            gradeCoalescer.submit(target, deferUntilQuiet = detectedDeviceType.isBeltBased)
             true
         }
         else -> false
