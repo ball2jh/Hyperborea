@@ -483,14 +483,13 @@ class V2SessionTest {
         val gradeWrites = transport.writtenPackets.drop(countBefore)
             .filter { it.isFeatureWrite(V2FeatureId.TARGET_GRADE) }
         // Coalesced: far fewer wire writes than presses…
-        assertThat(gradeWrites.size).isLessThan(6)
-        assertThat(gradeWrites.size).isAtLeast(2)
+        assertThat(gradeWrites).hasSize(1)
         // …but no press is lost: the final write carries the fully accumulated 3.0 %.
         assertThat(gradeWrites.last().featureWriteValue()).isEqualTo(3.0f)
     }
 
     @Test
-    fun `single AdjustIncline writes immediately`() = runTest {
+    fun `single AdjustIncline writes after the selection settles`() = runTest {
         val session = createSession(this)
         session.start()
         advanceUntilIdle()
@@ -498,11 +497,40 @@ class V2SessionTest {
         val countBefore = transport.writtenPackets.size
         session.writeFeature(DeviceCommand.AdjustIncline(increase = true))
         runCurrent()
+        assertThat(transport.writtenPackets.drop(countBefore).filter { it.isFeatureWrite(V2FeatureId.TARGET_GRADE) }).isEmpty()
+        advanceTimeBy(BaseFitProSession.GRADE_WRITE_INTERVAL_MS + 1)
 
         val gradeWrites = transport.writtenPackets.drop(countBefore)
             .filter { it.isFeatureWrite(V2FeatureId.TARGET_GRADE) }
         assertThat(gradeWrites).hasSize(1)
         assertThat(gradeWrites[0].featureWriteValue()).isEqualTo(0.5f)
+    }
+
+    @Test
+    fun `pause cancels a held incline selection before its delayed motor write`() = runTest {
+        val session = createSession(this)
+        session.start()
+        advanceUntilIdle()
+        val baseline = transport.writtenPackets.size
+        session.writeFeature(DeviceCommand.AdjustIncline(increase = true))
+        session.writeFeature(DeviceCommand.PauseWorkout)
+        advanceTimeBy(BaseFitProSession.GRADE_WRITE_INTERVAL_MS * 2)
+        assertThat(transport.writtenPackets.drop(baseline).filter { it.isFeatureWrite(V2FeatureId.TARGET_GRADE) }).isEmpty()
+    }
+
+    @Test
+    fun `console initiated pause cancels a held incline selection`() = runTest {
+        val session = createSession(this)
+        session.start()
+        advanceUntilIdle()
+        transport.emitIncoming(buildEventPacket(V2FeatureId.WORKOUT_STATE, V2WorkoutMode.RUNNING.raw))
+        runCurrent()
+        val baseline = transport.writtenPackets.size
+        session.writeFeature(DeviceCommand.AdjustIncline(increase = true))
+        transport.emitIncoming(buildEventPacket(V2FeatureId.WORKOUT_STATE, V2WorkoutMode.PAUSED.raw))
+        runCurrent()
+        advanceTimeBy(BaseFitProSession.GRADE_WRITE_INTERVAL_MS * 2)
+        assertThat(transport.writtenPackets.drop(baseline).filter { it.isFeatureWrite(V2FeatureId.TARGET_GRADE) }).isEmpty()
     }
 
     @Test
@@ -543,6 +571,22 @@ class V2SessionTest {
         transport.emitIncoming(buildEventPacket(V2FeatureId.TARGET_GRADE, 4.5f))
         runCurrent()
         assertThat(session.exerciseData.value?.targetIncline).isEqualTo(4.5f)
+    }
+
+    @Test
+    fun `ramp incline retains fine precision while selections keep the configured step`() = runTest {
+        val session = createSession(this)
+        session.start()
+        advanceUntilIdle()
+        val countBefore = transport.writtenPackets.size
+        session.writeFeature(DeviceCommand.SetIncline(1.23f, snapToStep = false))
+        advanceTimeBy(BaseFitProSession.GRADE_WRITE_INTERVAL_MS * 2)
+        session.writeFeature(DeviceCommand.AdjustIncline(increase = true))
+        advanceTimeBy(BaseFitProSession.GRADE_WRITE_INTERVAL_MS * 2)
+        val grades = transport.writtenPackets.drop(countBefore)
+            .filter { it.isFeatureWrite(V2FeatureId.TARGET_GRADE) }.map { it.featureWriteValue() }
+        assertThat(grades[0]).isWithin(.0001f).of(1.23f)
+        assertThat(grades[1]).isEqualTo(1.5f)
     }
 
     @Test
@@ -812,6 +856,7 @@ class V2SessionTest {
         val countBefore = transport.writtenPackets.size
         session.writeFeature(DeviceCommand.AdjustIncline(increase = true))
 
+        advanceTimeBy(BaseFitProSession.GRADE_WRITE_INTERVAL_MS + 1)
         val written = transport.writtenPackets.drop(countBefore)
         assertThat(written).hasSize(1)
         assertThat(written[0][3]).isEqualTo(V2FeatureId.TARGET_GRADE.wireLo)
@@ -1158,6 +1203,7 @@ class V2SessionTest {
         transport.emitIncoming(buildEventPacket(V2FeatureId.KEY_COOKED, 5f)) // incline up
         runCurrent()
 
+        advanceTimeBy(BaseFitProSession.GRADE_WRITE_INTERVAL_MS + 1)
         val writes = transport.writtenPackets.drop(baseline)
         assertThat(writes.filter { it.isFeatureWrite(V2FeatureId.TARGET_KPH) }).hasSize(1)
         assertThat(writes.filter { it.isFeatureWrite(V2FeatureId.TARGET_GRADE) }).hasSize(1)

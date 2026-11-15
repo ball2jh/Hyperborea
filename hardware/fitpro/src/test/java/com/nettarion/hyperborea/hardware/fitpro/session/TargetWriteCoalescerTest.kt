@@ -14,6 +14,48 @@ class TargetWriteCoalescerTest {
     private val written = mutableListOf<Float>()
 
     @Test
+    fun `held relative selection writes just the final destination after release`() = runTest {
+        val coalescer = TargetWriteCoalescer(backgroundScope, INTERVAL) { written.add(it) }
+        repeat(10) { index ->
+            coalescer.submit((index + 1) * .5f, deferUntilQuiet = true)
+            advanceTimeBy(100)
+        }
+        assertThat(written).isEmpty()
+        advanceTimeBy(INTERVAL * 2)
+        assertThat(written).containsExactly(5f)
+    }
+
+    @Test
+    fun `absolute preset replaces a pending held selection immediately`() = runTest {
+        val coalescer = TargetWriteCoalescer(backgroundScope, INTERVAL) { written.add(it) }
+        coalescer.submit(.5f, deferUntilQuiet = true)
+        coalescer.submit(10f)
+        assertThat(written).containsExactly(10f)
+        advanceTimeBy(INTERVAL * 2)
+        assertThat(written).containsExactly(10f)
+    }
+
+    @Test
+    fun `stopping cancels a deferred selection before it can move the deck`() = runTest {
+        val coalescer = TargetWriteCoalescer(backgroundScope, INTERVAL) { written.add(it) }
+        coalescer.submit(5f, deferUntilQuiet = true)
+        coalescer.close()
+        advanceTimeBy(INTERVAL * 2)
+        assertThat(written).isEmpty()
+    }
+
+    @Test
+    fun `pause cancels queued motion and later targets still work`() = runTest {
+        val coalescer = TargetWriteCoalescer(backgroundScope, INTERVAL) { written.add(it) }
+        coalescer.submit(5f, deferUntilQuiet = true)
+        coalescer.cancelPending()
+        advanceTimeBy(INTERVAL * 2)
+        assertThat(written).isEmpty()
+        coalescer.submit(2f)
+        assertThat(written).containsExactly(2f)
+    }
+
+    @Test
     fun `first submit writes immediately`() = runTest {
         val coalescer = TargetWriteCoalescer(backgroundScope, INTERVAL) { written.add(it) }
 

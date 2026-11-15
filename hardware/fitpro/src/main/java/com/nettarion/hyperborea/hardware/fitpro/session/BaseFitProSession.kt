@@ -100,6 +100,7 @@ internal abstract class BaseFitProSession(
     // Accumulated absolute targets behind the relative Adjust± commands: one press = one step from
     // the last value WE sent (not the console's read-back, which may self-step on some units).
     protected var lastSentGrade = 0f
+    private var lastGradeWasFine = false
     protected var lastSentSpeed = 0f
 
     /** Grip HR is a noisy analog contact reading — both protocols gate + smooth it with this. */
@@ -140,9 +141,11 @@ internal abstract class BaseFitProSession(
 
     /** Steps the accumulated incline target by one [DeviceInfo.inclineStep], clamped to the device's range. */
     protected fun nextAdjustedGrade(increase: Boolean): Float {
+        val selected = if (lastGradeWasFine) roundToStep(lastSentGrade, deviceInfo.inclineStep) else lastSentGrade
         lastSentGrade = clampedInclineTarget(
-            lastSentGrade + if (increase) deviceInfo.inclineStep else -deviceInfo.inclineStep,
+            selected + if (increase) deviceInfo.inclineStep else -deviceInfo.inclineStep,
         )
+        lastGradeWasFine = false
         return lastSentGrade
     }
 
@@ -185,8 +188,8 @@ internal abstract class BaseFitProSession(
 
     /**
      * Incline target writes go through a throttle-with-trailing-flush so a burst of stepped
-     * targets (held +/− button, Zwift SIM gradient stream) reaches the deck as one moving target
-     * per interval instead of a step-settle-step staircase — see [TargetWriteCoalescer].
+     * targets reaches the deck at a bounded rate. Relative button selections use a trailing
+     * quiet interval; absolute targets and fine program ramps use leading/trailing throttling.
      */
     protected val gradeCoalescer by lazy {
         TargetWriteCoalescer(sessionScope, GRADE_WRITE_INTERVAL_MS) { writeGradeTarget(it) }
@@ -200,7 +203,8 @@ internal abstract class BaseFitProSession(
      */
     protected suspend fun handleInclineCommand(command: DeviceCommand): Boolean = when (command) {
         is DeviceCommand.SetIncline -> {
-            lastSentGrade = clampedInclineTarget(roundToStep(command.percent, deviceInfo.inclineStep))
+            lastGradeWasFine = !command.snapToStep
+            lastSentGrade = clampedInclineTarget(roundToStep(command.percent, if (command.snapToStep) deviceInfo.inclineStep else .01f))
             publishCommandedInclineTarget(lastSentGrade)
             gradeCoalescer.submit(lastSentGrade)
             true
@@ -208,7 +212,9 @@ internal abstract class BaseFitProSession(
         is DeviceCommand.AdjustIncline -> {
             val target = nextAdjustedGrade(command.increase)
             publishCommandedInclineTarget(target)
-            gradeCoalescer.submit(target)
+            // Select a destination in normal UI steps, then move to it once the held/repeated
+            // selection ends instead of settling at every intermediate half-percent.
+            gradeCoalescer.submit(target, deferUntilQuiet = true)
             true
         }
         else -> false
@@ -237,10 +243,9 @@ internal abstract class BaseFitProSession(
         private const val TELEMETRY_LOG_INTERVAL_MS = 1000L
 
         /**
-         * Minimum interval between incline target writes. Tunable 500–1000 ms: below ~500 ms the
-         * deck motor can catch (and settle at) each intermediate target on slow actuators; above
-         * ~1000 ms single Zwift gradient corrections start to feel laggy. Not yet measured against
-         * a specific deck — adjust from field testing.
+         * Wire-rate limit for streamed absolute targets, also the quiet interval after manual
+         * selection. Longer than the UI's initial 500 ms hold threshold, so a held button
+         * accumulates before the first motor write. Physical smoothness remains device-dependent.
          */
         internal const val GRADE_WRITE_INTERVAL_MS = 750L
     }

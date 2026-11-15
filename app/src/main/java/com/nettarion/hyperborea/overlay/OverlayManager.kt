@@ -1,13 +1,9 @@
 package com.nettarion.hyperborea.overlay
 
-import android.app.Activity
-import android.app.ActivityManager
-import android.app.Application
 import android.content.Context
 import android.content.SharedPreferences
 import android.graphics.PixelFormat
 import android.os.Build
-import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
 import android.provider.Settings
@@ -24,7 +20,7 @@ import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.StateFlow
-import kotlinx.coroutines.flow.drop
+import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.launch
 
 class OverlayManager(
@@ -40,6 +36,8 @@ class OverlayManager(
     private val onPause: () -> Unit,
     private val onResume: () -> Unit,
     private val onStop: () -> Unit,
+    private val programController: com.nettarion.hyperborea.program.ProgramController,
+    private val foreground: StateFlow<Boolean>,
 ) {
 
     private val mainHandler = Handler(Looper.getMainLooper())
@@ -49,68 +47,34 @@ class OverlayManager(
     private var contentView: OverlayContentView? = null
     private var exerciseDataJob: Job? = null
     private var stateJob: Job? = null
+    private var programJob: Job? = null
     private var unitsJob: Job? = null
     private var userDismissed = false
-    private var isAppInForeground: Boolean
+    private var isAppInForeground = foreground.value
     private var lastState: OrchestratorState = OrchestratorState.Idle
-
-    private val lifecycleCallbacks: Application.ActivityLifecycleCallbacks
+    @Volatile private var destroyed = false
+    private val visibilityJob: Job
 
     init {
-        // Detect initial foreground state — OverlayManager is typically created after the activity
-        // has already started, so onActivityStarted won't fire for the already-visible activity.
-        val am = context.getSystemService(Context.ACTIVITY_SERVICE) as ActivityManager
-        val myPid = android.os.Process.myPid()
-        isAppInForeground = am.runningAppProcesses?.any {
-            it.pid == myPid && it.importance == ActivityManager.RunningAppProcessInfo.IMPORTANCE_FOREGROUND
-        } ?: false
-        logger.d(TAG, "Initial foreground state: $isAppInForeground")
-
-        val initialCount = if (isAppInForeground) 1 else 0
-        lifecycleCallbacks = object : Application.ActivityLifecycleCallbacks {
-            private var startedCount = initialCount
-
-            override fun onActivityStarted(activity: Activity) {
-                startedCount++
-                logger.d(TAG, "onActivityStarted: count=$startedCount")
-                if (startedCount == 1) {
-                    isAppInForeground = true
-                    hide()
+        visibilityJob = scope.launch {
+            combine(foreground, overlayEnabled, overlayStyle) { visible, _, _ -> visible }
+                .collect { visible ->
+                    mainHandler.post {
+                        if (!destroyed) {
+                            isAppInForeground = visible
+                            logger.d(TAG, "App foreground: $visible")
+                            // Rebuild on a style change; react to enable/disable without waiting
+                            // for the next workout-state or activity event.
+                            hide()
+                            if (shouldShowOverlay()) show()
+                        }
+                    }
                 }
-            }
-
-            override fun onActivityStopped(activity: Activity) {
-                startedCount--
-                logger.d(TAG, "onActivityStopped: count=$startedCount")
-                if (startedCount == 0) {
-                    isAppInForeground = false
-                    if (shouldShowOverlay()) show()
-                }
-            }
-
-            override fun onActivityCreated(activity: Activity, savedInstanceState: Bundle?) {}
-            override fun onActivityResumed(activity: Activity) {}
-            override fun onActivityPaused(activity: Activity) {}
-            override fun onActivitySaveInstanceState(activity: Activity, outState: Bundle) {}
-            override fun onActivityDestroyed(activity: Activity) {}
-        }
-
-        (context.applicationContext as Application).registerActivityLifecycleCallbacks(lifecycleCallbacks)
-
-        // Rebuild the window when the user switches style in settings; also covers switching to
-        // CONTROLS while idle-and-backgrounded, where METRICS would never have been shown.
-        scope.launch {
-            overlayStyle.drop(1).collect {
-                mainHandler.post {
-                    hide()
-                    if (shouldShowOverlay()) show()
-                }
-            }
         }
     }
 
     fun show() {
-        if (view != null) return
+        if (destroyed || view != null) return
         if (Looper.myLooper() != Looper.getMainLooper()) {
             logger.e(TAG, "show() called off main thread: ${Thread.currentThread().name}")
         }
@@ -161,6 +125,8 @@ class OverlayManager(
         }
         exerciseDataJob?.cancel()
         stateJob?.cancel()
+        programJob?.cancel()
+        programJob = null
         unitsJob?.cancel()
         exerciseDataJob = null
         stateJob = null
@@ -192,6 +158,7 @@ class OverlayManager(
             logger.d(TAG, "onStateChanged dispatching to main thread (state=$state)")
         }
         mainHandler.post {
+            if (destroyed) return@post
             lastState = state
             if (stateAllowsOverlay(overlayStyle.value, state)) {
                 if (shouldShowOverlay()) show()
@@ -208,8 +175,9 @@ class OverlayManager(
     }
 
     fun destroy() {
+        destroyed = true
+        visibilityJob.cancel()
         hide()
-        (context.applicationContext as Application).unregisterActivityLifecycleCallbacks(lifecycleCallbacks)
     }
 
     private fun shouldShowOverlay(): Boolean {
@@ -228,6 +196,7 @@ class OverlayManager(
     private fun sendCommand(command: DeviceCommand) {
         scope.launch {
             try {
+                programController.manualControl(command)
                 hardwareAdapter.sendCommand(command)
             } catch (e: CancellationException) {
                 throw e
@@ -238,6 +207,9 @@ class OverlayManager(
     }
 
     private fun startCollectors() {
+        programJob = scope.launch {
+            programController.state.collect { state -> view?.post { contentView?.updateProgram(state, useImperial.value) } }
+        }
         exerciseDataJob = scope.launch {
             hardwareAdapter.exerciseData.collect { data ->
                 view?.post { contentView?.updateExerciseData(data) }
@@ -250,7 +222,10 @@ class OverlayManager(
         }
         unitsJob = scope.launch {
             useImperial.collect { imperial ->
-                view?.post { (contentView as? OverlayControlBarView)?.setUseImperial(imperial) }
+                view?.post {
+                    (contentView as? OverlayControlBarView)?.setUseImperial(imperial)
+                    contentView?.updateProgram(programController.state.value, imperial)
+                }
             }
         }
     }

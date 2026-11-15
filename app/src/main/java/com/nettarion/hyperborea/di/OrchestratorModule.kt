@@ -49,10 +49,12 @@ object OrchestratorModule {
         scope: CoroutineScope,
         sensorAdapter: SensorAdapter,
         profileRepository: ProfileRepository,
+        programController: dagger.Lazy<com.nettarion.hyperborea.program.ProgramController>,
     ): Orchestrator = Orchestrator(
         systemMonitor, systemController, ecosystemManager,
         hardwareAdapter, broadcastManager, rideRecorder, userPreferences, logger, scope,
         sensorAdapter = sensorAdapter,
         profileRepository = profileRepository,
+        beforeExternalCommand = { programController.get().manualControl(it) },
     )
 }

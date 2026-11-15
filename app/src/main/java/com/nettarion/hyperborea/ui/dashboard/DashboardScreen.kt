@@ -51,6 +51,7 @@ fun DashboardScreen(
     onOpenSettings: () -> Unit,
     pendingStopDialog: androidx.compose.runtime.MutableState<Boolean> = remember { mutableStateOf(false) },
     viewModel: DashboardViewModel = hiltViewModel(),
+    onOpenPrograms: () -> Unit = {},
 ) {
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
     var drawerOpen by remember { mutableStateOf(false) }
@@ -119,6 +120,12 @@ fun DashboardScreen(
             )
             HorizontalDivider(thickness = 1.dp, color = colors.divider)
             if (isTreadmill) {
+                androidx.compose.foundation.layout.Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp), verticalAlignment = Alignment.CenterVertically) {
+                    Text("Free run with START, or choose a programmed session", modifier = Modifier.weight(1f), color = colors.textMedium)
+                    OutlinedButton(onClick = onOpenPrograms) { Text("Programs") }
+                }
+                com.nettarion.hyperborea.ui.program.ProgramRunPanel()
+
                 TreadmillMetricGrid(
                     exerciseData = uiState.exerciseData,
                     deviceInfo = uiState.deviceInfo,

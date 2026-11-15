@@ -2,6 +2,7 @@ package com.nettarion.hyperborea.hardware.fitpro.v1
 
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
+import kotlin.math.roundToInt
 
 object V1Codec {
 
@@ -242,7 +243,7 @@ object V1Codec {
         }
         V1Converter.GRADE -> {
             // Grade * 100, stored as signed 16-bit LE
-            val raw = clampToShort((value * 100).toInt())
+            val raw = clampToShort((value * 100).roundToInt())
             byteArrayOf(raw.toByte(), (raw.toInt() shr 8).toByte())
         }
         V1Converter.RESISTANCE -> {

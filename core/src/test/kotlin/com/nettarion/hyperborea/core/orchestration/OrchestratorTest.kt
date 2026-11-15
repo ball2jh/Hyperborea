@@ -45,6 +45,53 @@ import org.junit.Test
 @OptIn(ExperimentalCoroutinesApi::class)
 class OrchestratorTest {
 
+    @Test
+    fun `program commands require a running non degraded workout and stop stays authoritative`() = runTest {
+        val env = TestEnv(this)
+        val command = DeviceCommand.SetTargetSpeed(8f)
+        assertThat(env.orchestrator.sendProgramCommand(command)).isFalse()
+        env.orchestrator.start()
+        assertThat(env.orchestrator.sendProgramCommand(command)).isTrue()
+        env.orchestrator.pause()
+        assertThat(env.orchestrator.sendProgramCommand(command)).isFalse()
+        env.orchestrator.resume()
+        assertThat(env.orchestrator.sendProgramCommand(command)).isTrue()
+        env.orchestrator.stop()
+        assertThat(env.orchestrator.sendProgramCommand(command)).isFalse()
+    }
+
+    @Test
+    fun `program commands cannot bypass treadmill physical start`() = runTest {
+        val env = TestEnv(this)
+        env.hardware.deviceInfo.value = buildDeviceInfo(type = DeviceType.TREADMILL)
+        env.orchestrator.start()
+        assertThat(env.orchestrator.sendProgramCommand(DeviceCommand.SetTargetSpeed(8f))).isFalse()
+        assertThat(env.hardware.receivedCommands).doesNotContain(DeviceCommand.SetTargetSpeed(8f))
+    }
+
+    @Test
+    fun `program commands are blocked when the hardware reports degradation`() = runTest {
+        val env = TestEnv(this)
+        env.hardware.degradedReason.value = "Connection interrupted"
+        env.orchestrator.start()
+        assertThat(env.orchestrator.sendProgramCommand(DeviceCommand.SetTargetSpeed(8f))).isFalse()
+    }
+
+    @Test
+    fun `external control notifies automation before forwarding a target`() = runTest {
+        val observed = mutableListOf<DeviceCommand>()
+        lateinit var env: TestEnv
+        env = TestEnv(this, beforeExternalCommand = {
+            assertThat(env.hardware.receivedCommands).doesNotContain(it)
+            observed += it
+        })
+        env.orchestrator.start()
+        val command = DeviceCommand.SetTargetSpeed(7f)
+        env.broadcast1.emitCommand(command)
+        assertThat(observed).containsExactly(command)
+        assertThat(env.hardware.receivedCommands).contains(command)
+    }
+
     // --- Happy path ---
 
     @Test
@@ -789,6 +836,7 @@ class OrchestratorTest {
         hardwareCanOperate: Boolean = true,
         enabledBroadcasts: Set<BroadcastId> = BroadcastId.entries.toSet(),
         sensorAdapter: SensorAdapter? = FakeSensorAdapter(),
+        beforeExternalCommand: suspend (DeviceCommand) -> Unit = {},
     ) {
         val monitor = FakeSystemMonitor()
         val controller = FakeSystemController()
@@ -827,6 +875,7 @@ class OrchestratorTest {
                 logger = logger,
                 scope = scope,
                 sensorAdapter = sensorAdapter,
+                beforeExternalCommand = beforeExternalCommand,
             )
         }
     }

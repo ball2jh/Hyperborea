@@ -1,6 +1,13 @@
 # Changelog
 
 ## [Unreleased]
+- Added a saved Loop program toggle in the editor: repeat the full program until stopped, with target-change warnings at the return to the first block, per-loop progress, and a repeat countdown in the widget. Existing programs remain single-pass.
+- Incline ramps retain hundredth-percent command precision between block endpoints, instead of rounding every update to the UI step. Held incline selections send one final destination after release; Pause/Stop cancel queued incline writes. Physical motion still depends on the equipment controller.
+- Program widgets use the Next target layout: a prominent change countdown, separate speed and incline rows with live readings and upcoming targets, and Pause/Stop controls. Removed the program name and duplicate metrics from the floating program view.
+- Manual warm-ups can continue directly into a programmed session after confirmation and a 3–2–1 count-in, preserving the workout recording. Fixed the floating widget remaining hidden after switching apps when the bridge service started during activity launch; missing overlay permission is now explained in Programs.
+- **Programmed treadmill sessions.** Choose a ready-made program or build and save your own using speed/incline graphs, timed blocks, drag reordering, repeats, and gradual ramps. Start programs directly from the library; the physical console Start key still gates the belt.
+- **Audible target-change countdowns, including in the background.** Automatic speed/incline changes have a visible and audible 3–2–1 count-in followed by a change tone. Both floating overlay styles show program progress and current → next targets. Pauses freeze program time; manual/external control, unavailable audio, or connection/timing interruptions suspend automation until explicitly resumed. Finishing a single-pass program gives a 3–2–1 stop warning, then stops the workout.
+- **Recover from restricted background service starts after an app update.** Defer a disallowed background start on newer Android versions and retry when the activity becomes visible.
 
 ## [1.4.1] - 2026-08-20
 - **V1 treadmill physical Start works again without bringing back the connect-time belt hazard.** Version 1.4.0 correctly stopped writing `WARM_UP` while connecting, because some controllers interpret that write as an immediate belt start, but it left the controller's explicit start request unanswered. Hyperborea now keeps the treadmill safely idle until the physical Start press, then answers `START_REQUESTED` with `WORKOUT_MODE=RUNNING`; a keypad-event fallback covers firmware that reports the Start button without asserting the request field.

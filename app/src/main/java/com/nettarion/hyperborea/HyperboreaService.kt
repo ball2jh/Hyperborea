@@ -39,8 +39,12 @@ class HyperboreaService : Service() {
     @Inject lateinit var logger: AppLogger
     @Inject lateinit var scope: CoroutineScope
     @Inject lateinit var updateManager: UpdateManager
+    @Inject lateinit var appVisibility: com.nettarion.hyperborea.platform.AppVisibility
+
+    @Inject lateinit var programController: com.nettarion.hyperborea.program.ProgramController
 
     private var stateObserverJob: Job? = null
+    private var programNotificationJob: Job? = null
     private lateinit var overlayManager: OverlayManager
 
     override fun onCreate() {
@@ -56,6 +60,8 @@ class HyperboreaService : Service() {
             useImperial = userPreferences.useImperial,
             logger = logger,
             scope = scope,
+            programController = programController,
+            foreground = appVisibility.foreground,
             onStart = { activate() },
             onPause = { pause() },
             onResume = { resume() },
@@ -67,6 +73,7 @@ class HyperboreaService : Service() {
                 startActivity(launchIntent)
             },
         )
+        programController.startMonitoring()
         orchestrator.startProbing()
         scope.launch {
             broadcastManager.start()
@@ -88,6 +95,13 @@ class HyperboreaService : Service() {
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         when (intent?.action) {
             ACTION_BOOT -> logger.i(TAG, "Started from boot — idle, waiting for activation")
+            ACTION_START_PROGRAM -> scope.launch {
+                try {
+                    val program = com.nettarion.hyperborea.program.ProgramCodec.decode(intent.getStringExtra(EXTRA_PROGRAM) ?: error("Missing program"))
+                    programController.start(program)
+                } catch (e: kotlinx.coroutines.CancellationException) { throw e }
+                catch (e: Exception) { logger.e(TAG, "Couldn't start program", e) }
+            }
             ACTION_ACTIVATE -> activate()
             ACTION_DEACTIVATE -> deactivate(saveRide = true)
             ACTION_DEACTIVATE_DISCARD -> deactivate(saveRide = false)
@@ -108,6 +122,7 @@ class HyperboreaService : Service() {
     override fun onDestroy() {
         overlayManager.destroy()
         stateObserverJob?.cancel()
+        programNotificationJob?.cancel()
         orchestrator.stopProbing()
         // Deliberately blocks the main thread: orchestrator.stop() is what halts a treadmill belt,
         // and once onDestroy returns the process may die before an async teardown finishes. Both
@@ -115,8 +130,10 @@ class HyperboreaService : Service() {
         // ANR window (it was 2×3 s sequential before).
         runBlocking {
             withTimeoutOrNull(STOP_TIMEOUT_MS) {
+                val programStop = launch { programController.stopMonitoring() }
                 val orchestratorStop = launch { orchestrator.stop() }
                 val broadcastStop = launch { broadcastManager.stop() }
+                programStop.join()
                 orchestratorStop.join()
                 broadcastStop.join()
             } ?: logger.w(TAG, "Teardown timed out in onDestroy")
@@ -137,6 +154,7 @@ class HyperboreaService : Service() {
     private fun activate() {
         logger.i(TAG, "Activating orchestrator")
         scope.launch {
+            programController.clearFinished()
             orchestrator.start()
         }
     }
@@ -172,6 +190,10 @@ class HyperboreaService : Service() {
     }
 
     private fun startStateObserver() {
+        programNotificationJob = scope.launch {
+            programController.state.map { run -> run?.let { com.nettarion.hyperborea.program.programStatusText(it, userPreferences.useImperial.value) } }
+                .distinctUntilChanged().collect { updateNotification(orchestrator.state.value) }
+        }
         stateObserverJob = scope.launch {
             orchestrator.state.collect { state ->
                 updateNotification(state)
@@ -191,7 +213,8 @@ class HyperboreaService : Service() {
             is OrchestratorState.Stopping -> "Stopping…"
         }
         val manager = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
-        manager.notify(NOTIFICATION_ID, buildNotification(text))
+        val program = programController.state.value?.takeIf { it.active }
+        manager.notify(NOTIFICATION_ID, buildNotification(program?.let { com.nettarion.hyperborea.program.programStatusText(it, userPreferences.useImperial.value) } ?: text))
     }
 
     /**
@@ -259,6 +282,7 @@ class HyperboreaService : Service() {
             .setSmallIcon(R.drawable.ic_stat_hyperborea)
             .setContentTitle("Hyperborea")
             .setContentText(contentText)
+            .setStyle(Notification.BigTextStyle().bigText(contentText))
             .setContentIntent(contentIntent)
             .setOngoing(true)
             .addAction(
@@ -275,6 +299,8 @@ class HyperboreaService : Service() {
     }
 
     companion object {
+        const val ACTION_START_PROGRAM = "com.nettarion.hyperborea.action.START_PROGRAM"
+        const val EXTRA_PROGRAM = "workout_program"
         const val ACTION_BOOT = "com.nettarion.hyperborea.action.BOOT"
         const val ACTION_ACTIVATE = "com.nettarion.hyperborea.action.ACTIVATE"
         const val ACTION_DEACTIVATE = "com.nettarion.hyperborea.action.DEACTIVATE"

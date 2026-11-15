@@ -664,6 +664,15 @@ class V1SessionTest {
     }
 
     @Test
+    fun `fine incline targets bypass UI stepping in V1 field mapping`() = runTest {
+        val session = startStreamingSession()
+        val fields = session.commandToFields(DeviceCommand.SetIncline(1.23f, snapToStep = false))
+        assertThat(fields[V1DataField.GRADE]!!).isWithin(.0001f).of(1.23f)
+        val selected = session.commandToFields(DeviceCommand.SetIncline(1.23f))
+        assertThat(selected[V1DataField.GRADE]).isEqualTo(1f)
+    }
+
+    @Test
     fun `writeFeature AdjustIncline accumulates`() = runTest {
         val session = startStreamingSession()
         session.writeFeature(DeviceCommand.AdjustIncline(increase = true))

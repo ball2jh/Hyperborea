@@ -53,6 +53,7 @@ class Orchestrator(
     private val scope: CoroutineScope,
     private val sensorAdapter: SensorAdapter? = null,
     private val profileRepository: ProfileRepository? = null,
+    private val beforeExternalCommand: suspend (DeviceCommand) -> Unit = {},
 ) {
 
     private val _state = MutableStateFlow<OrchestratorState>(OrchestratorState.Idle)
@@ -273,6 +274,7 @@ class Orchestrator(
                 .catch { e -> logger.e(TAG, "Command pipeline error", e) }
                 .collect { command ->
                     try {
+                        beforeExternalCommand(command)
                         logger.d(TAG, "Forwarding command: $command")
                         hardwareAdapter.sendCommand(command)
                     } catch (e: CancellationException) { throw e }
@@ -465,6 +467,15 @@ class Orchestrator(
             }
         }
         return true
+    }
+
+    /** Serialized with pause/stop: automation cannot restart a belt during teardown. */
+    suspend fun sendProgramCommand(command: DeviceCommand): Boolean = mutex.withLock {
+        require(command is DeviceCommand.SetTargetSpeed || command is DeviceCommand.SetIncline)
+        val running = _state.value as? OrchestratorState.Running ?: return@withLock false
+        if (running.degraded != null || hardwareAdapter.state.value !is AdapterState.Active) return@withLock false
+        hardwareAdapter.sendCommand(command)
+        true
     }
 
     suspend fun pause() {

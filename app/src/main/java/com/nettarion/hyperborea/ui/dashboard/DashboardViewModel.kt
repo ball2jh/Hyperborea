@@ -51,6 +51,7 @@ class DashboardViewModel @Inject constructor(
     private val fitExporter: FitExporter,
     private val logger: AppLogger,
     @param:ApplicationContext private val context: Context,
+    private val programController: com.nettarion.hyperborea.program.ProgramController? = null,
 ) : ViewModel() {
 
     private val broadcastsFlow: Flow<List<BroadcastUiState>> = run {
@@ -153,6 +154,7 @@ class DashboardViewModel @Inject constructor(
         logger.i(TAG, "User action: $command")
         viewModelScope.launch {
             try {
+                programController?.manualControl(command)
                 hardwareAdapter.sendCommand(command)
             } catch (e: kotlinx.coroutines.CancellationException) {
                 throw e

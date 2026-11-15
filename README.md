@@ -53,6 +53,30 @@ are signed with `release.jks` if present, otherwise with the debug key — see
 self-update/diagnostics settings. The `./gradlew prepareRelease` task runs the full
 clean → lint → test → build → package pipeline and requires a release keystore.
 
+### Local treadmill simulator
+
+Run the `standardDebug` build on an Android emulator to use the built-in demo treadmill;
+no USB equipment is needed. A landscape tablet emulator at 1920×1080 is useful for matching
+the console dashboard. With the emulator booted and selected by ADB:
+
+```bash
+./gradlew :app:assembleStandardDebug
+adb install -r -g app/build/outputs/apk/standard/debug/app-standard-debug.apk
+adb shell am start -n com.nettarion.hyperborea.debug/com.nettarion.hyperborea.MainActivity
+```
+
+Choose a profile or **Guest**, then press **START**. The simulator waits five seconds to mimic
+the physical console Start key,
+then ramps up to 8 km/h. Speed, incline, pause, and resume controls work against simulated
+hardware, and the central track completes one lap per 400 m. Debug builds on real consoles
+still use FitPro USB hardware; release builds always use real hardware.
+
+To check track geometry and lap boundaries, including ten consecutive laps:
+
+```bash
+./gradlew :app:testStandardDebugUnitTest --tests '*TrackMathTest'
+```
+
 ## Installing
 
 Hyperborea installs as a regular Android APK over ADB — no root required. The `release/Hyperborea/`
@@ -121,3 +145,38 @@ See [CONTRIBUTING.md](CONTRIBUTING.md).
 ## License
 
 [MIT](LICENSE) © 2026 Jonathan Ball.
+
+## Treadmill programs
+
+On the treadmill dashboard, choose **Programs** for ready-made runs or a custom session.
+**Start program** arms the equipment; the physical console Start key still starts the belt.
+While a manual walk is running, **Start program** offers to continue the same workout after
+a 3–2–1 count-in. The warm-up stays in the recording; speed and incline stay unchanged until
+the count-in finishes. An active program must be stopped before choosing another.
+**Edit** opens aligned speed and incline graphs. Drag graph handles to adjust targets, drag
+**⠿** on the bottom blocks to reorder, or use **Earlier / Later**. Blocks have a duration entered in minutes and seconds,
+speed, incline, and an optional gradual ramp. Custom drafts are retained locally; **Save program**
+adds a reusable plan to **My programs**. You can also save a plan after finishing or stopping.
+Enable **Loop program** on the editor’s right side to repeat all blocks until you press Stop.
+The setting is saved with the program; the last block counts down to the first block’s targets
+when they change, with no automatic workout stop between loops.
+Completed workouts continue to use the existing profile ride history.
+
+Program timing, target changes, and audible 3–2–1 countdowns run in the foreground service.
+The three beeps precede a distinct change tone; ramps are announced once at their start.
+Incline block settings keep their usual steps, while ramp commands retain finer wire precision.
+Held incline +/− controls select a destination immediately; the deck receives the final target
+after release and a short quiet interval, avoiding a command for every intermediate selection.
+Media sound must be available before automatic targets are applied. Pause freezes the program;
+manual speed/incline control (including external app commands) suspends automation until
+**Resume program**, which gives a fresh countdown. Connection/timing interruptions also suspend
+automation rather than fast-forwarding through missed changes. Single-pass programs stop the workout at
+the end of the final block after a visible and audible 3–2–1 stop warning. Looping programs
+repeat until stopped. Programs do not
+automatically resume after process death.
+
+Enable **Background widget** in Programs (or **System Overlay** in Quick Settings). The Programs
+toggle opens Android's overlay permission screen when needed. This shows
+the next change countdown, separate speed/incline rows with live measurements and upcoming targets,
+and Pause/Stop controls while another app is open. The program name and extra metrics are omitted.
+Both overlay styles support program status; tap that status to return to Hyperborea.
