@@ -1,6 +1,7 @@
 # Changelog
 
 ## [Unreleased]
+- V2 treadmills receive a one-hour pause timeout instead of the stock ten-minute limit, including consoles that start themselves after a physical Start acknowledgement. Other equipment keeps its existing timeout settings.
 - Program mode uses the existing dashboard strip for block progress, separate current/next speed and incline rows, and manual-axis status. A manual speed or incline edit holds just that axis until the next block; the other axis and clock continue. Automation returns with a full countdown, including after a late edit or loop boundary.
 - Keep delayed/fine incline control and program target writes treadmill-only; preserve bike, elliptical and rower control behaviour.
 - Added a saved Loop program toggle in the editor: repeat the full program until stopped, with target-change warnings at the return to the first block, per-loop progress, and a repeat countdown in the widget. Existing programs remain single-pass.

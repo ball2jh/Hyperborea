@@ -49,12 +49,13 @@ class V2SessionTest {
     private suspend fun TestScope.verifyNonTreadmillControls(code: Float, type: DeviceType) {
         val session = createSession(this)
         emitSupportedFeatures(V2FeatureId.DEVICE_TYPE, V2FeatureId.TARGET_GRADE, V2FeatureId.TARGET_RESISTANCE,
-            V2FeatureId.GOAL_WATTS, V2FeatureId.WORKOUT_STATE, V2FeatureId.CURRENT_KPH, V2FeatureId.RPM, V2FeatureId.WATTS)
+            V2FeatureId.GOAL_WATTS, V2FeatureId.WORKOUT_STATE, V2FeatureId.CURRENT_KPH, V2FeatureId.RPM, V2FeatureId.WATTS, V2FeatureId.PAUSE_TIMEOUT)
         transport.emitIncoming(buildEventPacket(V2FeatureId.DEVICE_TYPE, code))
         transport.emitIncoming(buildEventPacket(V2FeatureId.WORKOUT_STATE, V2WorkoutMode.RUNNING.raw))
         session.start()
         advanceUntilIdle()
         assertThat(session.detectedDeviceType).isEqualTo(type)
+        assertThat(transport.writtenPackets.none { it.isFeatureWrite(V2FeatureId.PAUSE_TIMEOUT) }).isTrue()
         val baseline = transport.writtenPackets.size
         session.writeFeature(DeviceCommand.AdjustIncline(true))
         runCurrent()
@@ -1183,6 +1184,26 @@ class V2SessionTest {
     }
 
     @Test
+    fun `self-driving treadmill receives one hour pause timeout and stays paused past ten minutes`() = runTest {
+        val session = createSession(this)
+        emitSupportedFeatures(V2FeatureId.TARGET_KPH, V2FeatureId.WORKOUT_STATE,
+            V2FeatureId.START_REQUESTED, V2FeatureId.PAUSE_TIMEOUT)
+        session.start(); advanceUntilIdle()
+        assertThat(transport.writtenPackets.single { it.isFeatureWrite(V2FeatureId.PAUSE_TIMEOUT) }.featureWriteValue()).isEqualTo(3600f)
+        transport.emitIncoming(buildEventPacket(V2FeatureId.WORKOUT_STATE, V2WorkoutMode.RUNNING.raw)); runCurrent()
+        session.writeFeature(DeviceCommand.PauseWorkout)
+        transport.emitIncoming(buildEventPacket(V2FeatureId.WORKOUT_STATE, V2WorkoutMode.PAUSED.raw)); runCurrent()
+        val baseline = transport.writtenPackets.size
+        val elapsed = session.exerciseData.value?.elapsedTime
+        advanceTimeBy(601_000); runCurrent()
+        // The fake transport doesn't implement MCU expiry. This verifies host behaviour and the
+        // configured timeout on the wire; actual firmware acceptance needs a console soak test.
+        assertThat(session.sessionState.value).isEqualTo(SessionState.Streaming)
+        assertThat(session.exerciseData.value?.elapsedTime).isEqualTo(elapsed)
+        assertThat(transport.writtenPackets.drop(baseline).none { it.workoutStateWriteValue() != null }).isTrue()
+    }
+
+    @Test
     fun `host-driven start writes the stock pre-workout config before RUNNING`() = runTest {
         // When the console declares the stock config features, the host writes them (units, timeouts,
         // goal) before the WORKOUT_STATE=RUNNING transition — this firmware refuses RUNNING otherwise.
@@ -1211,6 +1232,7 @@ class V2SessionTest {
             assertThat(cfgIdx).isLessThan(runIdx)
         }
         assertThat(writes.first { it.isFeatureWrite(V2FeatureId.GOAL_TIME) }.featureWriteValue()).isEqualTo(10_800f)
+        assertThat(writes.single { it.isFeatureWrite(V2FeatureId.PAUSE_TIMEOUT) }.featureWriteValue()).isEqualTo(3600f)
     }
 
     @Test

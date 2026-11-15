@@ -532,6 +532,12 @@ internal class V2Session(
      */
     private suspend fun writeInitConfiguration(supported: Set<V2FeatureId>?) {
         if (supported == null) return
+        // A pause should survive a longer break. Apply to both self-driving and host-driven
+        // treadmills; bikes/ellipticals/rowers keep their console defaults. Use positive seconds:
+        // zero is not a verified "disabled" sentinel across the supported firmware variants.
+        if (detectedDeviceType == DeviceType.TREADMILL && V2FeatureId.PAUSE_TIMEOUT in supported) {
+            writeFeatureRaw(V2FeatureId.PAUSE_TIMEOUT, TREADMILL_PAUSE_TIMEOUT_S)
+        }
         if (V2FeatureId.HEART_BEAT_INTERVAL in supported) {
             transport.write(V2Codec.encode(
                 V2Message.Outgoing.WriteFeature(V2FeatureId.HEART_BEAT_INTERVAL, HEART_BEAT_INTERVAL_MS),
@@ -579,7 +585,7 @@ internal class V2Session(
             V2FeatureId.DISPLAY_UNITS to DISPLAY_UNITS_METRIC,
             V2FeatureId.WARM_UP_TIMEOUT to WARM_UP_TIMEOUT_S,
             V2FeatureId.COOL_DOWN_TIMEOUT to COOL_DOWN_TIMEOUT_S,
-            V2FeatureId.PAUSE_TIMEOUT to PAUSE_TIMEOUT_S,
+            V2FeatureId.PAUSE_TIMEOUT to TREADMILL_PAUSE_TIMEOUT_S,
             V2FeatureId.GOAL_TIME to GOAL_TIME_S,
         )
         val sent = config.filter { (feature, _) -> feature in declared }
@@ -919,7 +925,8 @@ internal class V2Session(
         private const val DISPLAY_UNITS_METRIC = 1f
         private const val WARM_UP_TIMEOUT_S = 180f
         private const val COOL_DOWN_TIMEOUT_S = 600f
-        private const val PAUSE_TIMEOUT_S = 600f
+        // One hour instead of the stock ten-minute pause limit. This is deliberately finite.
+        private const val TREADMILL_PAUSE_TIMEOUT_S = 3600f
         private const val GOAL_TIME_S = 10_800f
         private const val MAX_SUBSCRIBE_BATCH = 8
         // How long to wait for the console to confirm a WORKOUT_STATE transition before continuing degraded.

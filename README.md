@@ -177,7 +177,8 @@ still hold the whole program until **Resume program** gives a fresh countdown, r
 fast-forwarding through missed changes. Single-pass programs stop the workout at
 the end of the final block after a visible and audible 3–2–1 stop warning. Looping programs
 repeat until stopped. Programs do not
-automatically resume after process death.
+automatically resume after process death. V2 treadmills that declare pause-timeout support are
+configured for a 60-minute pause rather than the stock 10 minutes; this is not an unlimited pause.
 
 Enable **Background widget** in Programs (or **System Overlay** in Quick Settings). The Programs
 toggle opens Android's overlay permission screen when needed. This shows
