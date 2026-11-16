@@ -34,6 +34,50 @@ class V2SessionTest {
             transport, logger, scope.backgroundScope, buildDeviceInfo(maxResistance = 24),
         )
 
+    @Test fun `idle safety interlock does not carry counters from an old console workout`() = runTest {
+        val session = startTreadmillSession()
+        transport.emitIncoming(buildEventPacket(V2FeatureId.DISTANCE, 2000f))
+        transport.emitIncoming(buildEventPacket(V2FeatureId.WORKOUT_STATE, V2WorkoutMode.OFF_MACHINE.raw)); runCurrent()
+        transport.emitIncoming(buildEventPacket(V2FeatureId.WORKOUT_STATE, V2WorkoutMode.NONE.raw))
+        transport.emitIncoming(buildEventPacket(V2FeatureId.DISTANCE, 0f)); runCurrent()
+        assertThat(session.exerciseData.value?.distance).isEqualTo(0f)
+        assertThat(transport.writtenPackets.none { it.workoutStateWriteValue() == V2WorkoutMode.RUNNING.raw }).isTrue()
+    }
+
+    @Test fun `V2 expiry clears RESULTS and preserves counters without writing a running state`() = runTest {
+        val session = startTreadmillSession()
+        transport.emitIncoming(buildEventPacket(V2FeatureId.WORKOUT_STATE, V2WorkoutMode.RUNNING.raw))
+        transport.emitIncoming(buildEventPacket(V2FeatureId.DISTANCE, 2000f))
+        transport.emitIncoming(buildEventPacket(V2FeatureId.CURRENT_CALORIES, 100f)); runCurrent()
+        session.writeFeature(DeviceCommand.PauseWorkout)
+        transport.emitIncoming(buildEventPacket(V2FeatureId.WORKOUT_STATE, V2WorkoutMode.PAUSED.raw)); runCurrent()
+        val baseline = transport.writtenPackets.size
+        transport.emitIncoming(buildEventPacket(V2FeatureId.WORKOUT_STATE, V2WorkoutMode.RESULTS.raw))
+        transport.emitIncoming(buildEventPacket(V2FeatureId.DISTANCE, 0f))
+        transport.emitIncoming(buildEventPacket(V2FeatureId.CURRENT_CALORIES, 0f))
+        transport.emitIncoming(buildEventPacket(V2FeatureId.DISTANCE, 500f))
+        transport.emitIncoming(buildEventPacket(V2FeatureId.CURRENT_CALORIES, 25f)); runCurrent()
+        assertThat(session.exerciseData.value?.distance).isEqualTo(2.5f)
+        assertThat(session.exerciseData.value?.calories).isEqualTo(125)
+        assertThat(transport.writtenPackets.drop(baseline).mapNotNull { it.workoutStateWriteValue() }).containsExactly(V2WorkoutMode.NONE.raw)
+        assertThat(transport.writtenPackets.drop(baseline).none { it.isFeatureWrite(V2FeatureId.TARGET_KPH) }).isTrue()
+    }
+
+    @Test fun `explicit V2 Resume after expiry performs start sequence and restores commanded speed`() = runTest {
+        val session = startTreadmillSession()
+        transport.emitIncoming(buildEventPacket(V2FeatureId.WORKOUT_STATE, V2WorkoutMode.RUNNING.raw)); runCurrent()
+        session.writeFeature(DeviceCommand.SetTargetSpeed(6f)); session.writeFeature(DeviceCommand.PauseWorkout)
+        transport.emitIncoming(buildEventPacket(V2FeatureId.WORKOUT_STATE, V2WorkoutMode.PAUSED.raw))
+        transport.emitIncoming(buildEventPacket(V2FeatureId.WORKOUT_STATE, V2WorkoutMode.RESULTS.raw)); runCurrent()
+        val baseline = transport.writtenPackets.size
+        session.writeFeature(DeviceCommand.ResumeWorkout); runCurrent()
+        val writes = transport.writtenPackets.drop(baseline)
+        assertThat(writes.mapNotNull { it.workoutStateWriteValue() }).containsAtLeast(V2WorkoutMode.NONE.raw, V2WorkoutMode.RUNNING.raw).inOrder()
+        assertThat(writes.last { it.isFeatureWrite(V2FeatureId.TARGET_KPH) }.featureWriteValue()).isEqualTo(6f)
+        transport.emitIncoming(buildEventPacket(V2FeatureId.WORKOUT_STATE, V2WorkoutMode.RUNNING.raw)); runCurrent()
+        assertThat(session.exerciseData.value?.workoutMode).isEqualTo(2)
+    }
+
     @Test fun `paused treadmill ignores ready timeout and speed commands until physical Start`() = runTest {
         val session = startTreadmillSession()
         transport.emitIncoming(buildEventPacket(V2FeatureId.WORKOUT_STATE, V2WorkoutMode.RUNNING.raw)); runCurrent()

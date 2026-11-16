@@ -111,7 +111,15 @@ internal abstract class BaseFitProSession(
     // START_REQUESTED, or READY_TO_START report alone cannot authorize a paused belt to restart.
     @Volatile protected var beltRestartRequiresUser = false
     protected fun latchBeltPause() {
-        if (detectedDeviceType.isBeltBased) beltRestartRequiresUser = true
+        if (detectedDeviceType.isBeltBased) {
+            beltRestartRequiresUser = true
+            val snapshot = accumulator.snapshot()
+            // DMK can also be reported while merely parked/arming. Do not carry counters from
+            // the console's previous workout into a new one that has never started.
+            if (snapshot.elapsedTime > 0 || snapshot.workoutMode == 2 || snapshot.workoutMode == 3) {
+                accumulator.preserveCountersAcrossReset()
+            }
+        }
     }
 
     private var lastKeyCode = 0
@@ -135,6 +143,7 @@ internal abstract class BaseFitProSession(
         if (detectedDeviceType == DeviceType.TREADMILL) {
             val command = when (key) {
                 ConsoleKey.START -> DeviceCommand.ResumeWorkout
+                ConsoleKey.STOP -> DeviceCommand.PauseWorkout
                 ConsoleKey.SPEED_UP -> DeviceCommand.AdjustSpeed(true)
                 ConsoleKey.SPEED_DOWN -> DeviceCommand.AdjustSpeed(false)
                 ConsoleKey.INCLINE_UP -> DeviceCommand.AdjustIncline(true)

@@ -177,13 +177,15 @@ still hold the whole program until **Resume program** gives a fresh countdown, r
 fast-forwarding through missed changes. Single-pass programs stop the workout at
 the end of the final block after a visible and audible 3–2–1 stop warning. Looping programs
 repeat until stopped. Programs do not
-automatically resume after process death. V2 treadmills that declare pause-timeout support are
-configured for a 60-minute pause rather than the stock 10 minutes; this is not an unlimited pause.
-When the controller reports that a paused treadmill has timed out into idle/results, the app ends
-the workout and saves eligible recordings. It never treats that report, or safety-key reinsertion,
-as permission to restart the belt. Paused belt sessions require an explicit Resume command or
-physical Start key; unsolicited start/running reports cannot resume automation. A USB disconnect while a treadmill
-is paused ends the session safely rather than reconnecting it automatically.
+automatically resume after process death. A treadmill workout stays paused until you explicitly
+resume or stop it. Supported V1/V2 controllers are initialized with a one-hour hardware pause timer, but if that
+timer expires the app keeps the workout, program position and cumulative counters; the controller's
+RESULTS state is cleared to idle without authorizing belt movement. Resume requires a person to
+press Resume or physical Start, followed by controller confirmation before automation resumes.
+Unsolicited start/running reports and safety-key reinsertion cannot resume a paused treadmill.
+If Resume is not confirmed within ten seconds, the app reasserts pause and keeps the workout for
+an explicit retry. A USB disconnect while a treadmill is paused still ends the session safely,
+rather than automatically reconnecting with a fresh protocol state.
 
 Enable **Background widget** in Programs (or **System Overlay** in Quick Settings). The Programs
 toggle opens Android's overlay permission screen when needed. This shows

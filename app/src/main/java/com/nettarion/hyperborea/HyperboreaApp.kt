@@ -19,6 +19,25 @@ class HyperboreaApp : Application() {
         registerActivityLifecycleCallbacks(appVisibility)
         diagnosticBootstrap.start()
         screenSleepController.start()
+        scheduleIdleServiceStart()
+    }
+
+    private var idleServiceStartQueued = false
+
+    /** Defer passive startup past activity initialization messages on older consoles. */
+    fun scheduleIdleServiceStart() {
+        if (idleServiceStartQueued) return
+        idleServiceStartQueued = true
+        val handler = android.os.Handler(android.os.Looper.getMainLooper())
+        handler.post {
+            handler.post {
+                idleServiceStartQueued = false
+                startIdleService()
+            }
+        }
+    }
+
+    private fun startIdleService() {
         try {
             startHyperboreaService()
         } catch (e: IllegalStateException) {

@@ -15,6 +15,38 @@ class ExerciseDataAccumulatorTest {
         accumulator = ExerciseDataAccumulator(clock = { fakeTime })
     }
 
+    @Test fun `paused belt counters survive repeated controller resets without losing the workout`() {
+        accumulator.updateDistance(2f); accumulator.updateCalories(100); accumulator.updateVerticalGain(20f)
+        accumulator.preserveCountersAcrossReset()
+        accumulator.updateDistance(0f); accumulator.updateCalories(0); accumulator.updateVerticalGain(0f)
+        accumulator.updateDistance(.5f); accumulator.updateCalories(25); accumulator.updateVerticalGain(5f)
+        assertThat(accumulator.snapshot().distance).isEqualTo(2.5f)
+        assertThat(accumulator.snapshot().calories).isEqualTo(125)
+        assertThat(accumulator.snapshot().verticalGain).isEqualTo(25f)
+        accumulator.updateDistance(0f); accumulator.updateCalories(0); accumulator.updateVerticalGain(0f)
+        assertThat(accumulator.snapshot().distance).isEqualTo(2.5f)
+        assertThat(accumulator.snapshot().calories).isEqualTo(125)
+        assertThat(accumulator.snapshot().verticalGain).isEqualTo(25f)
+        accumulator.reset(); accumulator.updateDistance(1f); accumulator.updateCalories(10)
+        assertThat(accumulator.snapshot().distance).isEqualTo(1f)
+        assertThat(accumulator.snapshot().calories).isEqualTo(10)
+    }
+
+    @Test fun `other equipment counters retain raw reset behaviour without belt pause policy`() {
+        accumulator.updateDistance(2f); accumulator.updateCalories(100); accumulator.updateVerticalGain(20f)
+        accumulator.updateDistance(0f); accumulator.updateCalories(0); accumulator.updateVerticalGain(0f)
+        assertThat(accumulator.snapshot().distance).isEqualTo(0f)
+        assertThat(accumulator.snapshot().calories).isEqualTo(0)
+        assertThat(accumulator.snapshot().verticalGain).isEqualTo(0f)
+    }
+
+    @Test fun `pause before first movement cannot start elapsed clock from later cadence`() {
+        accumulator.pause(); fakeTime += 3_600_000; accumulator.updateCadence(60)
+        assertThat(accumulator.snapshot().elapsedTime).isEqualTo(0)
+        accumulator.resume(); fakeTime += 2000
+        assertThat(accumulator.snapshot().elapsedTime).isEqualTo(2)
+    }
+
     @Test
     fun `snapshot returns null fields initially`() {
         accumulator.start()

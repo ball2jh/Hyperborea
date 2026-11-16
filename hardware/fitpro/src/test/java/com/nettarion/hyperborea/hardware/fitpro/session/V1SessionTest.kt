@@ -28,6 +28,65 @@ class V1SessionTest {
             buildDeviceInfo(maxResistance = 24),
         )
 
+    @Test fun `V1 RESULTS is cleared to IDLE without ever authorizing RUNNING`() = runTest {
+        val session = startStreamingTreadmillSession()
+        session.writeFeature(DeviceCommand.PauseWorkout)
+        val baseline = transport.writtenPackets.size
+        backgroundScope.launch { transport.emitIncoming(buildTreadmillStartResponse(workoutMode = 4)) }
+        advanceTimeBy(500); advanceUntilIdle()
+        val modes = transport.writtenPackets.drop(baseline).mapNotNull { it.workoutModeWriteValue() }
+        assertThat(modes).contains(1)
+        assertThat(modes).doesNotContain(2)
+        assertThat(session.exerciseData.value?.workoutMode).isEqualTo(4)
+    }
+
+    @Test fun `explicit V1 Resume from RESULTS waits for IDLE before queueing RUNNING`() = runTest {
+        val session = startStreamingTreadmillSession()
+        session.writeFeature(DeviceCommand.PauseWorkout)
+        backgroundScope.launch { transport.emitIncoming(buildTreadmillStartResponse(workoutMode = 4)) }
+        advanceTimeBy(300); advanceUntilIdle()
+        session.writeFeature(DeviceCommand.ResumeWorkout)
+        backgroundScope.launch { transport.emitIncoming(buildTreadmillStartResponse(workoutMode = 1)) }
+        advanceTimeBy(500); advanceUntilIdle()
+        assertThat(transport.writtenPackets.mapNotNull { it.workoutModeWriteValue() }).containsAtLeast(1, 2).inOrder()
+    }
+
+    @Test fun `Pause cancels a queued V1 resume out of RESULTS`() = runTest {
+        val session = startStreamingTreadmillSession()
+        session.writeFeature(DeviceCommand.PauseWorkout)
+        backgroundScope.launch { transport.emitIncoming(buildTreadmillStartResponse(workoutMode = 4)) }
+        advanceTimeBy(300); advanceUntilIdle()
+        val baseline = transport.writtenPackets.size
+        session.writeFeature(DeviceCommand.ResumeWorkout)
+        session.writeFeature(DeviceCommand.PauseWorkout)
+        backgroundScope.launch { transport.emitIncoming(buildTreadmillStartResponse(workoutMode = 1)) }
+        advanceTimeBy(500); advanceUntilIdle()
+        assertThat(transport.writtenPackets.drop(baseline).mapNotNull { it.workoutModeWriteValue() }).doesNotContain(2)
+    }
+
+    @Test fun `V1 treadmill initializes supported pause timeout while remaining safely idle`() = runTest {
+        val session = createSession(this)
+        backgroundScope.launch {
+            val fields = V1DataField.periodicReadFields.map { it.fieldIndex }.toSet() +
+                V1DataField.REQUIRE_START_REQUESTED.fieldIndex + V1DataField.PAUSE_TIMEOUT.fieldIndex
+            transport.emitIncoming(buildDeviceInfoResponse(deviceId = V1Message.DEVICE_TREADMILL, supportedBitFields = fields))
+            transport.emitIncoming(buildSupportedCommandsResponse())
+            transport.emitIncoming(buildSystemInfoResponse())
+            transport.emitIncoming(buildVersionInfoResponse())
+            transport.emitIncoming(buildSecurityUnlockedResponse())
+            transport.emitIncoming(buildCapabilityResponse())
+            transport.emitIncoming(buildReadWriteAck()) // pause timeout
+            respondToTreadmillConsoleStartup()
+        }
+        session.start(); advanceUntilIdle()
+        val timeout = transport.writtenPackets.single { packet ->
+            packet.size >= 12 && packet[2] == 2.toByte() && packet[3] == 5.toByte() &&
+                (4..7).all { packet[it] == 0.toByte() } && packet[8] == 8.toByte()
+        }
+        assertThat((timeout[9].toInt() and 255) or ((timeout[10].toInt() and 255) shl 8)).isEqualTo(3600)
+        assertThat(transport.writtenPackets.mapNotNull { it.workoutModeWriteValue() }).isEmpty()
+    }
+
     @Test fun `unrequested V1 treadmill RUNNING after pause is rejected until explicit Resume`() = runTest {
         val session = startStreamingTreadmillSession()
         session.writeFeature(DeviceCommand.PauseWorkout)

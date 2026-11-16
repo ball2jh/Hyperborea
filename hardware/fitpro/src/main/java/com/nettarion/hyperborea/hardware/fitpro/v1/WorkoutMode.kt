@@ -14,6 +14,7 @@ enum class WorkoutMode(val raw: Float) {
     IDLE(1f),
     RUNNING(2f),
     PAUSE(3f),
+    RESULTS(4f),
     DMK(8f),
     WARM_UP(10f),
     COOL_DOWN(11f),

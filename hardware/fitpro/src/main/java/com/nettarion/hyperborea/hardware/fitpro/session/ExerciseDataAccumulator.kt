@@ -25,6 +25,16 @@ class ExerciseDataAccumulator(
     private var verticalGain: Float? = null
     private var strokeCount: Int? = null
     private var strokeRate: Int? = null
+    @Volatile private var preserveCounterContinuity = false
+    private var rawDistance = 0f
+    private var distanceOffset = 0f
+    private var rawCalories = 0
+    private var caloriesOffset = 0
+    private var rawVerticalGain = 0f
+    private var verticalGainOffset = 0f
+
+    /** A paused belt controller may reset its counters when its own pause timer expires. */
+    fun preserveCountersAcrossReset() { preserveCounterContinuity = true }
 
     // Elapsed time tracking — own clock, pausable
     private var accumulatedSeconds: Long = initialElapsedSeconds
@@ -40,8 +50,8 @@ class ExerciseDataAccumulator(
     }
 
     fun pause() {
-        if (!paused && runningStartTime > 0L) {
-            accumulatedSeconds += (clock() - runningStartTime) / 1000L
+        if (!paused) {
+            if (runningStartTime > 0L) accumulatedSeconds += (clock() - runningStartTime) / 1000L
             runningStartTime = 0L
             paused = true
         }
@@ -64,15 +74,27 @@ class ExerciseDataAccumulator(
     fun updateIncline(value: Float) { incline = value }
     /** A `null` value clears the reading — used when a grip sensor loses contact. */
     fun updateHeartRate(value: Int?) { heartRate = value }
-    fun updateDistance(value: Float) { distance = value }
-    fun updateCalories(value: Int) { calories = value }
+    fun updateDistance(value: Float) {
+        if (preserveCounterContinuity && value < rawDistance - .001f) distanceOffset += rawDistance
+        rawDistance = value
+        distance = if (preserveCounterContinuity) maxOf(distance ?: 0f, distanceOffset + value) else value
+    }
+    fun updateCalories(value: Int) {
+        if (preserveCounterContinuity && value < rawCalories) caloriesOffset += rawCalories
+        rawCalories = value
+        calories = caloriesOffset + value
+    }
     fun updateElapsedTime(seconds: Long) { /* ignored — we track our own clock */ }
     fun updateTargetSpeed(value: Float) { targetSpeed = value }
     fun updateTargetIncline(value: Float) { targetIncline = value }
     fun updateTargetPower(value: Int) { targetPower = value }
     fun updateTargetResistance(value: Int) { targetResistance = value }
     fun updateWorkoutMode(value: Int) { workoutMode = value }
-    fun updateVerticalGain(meters: Float) { verticalGain = meters }
+    fun updateVerticalGain(meters: Float) {
+        if (preserveCounterContinuity && meters < rawVerticalGain - .001f) verticalGainOffset += rawVerticalGain
+        rawVerticalGain = meters
+        verticalGain = if (preserveCounterContinuity) maxOf(verticalGain ?: 0f, verticalGainOffset + meters) else meters
+    }
     fun updateStrokeCount(value: Int) { strokeCount = value }
     fun updateStrokeRate(value: Int) { strokeRate = value }
 
@@ -121,5 +143,9 @@ class ExerciseDataAccumulator(
         verticalGain = null
         strokeCount = null
         strokeRate = null
+        preserveCounterContinuity = false
+        rawDistance = 0f; distanceOffset = 0f
+        rawCalories = 0; caloriesOffset = 0
+        rawVerticalGain = 0f; verticalGainOffset = 0f
     }
 }

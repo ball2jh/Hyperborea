@@ -46,7 +46,8 @@ class ProgramController @Inject constructor(
                 // This callback is a physical Start edge, not a workout-mode/timeout report.
                 // Initial starts remain gated by the protocol; only an existing pause resumes here.
                 if (orchestrator.state.value is OrchestratorState.Paused) orchestrator.resume()
-            } else manualControl(command)
+            } else if (command is DeviceCommand.PauseWorkout) orchestrator.pause()
+            else manualControl(command)
         }
         telemetry = scope.launch { hardware.exerciseData.collect { if (it != null) lastTelemetry = SystemClock.elapsedRealtime() } }
         ticker = scope.launch {

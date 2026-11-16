@@ -78,7 +78,7 @@ class MainActivity : ComponentActivity() {
         super.onStart()
         // Idempotent idle service start; also retries a start deferred by Application's
         // background-start restriction. It never activates a workout on its own.
-        startHyperboreaService()
+        (application as HyperboreaApp).scheduleIdleServiceStart()
     }
 
     override fun onNewIntent(intent: Intent) {

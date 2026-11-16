@@ -10,8 +10,8 @@ import com.nettarion.hyperborea.core.model.DeviceType
  *    user pressed the physical Start key and the protocol session/MCU completed the transition).
  *  - DMK while Running → pause (safety key removed). From AwaitingConsoleStart it's ignored —
  *    the console's own "INSERT SAFETY KEY" hardware indicator covers that case.
- *  - IDLE from a paused treadmill → stop/save. IDLE can mean pause expiry or safety-key
- *    reinsertion; neither authorizes restarting a belt. Non-belt equipment retains its existing
+ *  - IDLE/RESULTS from a paused treadmill → stay paused. Pause expiry and safety-key
+ *    reinsertion never end the retained workout or authorize restarting a belt. Non-belt equipment retains its existing
  *    safety-key recovery. From Running/armed, IDLE stops the workout.
  *
  * Stateful in one way: belt machines can remain idle until the physical Start key is pressed. An
@@ -37,7 +37,7 @@ internal class WorkoutModeInterpreter(private val logger: AppLogger) {
 
     fun interpret(workoutMode: Int?, state: OrchestratorState, deviceType: DeviceType?): Action {
         if (workoutMode != null &&
-            workoutMode != WORKOUT_MODE_IDLE && workoutMode != WORKOUT_MODE_UNKNOWN) {
+            workoutMode != WORKOUT_MODE_IDLE && workoutMode != WORKOUT_MODE_UNKNOWN && workoutMode != WORKOUT_MODE_RESULTS) {
             consoleLeftIdle = true
         }
         return when (workoutMode) {
@@ -50,9 +50,12 @@ internal class WorkoutModeInterpreter(private val logger: AppLogger) {
             WORKOUT_MODE_DMK ->
                 if (state is OrchestratorState.Running) Action.PauseFromConsole
                 else Action.None
+            WORKOUT_MODE_RESULTS -> if (deviceType == DeviceType.TREADMILL && state is OrchestratorState.Running) {
+                Action.StopWorkout(wasRunning = true)
+            } else Action.None
             WORKOUT_MODE_IDLE -> when (state) {
                 is OrchestratorState.Paused -> if (deviceType == null || deviceType == DeviceType.TREADMILL) {
-                    Action.StopWorkout(wasRunning = true)
+                    Action.None
                 } else Action.ResumeFromSafetyKey
                 is OrchestratorState.Running -> Action.StopWorkout(wasRunning = true)
                 is OrchestratorState.AwaitingConsoleStart ->
@@ -74,6 +77,7 @@ internal class WorkoutModeInterpreter(private val logger: AppLogger) {
         const val WORKOUT_MODE_IDLE = 1
         const val WORKOUT_MODE_RUNNING = 2
         const val WORKOUT_MODE_PAUSE = 3
+        const val WORKOUT_MODE_RESULTS = 4
         const val WORKOUT_MODE_DMK = 8
     }
 }

@@ -313,7 +313,12 @@ internal class V2Session(
                 V2Message.Outgoing.WriteFeature(V2FeatureId.WORKOUT_STATE, V2WorkoutMode.PAUSED.raw)
             }
             is DeviceCommand.ResumeWorkout -> {
-                accumulator.resume()
+                val current = _workoutMode.value?.let(V2WorkoutMode::fromRaw)
+                if (detectedDeviceType.isBeltBased && (!consoleDeclaresStartRequested || current == V2WorkoutMode.NONE || current == V2WorkoutMode.RESULTS)) {
+                    requestWorkoutStart("explicit ResumeWorkout")
+                    return
+                }
+                if (!detectedDeviceType.isBeltBased) accumulator.resume()
                 V2Message.Outgoing.WriteFeature(V2FeatureId.WORKOUT_STATE, V2WorkoutMode.RUNNING.raw)
             }
             is DeviceCommand.CalibrateIncline -> {
@@ -451,6 +456,7 @@ internal class V2Session(
 
         startRequestJob = sessionScope.launch {
             try {
+                if (from == V2WorkoutMode.RESULTS) writeWorkoutState(V2WorkoutMode.NONE)
                 if (acked) {
                     logger.i(TAG, "Start requested ($trigger, from=${from ?: "?"}) — acking with START_REQUESTED")
                     writeFeatureRaw(V2FeatureId.START_REQUESTED, START_REQUESTED_TRUE)
@@ -764,7 +770,10 @@ internal class V2Session(
                     // just our own Pause/Resume commands. The accumulator guards make the
                     // overlap with writeFeature's pause()/resume() calls harmless.
                     when (mode) {
-                        V2WorkoutMode.OFF_MACHINE -> latchBeltPause()
+                        V2WorkoutMode.OFF_MACHINE -> {
+                            latchBeltPause()
+                            if (detectedDeviceType.isBeltBased) accumulator.pause()
+                        }
                         V2WorkoutMode.PAUSED -> {
                             latchBeltPause()
                             if (detectedDeviceType.isBeltBased) sessionScope.launch { gradeCoalescer.cancelPending() }
@@ -779,6 +788,13 @@ internal class V2Session(
                         }
                         else -> {}
                     }
+                }
+                if (mode == V2WorkoutMode.RESULTS && detectedDeviceType.isBeltBased) {
+                    if (startRequestJob?.isActive != true) latchBeltPause()
+                    accumulator.pause()
+                    // Recover the controller's state without authorizing movement. User Resume
+                    // later runs the normal start configuration/acknowledgement sequence.
+                    writeWorkoutState(V2WorkoutMode.NONE)
                 }
                 // READY_TO_START is the V2 MCU's "user pressed the physical Start key" report —
                 // it parks there waiting for the host to start the workout. Mirrors the stock
