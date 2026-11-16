@@ -301,6 +301,14 @@ class Orchestrator(
                             logger.i(TAG, "Console Start pressed — entering Running")
                             enterRunning()
                         }
+                        is WorkoutModeInterpreter.Action.PauseFromConsole -> {
+                            logger.i(TAG, "Console paused workout (Stop pressed on console)")
+                            _state.value = OrchestratorState.Paused
+                        }
+                        is WorkoutModeInterpreter.Action.ResumeFromConsole -> {
+                            logger.i(TAG, "Console resumed workout (Start pressed on console)")
+                            _state.value = OrchestratorState.Running(degraded = hardwareAdapter.degradedReason.value)
+                        }
                         is WorkoutModeInterpreter.Action.PauseForSafetyKey -> {
                             logger.w(TAG, "Safety key removed — pausing")
                             _state.value = OrchestratorState.Paused
@@ -309,6 +317,12 @@ class Orchestrator(
                             logger.i(TAG, "Safety key re-inserted — resuming")
                             hardwareAdapter.sendCommand(DeviceCommand.ResumeWorkout)
                             _state.value = OrchestratorState.Running(degraded = hardwareAdapter.degradedReason.value)
+                        }
+                        is WorkoutModeInterpreter.Action.PauseTimedOut -> {
+                            // Hardware MCU pause timeout expired into RESULTS/IDLE.
+                            // Keep Orchestrator in Paused so the on-screen Resume/Stop buttons remain
+                            // active and either clicking Resume or pressing physical Start restarts the belt.
+                            logger.i(TAG, "Console pause timed out — keeping workout paused and ready to resume")
                         }
                         is WorkoutModeInterpreter.Action.StopWorkout -> {
                             // User pressed the physical Stop key. The Dashboard's save-ride dialog
@@ -473,6 +487,7 @@ class Orchestrator(
                 logger.d(TAG, "pause() ignored (not Running, current: ${_state.value})")
                 return
             }
+            workoutModeInterpreter.onUserPause()
             hardwareAdapter.sendCommand(DeviceCommand.PauseWorkout)
             _state.value = OrchestratorState.Paused
             logger.i(TAG, "Orchestrator paused")
@@ -481,13 +496,18 @@ class Orchestrator(
 
     suspend fun resume() {
         mutex.withLock {
-            if (_state.value !is OrchestratorState.Paused) {
-                logger.d(TAG, "resume() ignored (not Paused, current: ${_state.value})")
+            val current = _state.value
+            if (current !is OrchestratorState.Paused && current !is OrchestratorState.AwaitingConsoleStart) {
+                logger.d(TAG, "resume() ignored (not Paused or AwaitingConsoleStart, current: $current)")
                 return
             }
             hardwareAdapter.sendCommand(DeviceCommand.ResumeWorkout)
-            _state.value = OrchestratorState.Running(degraded = hardwareAdapter.degradedReason.value)
-            logger.i(TAG, "Orchestrator resumed")
+            if (current is OrchestratorState.AwaitingConsoleStart) {
+                logger.i(TAG, "Resume commanded while AwaitingConsoleStart — queued ResumeWorkout, awaiting console confirmation")
+            } else {
+                _state.value = OrchestratorState.Running(degraded = hardwareAdapter.degradedReason.value)
+                logger.i(TAG, "Orchestrator resumed")
+            }
         }
     }
 

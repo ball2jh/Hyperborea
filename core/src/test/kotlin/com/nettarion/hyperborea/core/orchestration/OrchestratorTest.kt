@@ -765,6 +765,136 @@ class OrchestratorTest {
     }
 
     @Test
+    fun `user pause followed by pause timeout into RESULTS and IDLE stays Paused and resumes via physical Start or UI Resume`() = runTest {
+        val env = TestEnv(this)
+        env.hardware.deviceInfo.value = buildDeviceInfo(type = DeviceType.TREADMILL)
+        env.orchestrator.start()
+
+        // Promote AwaitingConsoleStart -> Running
+        env.hardware.exerciseData.value = ExerciseData(
+            power = 100, cadence = null, speed = 1.6f, resistance = null,
+            incline = 1f, heartRate = null, distance = 0.5f, calories = 30,
+            elapsedTime = 60, workoutMode = 2,
+        )
+        advanceUntilIdle()
+        assertThat(env.orchestrator.state.value).isEqualTo(OrchestratorState.Running())
+
+        // User pauses
+        env.orchestrator.pause()
+        advanceUntilIdle()
+        assertThat(env.orchestrator.state.value).isEqualTo(OrchestratorState.Paused)
+
+        // Hardware MCU pause timeout expires into RESULTS (4) then IDLE (1)
+        env.hardware.exerciseData.value = ExerciseData(
+            power = 100, cadence = null, speed = 0f, resistance = null,
+            incline = 1f, heartRate = null, distance = 0.5f, calories = 30,
+            elapsedTime = 60, workoutMode = 4,
+        )
+        advanceUntilIdle()
+        assertThat(env.orchestrator.state.value).isEqualTo(OrchestratorState.Paused)
+
+        env.hardware.exerciseData.value = ExerciseData(
+            power = 100, cadence = null, speed = 0f, resistance = null,
+            incline = 1f, heartRate = null, distance = 0.5f, calories = 30,
+            elapsedTime = 60, workoutMode = 1,
+        )
+        advanceUntilIdle()
+        assertThat(env.orchestrator.state.value).isEqualTo(OrchestratorState.Paused)
+
+        // User clicks Resume on display — trailing IDLE poll before MCU reaches RUNNING must not stop workout
+        env.orchestrator.resume()
+        advanceUntilIdle()
+        assertThat(env.orchestrator.state.value).isEqualTo(OrchestratorState.Running())
+
+        env.hardware.exerciseData.value = ExerciseData(
+            power = 100, cadence = null, speed = 0f, resistance = null,
+            incline = 1f, heartRate = null, distance = 0.5f, calories = 30,
+            elapsedTime = 60, workoutMode = 1,
+        )
+        advanceUntilIdle()
+        assertThat(env.orchestrator.state.value).isEqualTo(OrchestratorState.Running())
+
+        // MCU reaches RUNNING (2)
+        env.hardware.exerciseData.value = ExerciseData(
+            power = 100, cadence = null, speed = 1.6f, resistance = null,
+            incline = 1f, heartRate = null, distance = 0.5f, calories = 30,
+            elapsedTime = 61, workoutMode = 2,
+        )
+        advanceUntilIdle()
+        assertThat(env.orchestrator.state.value).isEqualTo(OrchestratorState.Running())
+    }
+
+    @Test
+    fun `safety key pull and reinsert resumes cleanly`() = runTest {
+        val env = TestEnv(this)
+        env.hardware.deviceInfo.value = buildDeviceInfo(type = DeviceType.TREADMILL)
+        env.orchestrator.start()
+
+        // Promote AwaitingConsoleStart -> Running
+        env.hardware.exerciseData.value = ExerciseData(
+            power = 100, cadence = null, speed = 1.6f, resistance = null,
+            incline = 1f, heartRate = null, distance = 0.5f, calories = 30,
+            elapsedTime = 60, workoutMode = 2,
+        )
+        advanceUntilIdle()
+        assertThat(env.orchestrator.state.value).isEqualTo(OrchestratorState.Running())
+
+        // Safety key pulled (DMK = 8)
+        env.hardware.exerciseData.value = ExerciseData(
+            power = 0, cadence = null, speed = 0f, resistance = null,
+            incline = 1f, heartRate = null, distance = 0.5f, calories = 30,
+            elapsedTime = 60, workoutMode = 8,
+        )
+        advanceUntilIdle()
+        assertThat(env.orchestrator.state.value).isEqualTo(OrchestratorState.Paused)
+
+        // Safety key reinserted (IDLE = 1)
+        env.hardware.exerciseData.value = ExerciseData(
+            power = 0, cadence = null, speed = 0f, resistance = null,
+            incline = 1f, heartRate = null, distance = 0.5f, calories = 30,
+            elapsedTime = 60, workoutMode = 1,
+        )
+        advanceUntilIdle()
+
+        // Safety key reinserted resumes to Running
+        assertThat(env.orchestrator.state.value).isEqualTo(OrchestratorState.Running())
+    }
+
+    @Test
+    fun `console Stop and Start syncs Orchestrator Paused and Running`() = runTest {
+        val env = TestEnv(this)
+        env.hardware.deviceInfo.value = buildDeviceInfo(type = DeviceType.TREADMILL)
+        env.orchestrator.start()
+
+        // Promote AwaitingConsoleStart -> Running
+        env.hardware.exerciseData.value = ExerciseData(
+            power = 100, cadence = null, speed = 1.6f, resistance = null,
+            incline = 1f, heartRate = null, distance = 0.5f, calories = 30,
+            elapsedTime = 60, workoutMode = 2,
+        )
+        advanceUntilIdle()
+        assertThat(env.orchestrator.state.value).isEqualTo(OrchestratorState.Running())
+
+        // Console reports PAUSE (3)
+        env.hardware.exerciseData.value = ExerciseData(
+            power = 100, cadence = null, speed = 0f, resistance = null,
+            incline = 1f, heartRate = null, distance = 0.5f, calories = 30,
+            elapsedTime = 60, workoutMode = 3,
+        )
+        advanceUntilIdle()
+        assertThat(env.orchestrator.state.value).isEqualTo(OrchestratorState.Paused)
+
+        // Console reports RUNNING (2)
+        env.hardware.exerciseData.value = ExerciseData(
+            power = 100, cadence = null, speed = 1.6f, resistance = null,
+            incline = 1f, heartRate = null, distance = 0.5f, calories = 30,
+            elapsedTime = 61, workoutMode = 2,
+        )
+        advanceUntilIdle()
+        assertThat(env.orchestrator.state.value).isEqualTo(OrchestratorState.Running())
+    }
+
+    @Test
     fun `stop from AwaitingConsoleStart transitions to Idle without saving`() = runTest {
         val env = TestEnv(this)
         env.hardware.deviceInfo.value = buildDeviceInfo(type = DeviceType.TREADMILL)

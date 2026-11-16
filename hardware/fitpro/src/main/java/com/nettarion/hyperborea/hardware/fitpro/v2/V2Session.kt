@@ -304,6 +304,12 @@ internal class V2Session(
             }
             is DeviceCommand.ResumeWorkout -> {
                 accumulator.resume()
+                val currentMode = _workoutMode.value?.let { V2WorkoutMode.fromRaw(it) }
+                if (detectedDeviceType.isBeltBased &&
+                    (!consoleDeclaresStartRequested || currentMode == V2WorkoutMode.NONE || currentMode == V2WorkoutMode.RESULTS)) {
+                    requestWorkoutStart("ResumeWorkout")
+                    return
+                }
                 V2Message.Outgoing.WriteFeature(V2FeatureId.WORKOUT_STATE, V2WorkoutMode.RUNNING.raw)
             }
             is DeviceCommand.CalibrateIncline -> {
@@ -531,6 +537,11 @@ internal class V2Session(
      */
     private suspend fun writeInitConfiguration(supported: Set<V2FeatureId>?) {
         if (supported == null) return
+        if (V2FeatureId.PAUSE_TIMEOUT in supported) {
+            transport.write(V2Codec.encode(
+                V2Message.Outgoing.WriteFeature(V2FeatureId.PAUSE_TIMEOUT, PAUSE_TIMEOUT_S),
+            ))
+        }
         if (V2FeatureId.HEART_BEAT_INTERVAL in supported) {
             transport.write(V2Codec.encode(
                 V2Message.Outgoing.WriteFeature(V2FeatureId.HEART_BEAT_INTERVAL, HEART_BEAT_INTERVAL_MS),
@@ -752,6 +763,12 @@ internal class V2Session(
                 // it parks there waiting for the host to start the workout. Mirrors the stock
                 // service's START_REQUESTED handling.
                 if (mode == V2WorkoutMode.READY_TO_START) requestWorkoutStart("console reported READY_TO_START")
+                // When pause timeout expires into RESULTS on an active session, reset console state
+                // to NONE so it doesn't stay wedged in RESULTS (where RUNNING writes are rejected).
+                if (mode == V2WorkoutMode.RESULTS && previous == V2WorkoutMode.PAUSED) {
+                    logger.i(TAG, "Pause timed out into RESULTS — resetting console state to NONE to unwedge console")
+                    sessionScope.launch { writeWorkoutState(V2WorkoutMode.NONE) }
+                }
                 accumulator.updateWorkoutMode(v2WorkoutStateToV1Code(mode))
             }
             // Equipment limits the MCU reports — captured into the session's capabilities (overlaid
@@ -915,7 +932,7 @@ internal class V2Session(
         private const val DISPLAY_UNITS_METRIC = 1f
         private const val WARM_UP_TIMEOUT_S = 180f
         private const val COOL_DOWN_TIMEOUT_S = 600f
-        private const val PAUSE_TIMEOUT_S = 600f
+        private const val PAUSE_TIMEOUT_S = 3600f
         private const val GOAL_TIME_S = 10_800f
         private const val MAX_SUBSCRIBE_BATCH = 8
         // How long to wait for the console to confirm a WORKOUT_STATE transition before continuing degraded.

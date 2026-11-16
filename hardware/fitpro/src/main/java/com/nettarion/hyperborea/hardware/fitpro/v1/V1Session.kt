@@ -97,6 +97,12 @@ internal class V1Session(
     /** Edge detector for the V1 controller's app-mediated physical Start signal. */
     private var lastStartRequested: Boolean = false
 
+    /** Set when ResumeWorkout arrives while the MCU is in RESULTS; triggers RUNNING once IDLE is reached. */
+    @Volatile private var pendingResumeFromResults: Boolean = false
+
+    /** Writes queued synchronously by [applyDataResponse] to be merged into [pendingWriteFields] in [pollOnce]. */
+    private var pollQueuedWrites: Map<V1DataField, Float> = emptyMap()
+
     /**
      * Whether the MCU is in constant-watts (ERG) mode. Updated from the IS_CONSTANT_WATTS_MODE
      * readback each poll (authoritative — survives an app restart with the MCU still latched) and
@@ -334,7 +340,14 @@ internal class V1Session(
             mapOf(V1DataField.WORKOUT_MODE to WorkoutMode.PAUSE.raw)
         }
         is DeviceCommand.ResumeWorkout -> {
-            mapOf(V1DataField.WORKOUT_MODE to WorkoutMode.RUNNING.raw)
+            if (accumulator.snapshot().workoutMode == WorkoutMode.RESULTS.raw.toInt()) {
+                logger.i(TAG, "ResumeWorkout while MCU is in RESULTS — clearing to IDLE before RUNNING")
+                pendingResumeFromResults = true
+                mapOf(V1DataField.WORKOUT_MODE to WorkoutMode.IDLE.raw)
+            } else {
+                pendingResumeFromResults = false
+                mapOf(V1DataField.WORKOUT_MODE to WorkoutMode.RUNNING.raw)
+            }
         }
         is DeviceCommand.CalibrateIncline -> emptyMap()
         // No rider-weight field in the V1 field set we poll — quietly ignored.
@@ -556,6 +569,9 @@ internal class V1Session(
      *   workout. [transitionToActive] re-disables it immediately before writing
      *   `WORKOUT_MODE=RUNNING`, which the firmware requires.
      */
+    private fun supportsPauseTimeout(): Boolean =
+        supportedBitFields.isEmpty() || V1DataField.PAUSE_TIMEOUT.fieldIndex in supportedBitFields
+
     private suspend fun prepareConsole() {
         val isTreadmill = detectedDeviceType == DeviceType.TREADMILL
         val supportsRequireStart = supportedBitFields.isEmpty() ||
@@ -563,6 +579,9 @@ internal class V1Session(
         val supportsIdleLockout = supportedBitFields.isEmpty() ||
             V1DataField.IDLE_MODE_LOCKOUT.fieldIndex in supportedBitFields
 
+        if (supportsPauseTimeout()) {
+            writeConsoleField(V1DataField.PAUSE_TIMEOUT, EXTENDED_PAUSE_TIMEOUT_S)
+        }
         if (supportsRequireStart) {
             writeConsoleField(V1DataField.REQUIRE_START_REQUESTED, FIELD_ENABLED)
         }
@@ -572,7 +591,8 @@ internal class V1Session(
     }
 
     private suspend fun writeConsoleField(field: V1DataField, value: Float) {
-        sendReadWrite(writeFields = mapOf(field to value), readFields = setOf(field))
+        val response = sendReadWrite(writeFields = mapOf(field to value), readFields = setOf(field))
+        logger.i(TAG, "Console init: $field=$value (readback=${response?.fields?.get(field)})")
         delay(COMMAND_DELAY_MS)
     }
 
@@ -803,6 +823,13 @@ internal class V1Session(
             lastTruncatedSeen = decoded.isTruncated
 
             applyDataResponse(decoded.fields)
+            if (pollQueuedWrites.isNotEmpty()) {
+                val queued = pollQueuedWrites
+                pollQueuedWrites = emptyMap()
+                pendingWriteMutex.withLock {
+                    pendingWriteFields = queued + pendingWriteFields
+                }
+            }
             handleKeyObject(decoded.keyObject)
             estimatePowerIfNeeded()
             consecutivePollErrors = 0
@@ -848,15 +875,38 @@ internal class V1Session(
                 V1DataField.WORKOUT_MODE -> {
                     val mode = value.toInt()
                     val previousMode = accumulator.snapshot().workoutMode
+                    val workoutMode = WorkoutMode.fromRaw(mode)
                     if (previousMode != mode) {
-                        when (WorkoutMode.fromRaw(mode)) {
-                            WorkoutMode.PAUSE -> accumulator.pause()
+                        logger.i(TAG, "Console workout mode: $workoutMode (raw=$mode, prev=$previousMode)")
+                        when (workoutMode) {
+                            WorkoutMode.PAUSE -> {
+                                accumulator.pause()
+                                if (supportsPauseTimeout()) {
+                                    pollQueuedWrites = pollQueuedWrites + (V1DataField.PAUSE_TIMEOUT to EXTENDED_PAUSE_TIMEOUT_S)
+                                }
+                            }
+                            WorkoutMode.RESULTS -> {
+                                accumulator.pause()
+                                logger.i(TAG, "Console entered RESULTS — clearing to IDLE so workout remains resumable")
+                            }
                             WorkoutMode.RUNNING -> {
+                                pendingResumeFromResults = false
                                 accumulator.resume()
                                 accumulator.startTimer()
+                                if (supportsPauseTimeout()) {
+                                    pollQueuedWrites = pollQueuedWrites + (V1DataField.PAUSE_TIMEOUT to EXTENDED_PAUSE_TIMEOUT_S)
+                                }
                             }
                             else -> {}
                         }
+                    }
+                    if (workoutMode == WorkoutMode.RESULTS) {
+                        // A V1 MCU in RESULTS ignores WORKOUT_MODE=RUNNING until it first exits to IDLE.
+                        pollQueuedWrites = pollQueuedWrites + (V1DataField.WORKOUT_MODE to WorkoutMode.IDLE.raw)
+                    } else if (workoutMode == WorkoutMode.IDLE && pendingResumeFromResults) {
+                        pendingResumeFromResults = false
+                        logger.i(TAG, "Console reached IDLE after RESULTS — completing queued ResumeWorkout")
+                        pollQueuedWrites = pollQueuedWrites + (V1DataField.WORKOUT_MODE to WorkoutMode.RUNNING.raw)
                     }
                     accumulator.updateWorkoutMode(mode)
                 }
@@ -1063,6 +1113,8 @@ internal class V1Session(
         // 0 = DISABLED / UNLOCKED.
         private const val FIELD_ENABLED = 1f
         private const val FIELD_DISABLED = 0f
+        // Extended pause timeout: 3600 seconds (1 hour) instead of 600s (10 min) default.
+        private const val EXTENDED_PAUSE_TIMEOUT_S = 3600f
 
         // KEY_OBJECT key codes are mapped centrally by FitProKeypad. V1 normally observes them;
         // treadmill Start is the one host-routed fallback because not every controller asserts

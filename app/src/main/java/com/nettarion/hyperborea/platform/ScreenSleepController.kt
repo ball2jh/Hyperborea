@@ -57,14 +57,17 @@ class ScreenSleepController @Inject constructor(
     private var grantWatchJob: Job? = null
 
     /**
-     * Whether the Activity should hold `FLAG_KEEP_SCREEN_ON` right now: only when the feature is
-     * enabled *and* a workout is in progress. When idle (or the feature is off) this is `false`
-     * and the OS screen-off timeout governs.
+     * Whether the Activity should hold `FLAG_KEEP_SCREEN_ON` right now:
+     * - Always `true` when the "sleep after idle" feature is disabled (consoles like the
+     *   NordicTrack X22i ship with a 10-minute `SCREEN_OFF_TIMEOUT` in firmware and do not wake
+     *   on touch once the display sleeps).
+     * - When the feature is enabled, `true` while a workout is active and `false` when idle so
+     *   the OS screen-off timeout governs.
      */
     val keepScreenOn: StateFlow<Boolean> =
         combine(userPreferences.screenSleepEnabled, orchestratorState) { enabled, state ->
-            enabled && state.keepsScreenAwake()
-        }.stateIn(scope, SharingStarted.Eagerly, false)
+            !enabled || state.keepsScreenAwake()
+        }.stateIn(scope, SharingStarted.Eagerly, true)
 
     /** Apply the system timeout now and re-apply whenever the toggle or duration changes. */
     fun start() {

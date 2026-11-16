@@ -20,17 +20,29 @@ internal class WorkoutModeInterpreter(private val logger: AppLogger) {
 
     sealed interface Action {
         data object PromoteToRunning : Action
+        data object PauseFromConsole : Action
+        data object ResumeFromConsole : Action
         data object PauseForSafetyKey : Action
         data object ResumeFromSafetyKey : Action
+        data object PauseTimedOut : Action
         data class StopWorkout(val wasRunning: Boolean) : Action
         data object None : Action
     }
 
     private var consoleLeftIdle = false
+    private var pausedBySafetyKey = false
+    private var pauseTimedOut = false
 
-    /** Forgets the console-left-idle confirmation. Call each time a session arms. */
+    /** Forgets state flags. Call each time a session arms. */
     fun reset() {
         consoleLeftIdle = false
+        pausedBySafetyKey = false
+        pauseTimedOut = false
+    }
+
+    fun onUserPause() {
+        pausedBySafetyKey = false
+        pauseTimedOut = false
     }
 
     fun interpret(workoutMode: Int?, state: OrchestratorState): Action {
@@ -39,17 +51,57 @@ internal class WorkoutModeInterpreter(private val logger: AppLogger) {
             consoleLeftIdle = true
         }
         return when (workoutMode) {
-            WORKOUT_MODE_RUNNING ->
-                if (state is OrchestratorState.AwaitingConsoleStart) Action.PromoteToRunning
-                else Action.None
+            WORKOUT_MODE_RUNNING -> {
+                pauseTimedOut = false
+                when (state) {
+                    is OrchestratorState.AwaitingConsoleStart -> Action.PromoteToRunning
+                    is OrchestratorState.Paused -> {
+                        pausedBySafetyKey = false
+                        Action.ResumeFromConsole
+                    }
+                    else -> Action.None
+                }
+            }
+            WORKOUT_MODE_PAUSE -> {
+                pauseTimedOut = false
+                if (state is OrchestratorState.Running) {
+                    pausedBySafetyKey = false
+                    Action.PauseFromConsole
+                } else {
+                    Action.None
+                }
+            }
             WORKOUT_MODE_DMK ->
-                if (state is OrchestratorState.Running) Action.PauseForSafetyKey
-                else Action.None
-            WORKOUT_MODE_IDLE -> when (state) {
-                is OrchestratorState.Paused -> Action.ResumeFromSafetyKey
-                is OrchestratorState.Running -> Action.StopWorkout(wasRunning = true)
+                if (state is OrchestratorState.Running) {
+                    pausedBySafetyKey = true
+                    Action.PauseForSafetyKey
+                } else if (state is OrchestratorState.Paused) {
+                    pausedBySafetyKey = true
+                    Action.None
+                } else {
+                    Action.None
+                }
+            WORKOUT_MODE_RESULTS, WORKOUT_MODE_IDLE -> when (state) {
+                is OrchestratorState.Paused ->
+                    if (workoutMode == WORKOUT_MODE_IDLE && pausedBySafetyKey) {
+                        pausedBySafetyKey = false
+                        Action.ResumeFromSafetyKey
+                    } else if (!pauseTimedOut) {
+                        pauseTimedOut = true
+                        Action.PauseTimedOut
+                    } else {
+                        Action.None
+                    }
+                is OrchestratorState.Running ->
+                    if (pauseTimedOut) {
+                        // A resume was just requested after a pause timeout; ignore trailing
+                        // RESULTS/IDLE polls while the console transitions back to RUNNING.
+                        Action.None
+                    } else {
+                        Action.StopWorkout(wasRunning = true)
+                    }
                 is OrchestratorState.AwaitingConsoleStart ->
-                    if (consoleLeftIdle) {
+                    if (workoutMode == WORKOUT_MODE_IDLE && consoleLeftIdle) {
                         Action.StopWorkout(wasRunning = false)
                     } else {
                         logger.d(TAG, "Idle report while armed (console never left idle) — staying armed")
@@ -66,6 +118,8 @@ internal class WorkoutModeInterpreter(private val logger: AppLogger) {
         const val WORKOUT_MODE_UNKNOWN = 0
         const val WORKOUT_MODE_IDLE = 1
         const val WORKOUT_MODE_RUNNING = 2
+        const val WORKOUT_MODE_PAUSE = 3
+        const val WORKOUT_MODE_RESULTS = 4
         const val WORKOUT_MODE_DMK = 8
     }
 }

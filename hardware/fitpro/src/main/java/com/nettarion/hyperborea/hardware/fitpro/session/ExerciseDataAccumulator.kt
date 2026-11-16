@@ -13,7 +13,11 @@ class ExerciseDataAccumulator(
     private var incline: Float? = null
     private var heartRate: Int? = null
     private var distance: Float? = null
+    private var distanceOffset: Float = 0f
+    private var lastRawDistance: Float = 0f
     private var calories: Int? = null
+    private var caloriesOffset: Int = 0
+    private var lastRawCalories: Int = 0
     private var targetSpeed: Float? = null
     // The only field written off the receive/poll loop: the session publishes a commanded incline
     // target straight from the command coroutine (see BaseFitProSession.handleInclineCommand), so
@@ -23,6 +27,8 @@ class ExerciseDataAccumulator(
     private var targetResistance: Int? = null
     private var workoutMode: Int? = null
     private var verticalGain: Float? = null
+    private var verticalGainOffset: Float = 0f
+    private var lastRawVerticalGain: Float = 0f
     private var strokeCount: Int? = null
     private var strokeRate: Int? = null
 
@@ -64,15 +70,35 @@ class ExerciseDataAccumulator(
     fun updateIncline(value: Float) { incline = value }
     /** A `null` value clears the reading — used when a grip sensor loses contact. */
     fun updateHeartRate(value: Int?) { heartRate = value }
-    fun updateDistance(value: Float) { distance = value }
-    fun updateCalories(value: Int) { calories = value }
+    fun updateDistance(value: Float) {
+        if (value < lastRawDistance - COUNTER_RESET_EPSILON) {
+            distanceOffset += lastRawDistance
+        }
+        lastRawDistance = value
+        distance = distanceOffset + value
+    }
+
+    fun updateCalories(value: Int) {
+        if (value < lastRawCalories) {
+            caloriesOffset += lastRawCalories
+        }
+        lastRawCalories = value
+        calories = caloriesOffset + value
+    }
+
     fun updateElapsedTime(seconds: Long) { /* ignored — we track our own clock */ }
     fun updateTargetSpeed(value: Float) { targetSpeed = value }
     fun updateTargetIncline(value: Float) { targetIncline = value }
     fun updateTargetPower(value: Int) { targetPower = value }
     fun updateTargetResistance(value: Int) { targetResistance = value }
     fun updateWorkoutMode(value: Int) { workoutMode = value }
-    fun updateVerticalGain(meters: Float) { verticalGain = meters }
+    fun updateVerticalGain(meters: Float) {
+        if (meters < lastRawVerticalGain - COUNTER_RESET_EPSILON) {
+            verticalGainOffset += lastRawVerticalGain
+        }
+        lastRawVerticalGain = meters
+        verticalGain = verticalGainOffset + meters
+    }
     fun updateStrokeCount(value: Int) { strokeCount = value }
     fun updateStrokeRate(value: Int) { strokeRate = value }
 
@@ -109,7 +135,11 @@ class ExerciseDataAccumulator(
         incline = null
         heartRate = null
         distance = null
+        distanceOffset = 0f
+        lastRawDistance = 0f
         calories = null
+        caloriesOffset = 0
+        lastRawCalories = 0
         accumulatedSeconds = 0L
         runningStartTime = 0L
         paused = false
@@ -119,7 +149,13 @@ class ExerciseDataAccumulator(
         targetResistance = null
         workoutMode = null
         verticalGain = null
+        verticalGainOffset = 0f
+        lastRawVerticalGain = 0f
         strokeCount = null
         strokeRate = null
+    }
+
+    private companion object {
+        const val COUNTER_RESET_EPSILON = 0.001f
     }
 }
