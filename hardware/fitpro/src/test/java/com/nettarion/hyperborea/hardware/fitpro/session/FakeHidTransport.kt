@@ -26,7 +26,14 @@ class FakeHidTransport : HidTransport {
         incomingChannel.close()
     }
 
+    /** The next this-many [write] calls throw, like a USB OUT transfer the controller refused. */
+    var failNextWrites = 0
+
     override suspend fun write(data: ByteArray) {
+        if (failNextWrites > 0) {
+            failNextWrites--
+            throw java.io.IOException("USB write failed")
+        }
         writtenPackets.add(data.copyOf())
     }
 

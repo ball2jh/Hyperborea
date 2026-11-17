@@ -735,21 +735,27 @@ internal class V1Session(
         // ReadWriteData targets DEVICE_MAIN (0x02) — FITNESS_BIKE (0x07) returns DEV_NOT_SUPPORTED.
         // pollFields is periodicReadFields ∩ supportedBitFields so the response payload size matches
         // the decoder's positional read; see V1Codec.decodeDataResponseForFields.
-        writeMessage(V1Message.Outgoing.ReadWriteData(
-            writeFields = writeFields,
-            readFields = pollFields,
-        ))
+        try {
+            writeMessage(V1Message.Outgoing.ReadWriteData(
+                writeFields = writeFields,
+                readFields = pollFields,
+            ))
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            // The drained commands never reached the MCU. Put them back before the loop counts
+            // this as a poll error, or a failed USB write silently eats a queued command — a
+            // PAUSE included.
+            requeueWrites(writeFields)
+            throw e
+        }
 
         delay(READ_DELAY_MS)
 
         // No timeout here on purpose: the poll loop is steady-state and just waits for the next reply.
         val firstPacket = transport.readPacket()
         if (firstPacket == null) {
-            if (writeFields.isNotEmpty()) {
-                pendingWriteMutex.withLock {
-                    pendingWriteFields = writeFields + pendingWriteFields
-                }
-            }
+            requeueWrites(writeFields)
             return
         }
 
@@ -757,21 +763,12 @@ internal class V1Session(
             readResponse(firstPacket, pollFields)
         } catch (e: Exception) {
             logger.w(TAG, "Malformed response (${firstPacket.size} bytes): ${e.message}")
-            // Re-queue write fields so commands aren't lost
-            if (writeFields.isNotEmpty()) {
-                pendingWriteMutex.withLock {
-                    pendingWriteFields = writeFields + pendingWriteFields
-                }
-            }
+            requeueWrites(writeFields)
             return
         }
         if (decoded is V1Message.Incoming.DataResponse) {
             if (decoded.status == V1Message.STATUS_SECURITY_BLOCK) {
-                if (writeFields.isNotEmpty()) {
-                    pendingWriteMutex.withLock {
-                        pendingWriteFields = writeFields + pendingWriteFields
-                    }
-                }
+                requeueWrites(writeFields)
                 // Capped: a controller that stays blocked despite accepting re-verification would
                 // otherwise be re-verified every poll (~100 ms) forever. After the cap, surface a
                 // degraded reason and keep polling plainly — a later DONE resets the counter.
@@ -834,6 +831,18 @@ internal class V1Session(
             _exerciseData.value = accumulator.snapshot()
 
             logTelemetryThrottled()
+        }
+    }
+
+    /**
+     * Returns fields a poll drained but could not deliver to the front of the queue. Anything
+     * queued since is newer and wins the merge (right side), so a Pause issued while the failed
+     * poll was in flight is never overwritten by the older write it supersedes.
+     */
+    private suspend fun requeueWrites(writeFields: Map<V1DataField, Float>) {
+        if (writeFields.isEmpty()) return
+        pendingWriteMutex.withLock {
+            pendingWriteFields = writeFields + pendingWriteFields
         }
     }
 
