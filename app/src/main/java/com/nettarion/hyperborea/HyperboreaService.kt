@@ -17,6 +17,7 @@ import com.nettarion.hyperborea.core.orchestration.Orchestrator
 import com.nettarion.hyperborea.core.orchestration.OrchestratorState
 import com.nettarion.hyperborea.core.profile.UserPreferences
 import com.nettarion.hyperborea.overlay.OverlayManager
+import com.nettarion.hyperborea.platform.runTeardownWithin
 import com.nettarion.hyperborea.platform.update.UpdateManager
 import dagger.hilt.android.AndroidEntryPoint
 import kotlinx.coroutines.CoroutineScope
@@ -25,8 +26,6 @@ import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.filterNotNull
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.runBlocking
-import kotlinx.coroutines.withTimeoutOrNull
 import javax.inject.Inject
 
 @AndroidEntryPoint
@@ -135,19 +134,20 @@ class HyperboreaService : Service() {
         programNotificationJob?.cancel()
         orchestrator.stopProbing()
         // Deliberately blocks the main thread: orchestrator.stop() is what halts a treadmill belt,
-        // and once onDestroy returns the process may die before an async teardown finishes. Both
-        // stops run concurrently under ONE bounded budget so the worst case stays well inside the
-        // ANR window (it was 2×3 s sequential before).
-        runBlocking {
-            withTimeoutOrNull(STOP_TIMEOUT_MS) {
-                val programStop = launch { programController.stopMonitoring() }
-                val orchestratorStop = launch { orchestrator.stop() }
-                val broadcastStop = launch { broadcastManager.stop() }
-                programStop.join()
-                orchestratorStop.join()
-                broadcastStop.join()
-            } ?: logger.w(TAG, "Teardown timed out in onDestroy")
-        }
+        // and once onDestroy returns the process may die before an async teardown finishes — so
+        // wait for it, but only up to STOP_TIMEOUT_MS. The stops run on the application scope,
+        // not inside this wait: orchestrator.stop() is uncancellable once begun (a half-run
+        // teardown strands the state machine) and can take tens of seconds against a controller
+        // that has stopped answering, which would be an ANR if we joined it. On timeout we stop
+        // waiting; the teardown itself carries on for as long as the process lives. The belt
+        // PAUSE is the first thing it writes, so it lands well inside the budget either way.
+        val finished = runTeardownWithin(
+            scope, STOP_TIMEOUT_MS,
+            { programController.stopMonitoring() },
+            { orchestrator.stop() },
+            { broadcastManager.stop() },
+        )
+        if (!finished) logger.w(TAG, "Teardown still running after ${STOP_TIMEOUT_MS}ms — onDestroy not waiting further")
         logger.i(TAG, "Service destroyed")
         super.onDestroy()
     }
@@ -322,6 +322,8 @@ class HyperboreaService : Service() {
 
         private const val NOTIFICATION_ID = 1
         private const val CHANNEL_ID = "hyperborea_service"
+        // Upper bound on how long onDestroy blocks the main thread waiting for teardown — kept
+        // well inside the ANR window. It bounds the wait only; the teardown is never cut short.
         private const val STOP_TIMEOUT_MS = 3000L
         private const val TAG = "Service"
     }
