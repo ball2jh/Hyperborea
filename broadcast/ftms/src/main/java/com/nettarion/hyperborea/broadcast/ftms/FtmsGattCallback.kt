@@ -38,6 +38,11 @@ class FtmsGattCallback(
     // wipe another central's live state.
     private val cccdState = ConcurrentHashMap<String, ConcurrentHashMap<UUID, ByteArray>>()
 
+    // Negotiated ATT MTU per device address; absent until the central asks for a larger one.
+    private val mtuByDevice = ConcurrentHashMap<String, Int>()
+    // (address, characteristic) pairs already warned about, so the warning is once per link.
+    private val oversizeWarned = java.util.Collections.newSetFromMap(ConcurrentHashMap<Pair<String, UUID>, Boolean>())
+
     override fun onConnectionStateChange(device: BluetoothDevice, status: Int, newState: Int) {
         when (newState) {
             BluetoothProfile.STATE_CONNECTED -> {
@@ -47,6 +52,8 @@ class FtmsGattCallback(
             BluetoothProfile.STATE_DISCONNECTED -> {
                 logger.i(TAG, "Client disconnected: ${device.address}")
                 cccdState.remove(device.address)
+                mtuByDevice.remove(device.address)
+                oversizeWarned.removeAll { it.first == device.address }
                 onClientDisconnected(device)
             }
         }
@@ -174,6 +181,35 @@ class FtmsGattCallback(
         }
     }
 
+    override fun onMtuChanged(device: BluetoothDevice, mtu: Int) {
+        logger.i(TAG, "MTU for ${device.address}: $mtu")
+        mtuByDevice[device.address] = mtu
+    }
+
+    /** Largest notification value [address] can receive whole: the ATT MTU minus the 3-byte header. */
+    fun maxNotificationPayload(address: String): Int =
+        (mtuByDevice[address] ?: DEFAULT_ATT_MTU) - ATT_NOTIFICATION_HEADER
+
+    /**
+     * Whether a [size]-byte notification of [charUuid] reaches [address] intact. The Android stack
+     * silently truncates a notification to the link's MTU, and the fuller FTMS data frames (21–27
+     * bytes) exceed the 20-byte default — a central that never negotiates a larger MTU would see
+     * cut-off frames with no error on either side. We don't split frames; this makes the condition
+     * visible in a field log instead, once per link and characteristic.
+     */
+    fun checkNotificationFits(address: String, charUuid: UUID, size: Int): Boolean {
+        val limit = maxNotificationPayload(address)
+        if (size <= limit) return true
+        if (oversizeWarned.add(address to charUuid)) {
+            logger.w(
+                TAG,
+                "Notification for $charUuid is $size bytes but $address accepts $limit " +
+                    "(MTU ${limit + ATT_NOTIFICATION_HEADER}) — the client receives it truncated",
+            )
+        }
+        return false
+    }
+
     override fun onServiceAdded(status: Int, service: BluetoothGattService) {
         if (status == BluetoothGatt.GATT_SUCCESS) {
             logger.d(TAG, "Service added: ${service.uuid}")
@@ -221,5 +257,7 @@ class FtmsGattCallback(
 
     private companion object {
         const val TAG = "FtmsGatt"
+        const val DEFAULT_ATT_MTU = 23
+        const val ATT_NOTIFICATION_HEADER = 3
     }
 }

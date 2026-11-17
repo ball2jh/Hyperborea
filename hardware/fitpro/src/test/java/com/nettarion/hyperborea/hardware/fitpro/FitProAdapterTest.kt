@@ -675,6 +675,114 @@ class FitProAdapterTest {
         assertThat(adapter.deviceInfo.value!!.maxSpeed).isEqualTo(15f)
     }
 
+    @Test
+    fun `a saved Bike config on a hardware-detected treadmill keeps treadmill type and limits`() = runTest {
+        fakeDeviceConfigRepo.configs[-3] = DeviceInfo(
+            name = "My Machine",
+            type = DeviceType.BIKE, // saved from a wrong default — the console says otherwise
+            supportedMetrics = setOf(Metric.POWER, Metric.CADENCE),
+            maxResistance = 24, minResistance = 1,
+            minIncline = -10f, maxIncline = 20f,
+            maxPower = 2000, minPower = 0, powerStep = 1,
+            resistanceStep = 1.0f, inclineStep = 1.0f,
+            speedStep = 0.5f, maxSpeed = 60f, // bike values: must not become the belt's clamps
+        )
+        val adapter = createAdapter(this, productId = 3)
+        buildV2SupportedFeatures(
+            V2FeatureId.DEVICE_TYPE, V2FeatureId.TARGET_KPH, V2FeatureId.MAX_KPH, V2FeatureId.WORKOUT_STATE,
+        ).forEach { transport.emitIncoming(it) }
+        transport.emitIncoming(buildV2Event(V2FeatureId.DEVICE_TYPE, 4f)) // treadmill
+        transport.emitIncoming(buildV2Event(V2FeatureId.MAX_KPH, 19f))
+
+        adapter.connect()
+        advanceUntilIdle()
+
+        val info = adapter.deviceInfo.value!!
+        val treadmill = DeviceDatabase.defaultsForType(DeviceType.TREADMILL)
+        // The orchestrator's physical-Start gate keys off this type; it must follow the hardware.
+        assertThat(info.type).isEqualTo(DeviceType.TREADMILL)
+        // Type-dependent limits come from the MCU / treadmill defaults, not the bike config.
+        assertThat(info.maxSpeed).isEqualTo(19f)
+        assertThat(info.speedStep).isEqualTo(treadmill.speedStep)
+        assertThat(info.minIncline).isEqualTo(treadmill.minIncline)
+        assertThat(info.maxIncline).isEqualTo(treadmill.maxIncline)
+        assertThat(info.maxResistance).isEqualTo(treadmill.maxResistance)
+        assertThat(info.supportedMetrics).isEqualTo(treadmill.supportedMetrics)
+        // What isn't tied to the equipment type is still the user's.
+        assertThat(info.name).isEqualTo("My Machine")
+        assertThat(info.inclineStep).isEqualTo(1.0f)
+        assertThat(info.configKey).isEqualTo(-3)
+    }
+
+    @Test
+    fun `without an MCU-reported limit the mismatched config falls back to treadmill defaults`() = runTest {
+        fakeDeviceConfigRepo.configs[-3] = DeviceInfo(
+            name = "My Machine", type = DeviceType.BIKE,
+            supportedMetrics = setOf(Metric.POWER),
+            maxResistance = 24, minResistance = 1, minIncline = -10f, maxIncline = 20f,
+            maxPower = 2000, minPower = 0, powerStep = 1,
+            resistanceStep = 1.0f, inclineStep = 0.5f, speedStep = 0.5f, maxSpeed = 60f,
+        )
+        val adapter = createAdapter(this, productId = 3)
+        buildV2SupportedFeatures(
+            V2FeatureId.DEVICE_TYPE, V2FeatureId.TARGET_KPH, V2FeatureId.WORKOUT_STATE,
+        ).forEach { transport.emitIncoming(it) }
+        transport.emitIncoming(buildV2Event(V2FeatureId.DEVICE_TYPE, 4f)) // treadmill
+
+        adapter.connect()
+        advanceUntilIdle()
+
+        val info = adapter.deviceInfo.value!!
+        assertThat(info.type).isEqualTo(DeviceType.TREADMILL)
+        assertThat(info.maxSpeed).isEqualTo(DeviceDatabase.defaultsForType(DeviceType.TREADMILL).maxSpeed)
+        assertThat(info.maxSpeed).isLessThan(60f)
+    }
+
+    @Test
+    fun `V1 probe resolves the same device info a connect does, MCU limits included`() = runTest {
+        suspend fun respondToHandshake() {
+            transport.emitIncoming(buildDeviceInfoResponse())
+            transport.emitIncoming(buildSupportedCommandsResponse())
+            transport.emitIncoming(buildSystemInfoResponse(model = 2117))
+            transport.emitIncoming(buildVersionInfoResponse())
+            transport.emitIncoming(buildSecurityUnlockedResponse())
+            transport.emitIncoming(buildCapabilityResponse(maxResistance = 30))
+        }
+        // Sessions are single-use and so are their transports: the probe gets its own, the
+        // connect uses the class-level one the shared helpers write to.
+        val probeTransport = FakeHidTransport()
+        var next = probeTransport
+        val factory = object : HidTransportFactory {
+            override fun create(vendorId: Int, @Suppress("PARAMETER_NAME_CHANGED_ON_OVERRIDE") pid: Int) =
+                HidTransportResult(next, 2)
+        }
+        val adapter = FitProAdapter(factory, logger, backgroundScope, fakeDeviceConfigRepo)
+
+        // Probe: the MCU reports a max resistance the catalog entry doesn't have.
+        val catalogMax = DeviceDatabase.fromHandshake(2117, 200).maxResistance
+        assertThat(catalogMax).isNotEqualTo(30)
+        backgroundScope.launch {
+            for (packet in listOf(
+                buildDeviceInfoResponse(), buildSupportedCommandsResponse(), buildSystemInfoResponse(model = 2117),
+                buildVersionInfoResponse(), buildSecurityUnlockedResponse(), buildCapabilityResponse(maxResistance = 30),
+            )) probeTransport.emitIncoming(packet)
+        }
+        val probed = adapter.identify()
+        advanceUntilIdle()
+        assertThat(probed!!.maxResistance).isEqualTo(30)
+        assertThat(adapter.deviceInfo.value).isEqualTo(probed)
+
+        // Connect: must land on the identical DeviceInfo, or the orchestrator restarts every
+        // broadcast (dropping an already-paired client) when the workout starts.
+        next = transport
+        backgroundScope.launch { respondToHandshake(); respondToConsoleStartup() }
+        adapter.connect()
+        advanceUntilIdle()
+
+        assertThat(adapter.state.value).isEqualTo(AdapterState.Active)
+        assertThat(adapter.deviceInfo.value).isEqualTo(probed)
+    }
+
     /** Supported-features frames (one content frame + empty terminator) for a V2 console. */
     private fun buildV2SupportedFeatures(vararg features: V2FeatureId): List<ByteArray> {
         val frame = ByteArray(features.size * 2)

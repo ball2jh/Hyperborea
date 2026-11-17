@@ -12,10 +12,14 @@ import javax.inject.Singleton
 import kotlinx.coroutines.CoroutineScope
 
 @Singleton
-class WifiAdapter @Inject constructor(
+class WifiAdapter internal constructor(
     private val nsdRegistrar: NsdRegistrar,
     logger: AppLogger,
+    /** Listen port. Production always uses [WifiServer.PORT]; tests pass 0 for an OS-assigned one. */
+    private val port: Int,
 ) : BaseBroadcastAdapter(logger, TAG) {
+
+    @Inject constructor(nsdRegistrar: NsdRegistrar, logger: AppLogger) : this(nsdRegistrar, logger, WifiServer.PORT)
 
     override val id: BroadcastId = BroadcastId.WIFI
     override val prerequisites: List<Prerequisite> = emptyList()
@@ -39,9 +43,9 @@ class WifiAdapter @Inject constructor(
             onCommand = { command -> emitCommand(command) },
         )
         server = wifiServer
-        wifiServer.start()
+        wifiServer.start(port)
 
-        nsdRegistrar.register(WifiServer.PORT, deviceInfo.name, deviceInfo.type)
+        nsdRegistrar.register(port, deviceInfo.name, deviceInfo.type)
 
         return { data -> wifiServer.broadcastData(data) }
     }

@@ -8,6 +8,7 @@ import com.nettarion.hyperborea.core.model.DeviceIdentity
 import com.nettarion.hyperborea.core.model.DeviceInfo
 import com.nettarion.hyperborea.core.model.DeviceType
 import com.nettarion.hyperborea.core.model.ExerciseData
+import com.nettarion.hyperborea.core.model.WorkoutPhase
 import com.nettarion.hyperborea.core.model.isBeltBased
 import com.nettarion.hyperborea.hardware.fitpro.session.BaseFitProSession
 import com.nettarion.hyperborea.hardware.fitpro.session.DeviceDatabase
@@ -130,54 +131,31 @@ internal class V2Session(
             _sessionState.value = SessionState.Streaming
             logger.i(TAG, "V2 session started")
         } catch (e: CancellationException) {
+            // A cancelled bring-up (the user stopped while connecting) must not leave the USB
+            // interface claimed or the receive loop alive — the adapter never sees this session.
+            abandon()
             throw e
         } catch (e: Exception) {
             logger.e(TAG, "Failed to start V2 session", e)
-            receiveJob?.cancel()
-            receiveJob = null
-            try { transport.close() } catch (_: Exception) {}
+            abandon()
             _sessionState.value = SessionState.Error(e.message ?: "V2 session failed", e)
         }
     }
 
-    override suspend fun stop() {
-        // First: no coalesced grade flush may land after the teardown writes below (which include
-        // TARGET_GRADE = 0). close() also waits out any in-flight coalesced write.
-        gradeCoalescer.close()
+    override suspend fun stopLoops() {
         receiveJob?.cancel()
         receiveJob = null
         startRequestJob?.cancel()
         startRequestJob = null
+    }
 
-        try {
-            if (transport.isOpen) {
-                haltForTeardown()
-                // Return the console to idle before disconnecting
-                transport.write(V2Codec.encode(
-                    V2Message.Outgoing.WriteFeature(V2FeatureId.WORKOUT_STATE, V2WorkoutMode.NONE.raw),
-                ))
-                transport.write(V2Codec.encode(V2Message.Outgoing.Unsubscribe(V2FeatureId.subscribable)))
-            }
-        } catch (e: CancellationException) {
-            throw e
-        } catch (e: Exception) {
-            logger.w(TAG, "Error during V2 session stop: ${e.message}")
-        } finally {
-            // Always release the USB connection, even when the teardown writes fail on a dead
-            // link — skipping this leaks the connection (and the interface claim) until the GC
-            // finalizer complains.
-            try { transport.close() } catch (e: Exception) { logger.w(TAG, "Transport close failed: ${e.message}") }
-        }
-
-        // No per-field state resets: sessions are single-use (the adapter builds a fresh
-        // instance per connect), so only the externally-observed flows need clearing.
-        accumulator.reset()
-        _exerciseData.value = null
-        _deviceIdentity.value = null
-        _degradedReason.value = null
-        _sessionState.value = SessionState.Disconnected
-        cancelSessionScope()
-        logger.i(TAG, "V2 session stopped")
+    override suspend fun writeTeardown() {
+        haltForTeardown()
+        // Return the console to idle before disconnecting
+        transport.write(V2Codec.encode(
+            V2Message.Outgoing.WriteFeature(V2FeatureId.WORKOUT_STATE, V2WorkoutMode.NONE.raw),
+        ))
+        transport.write(V2Codec.encode(V2Message.Outgoing.Unsubscribe(V2FeatureId.subscribable)))
     }
 
     /**
@@ -221,10 +199,7 @@ internal class V2Session(
             logger.e(TAG, "Identify failed", e)
             return null
         } finally {
-            receiveJob?.cancel()
-            receiveJob = null
-            try { transport.close() } catch (_: Exception) {}
-            cancelSessionScope() // transient instance — nothing may outlive identify()
+            abandon() // transient instance — nothing may outlive identify()
         }
     }
 
@@ -260,16 +235,7 @@ internal class V2Session(
 
     override suspend fun writeFeature(command: DeviceCommand) {
         if (_sessionState.value !is SessionState.Streaming) return
-        if (command is DeviceCommand.PauseWorkout && detectedDeviceType.isBeltBased) {
-            latchBeltPause(explicit = true)
-            startRequestJob?.cancel()
-            gradeCoalescer.cancelPending()
-        }
-        if (command is DeviceCommand.ResumeWorkout) { beltRestartRequiresUser = false; beltHasRun = true }
-        if (beltRestartRequiresUser && (command is DeviceCommand.SetTargetSpeed || command is DeviceCommand.AdjustSpeed)) {
-            logger.w(TAG, "Ignoring belt-speed target while paused — explicit Resume or physical Start required")
-            return
-        }
+        if (!admitCommand(command)) return
 
         // Incline targets route through the grade coalescer (burst → one moving target per
         // interval) instead of the direct write below. Same declared-feature gate first.
@@ -363,6 +329,10 @@ internal class V2Session(
         } catch (e: Exception) {
             logger.e(TAG, "Failed to write feature", e)
         }
+    }
+
+    override fun onExplicitBeltPause() {
+        startRequestJob?.cancel()
     }
 
     override suspend fun writeGradeTarget(target: Float) {
@@ -758,39 +728,22 @@ internal class V2Session(
                     logger.w(TAG, "Unrequested RUNNING report while paused — reasserting belt pause")
                     _workoutMode.value = V2WorkoutMode.PAUSED.raw
                     writeFeature(DeviceCommand.PauseWorkout)
-                    accumulator.updateWorkoutMode(V1_WORKOUT_MODE_PAUSE)
+                    accumulator.updateWorkoutMode(WorkoutPhase.PAUSE.code)
                     return
                 }
                 // Info-level on purpose: which states a console actually reports (and when) is
                 // the load-bearing fact in field logs — e.g. whether READY_TO_START follows a
                 // Start-key press. Low volume: V2 events fire on change only.
                 logger.i(TAG, "Console workout state event: $mode (raw=$value)")
+                val phase = mode.toWorkoutPhase()
                 if (previous != mode) {
-                    // Mirror V1's WORKOUT_MODE handling: the ride clock must follow
-                    // CONSOLE-initiated transitions too (pause timeout, safety interlock), not
-                    // just our own Pause/Resume commands. The accumulator guards make the
-                    // overlap with writeFeature's pause()/resume() calls harmless.
-                    when (mode) {
-                        V2WorkoutMode.OFF_MACHINE -> {
-                            latchBeltPause()
-                            if (detectedDeviceType.isBeltBased) accumulator.pause()
-                        }
-                        V2WorkoutMode.PAUSED -> {
-                            beltHasRun = true // a console-reported pause implies an active workout
-                            latchBeltPause()
-                            if (detectedDeviceType.isBeltBased) sessionScope.launch { gradeCoalescer.cancelPending() }
-                            accumulator.pause()
-                        }
-                        V2WorkoutMode.WARM_UP, V2WorkoutMode.COOL_DOWN -> if (detectedDeviceType.isBeltBased) beltHasRun = true
-                        V2WorkoutMode.RUNNING -> {
-                            beltHasRun = true
-                            accumulator.resume()
-                            accumulator.startTimer()
-                            // The console started after all — clear the start-failure warning (but
-                            // not a bike-path "didn't confirm" reason, which has its own text).
-                            if (_degradedReason.value == START_NOT_CONFIRMED_REASON) _degradedReason.value = null
-                        }
-                        else -> {}
+                    // Same latch/ride-clock reactions as V1 (shared in the base). The accumulator
+                    // guards make the overlap with writeFeature's pause()/resume() calls harmless.
+                    onWorkoutPhaseEntered(phase)
+                    // The console started after all — clear the start-failure warning (but not a
+                    // bike-path "didn't confirm" reason, which has its own text).
+                    if (mode == V2WorkoutMode.RUNNING && _degradedReason.value == START_NOT_CONFIRMED_REASON) {
+                        _degradedReason.value = null
                     }
                 }
                 if (mode == V2WorkoutMode.RESULTS && detectedDeviceType.isBeltBased) {
@@ -806,7 +759,7 @@ internal class V2Session(
                 // it parks there waiting for the host to start the workout. Mirrors the stock
                 // service's START_REQUESTED handling.
                 if (mode == V2WorkoutMode.READY_TO_START) requestWorkoutStart("console reported READY_TO_START")
-                accumulator.updateWorkoutMode(v2WorkoutStateToV1Code(mode))
+                accumulator.updateWorkoutMode(phase.code)
             }
             // Equipment limits the MCU reports — captured into the session's capabilities (overlaid
             // onto DeviceInfo by the adapter), not exercise data.
@@ -910,22 +863,21 @@ internal class V2Session(
     }
 
     /**
-     * Translates V2's [V2WorkoutMode] ordinal to the V1
-     * [com.nettarion.hyperborea.hardware.fitpro.v1.WorkoutMode] raw value the orchestrator's
-     * workout-mode monitor expects (V1 numbering is the lingua franca because V1 is older). The
-     * `OFF_MACHINE` state has no V1 equivalent — the closest semantic match is `DMK` (user not on
-     * device / not driving telemetry), so the monitor's safety-pause path fires for both.
+     * Translates V2's [V2WorkoutMode] to the shared [WorkoutPhase] the orchestrator's workout-mode
+     * monitor and the base session's latch handling expect. `OFF_MACHINE` has no V1 equivalent —
+     * the closest semantic match is `DMK` (user not on device), so the safety-pause path fires for
+     * both. `RESULTS` deliberately publishes as IDLE: the V2 session clears it itself.
      */
-    private fun v2WorkoutStateToV1Code(mode: V2WorkoutMode): Int = when (mode) {
-        V2WorkoutMode.RUNNING -> V1_WORKOUT_MODE_RUNNING
-        V2WorkoutMode.PAUSED -> V1_WORKOUT_MODE_PAUSE
-        V2WorkoutMode.OFF_MACHINE -> V1_WORKOUT_MODE_DMK
-        V2WorkoutMode.WARM_UP -> V1_WORKOUT_MODE_WARM_UP
-        V2WorkoutMode.COOL_DOWN -> V1_WORKOUT_MODE_COOL_DOWN
+    private fun V2WorkoutMode.toWorkoutPhase(): WorkoutPhase = when (this) {
+        V2WorkoutMode.RUNNING -> WorkoutPhase.RUNNING
+        V2WorkoutMode.PAUSED -> WorkoutPhase.PAUSE
+        V2WorkoutMode.OFF_MACHINE -> WorkoutPhase.DMK
+        V2WorkoutMode.WARM_UP -> WorkoutPhase.WARM_UP
+        V2WorkoutMode.COOL_DOWN -> WorkoutPhase.COOL_DOWN
         V2WorkoutMode.NONE,
         V2WorkoutMode.READY_TO_START,
-        V2WorkoutMode.RESULTS -> V1_WORKOUT_MODE_IDLE
-        V2WorkoutMode.UNKNOWN -> V1_WORKOUT_MODE_UNKNOWN
+        V2WorkoutMode.RESULTS -> WorkoutPhase.IDLE
+        V2WorkoutMode.UNKNOWN -> WorkoutPhase.UNKNOWN
     }
 
     private suspend fun writeWorkoutState(mode: V2WorkoutMode) {
@@ -983,15 +935,5 @@ internal class V2Session(
         private const val DEVICE_TYPE_TIMEOUT_MS = 2_000L
         // Product info streams many small frames — same long-command class as the features query.
         private const val PRODUCT_INFO_TIMEOUT_MS = 4_000L
-
-        // V1 [com.nettarion.hyperborea.hardware.fitpro.v1.WorkoutMode] raw codes used by the
-        // orchestrator's workout-mode monitor — kept here as a translation target for V2's WORKOUT_STATE.
-        private const val V1_WORKOUT_MODE_UNKNOWN = 0
-        private const val V1_WORKOUT_MODE_IDLE = 1
-        private const val V1_WORKOUT_MODE_RUNNING = 2
-        private const val V1_WORKOUT_MODE_PAUSE = 3
-        private const val V1_WORKOUT_MODE_DMK = 8
-        private const val V1_WORKOUT_MODE_WARM_UP = 10
-        private const val V1_WORKOUT_MODE_COOL_DOWN = 11
     }
 }

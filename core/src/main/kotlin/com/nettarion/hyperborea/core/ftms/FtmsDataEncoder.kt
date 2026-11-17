@@ -2,6 +2,7 @@ package com.nettarion.hyperborea.core.ftms
 
 import com.nettarion.hyperborea.core.model.DeviceType
 import com.nettarion.hyperborea.core.model.ExerciseData
+import com.nettarion.hyperborea.core.model.WorkoutPhase
 
 import com.nettarion.hyperborea.core.ftms.ByteUtils.putUint32LE
 import com.nettarion.hyperborea.core.ftms.ByteUtils.sint16LE
@@ -368,15 +369,15 @@ object FtmsDataEncoder {
      * Returns [Flags, TrainingStatus] — 2 bytes, no string.
      */
     fun encodeTrainingStatus(workoutMode: Int?): ByteArray {
-        val status: Byte = when (workoutMode) {
-            1 -> 0x01       // IDLE → Idle
-            2 -> 0x0D       // RUNNING → Manual Mode (Quick Start)
-            3 -> 0x01       // PAUSE → Idle
-            4 -> 0x0F       // RESULTS → Post-Workout
-            8 -> 0x01       // DMK (Safety Key) → Idle
-            10 -> 0x02      // WARM_UP → Warming Up
-            11 -> 0x0B      // COOL_DOWN → Cool Down
-            else -> 0x00
+        val status: Byte = when (WorkoutPhase.fromCode(workoutMode)) {
+            WorkoutPhase.IDLE -> 0x01       // Idle
+            WorkoutPhase.RUNNING -> 0x0D    // Manual Mode (Quick Start)
+            WorkoutPhase.PAUSE -> 0x01      // Idle
+            WorkoutPhase.RESULTS -> 0x0F    // Post-Workout
+            WorkoutPhase.DMK -> 0x01        // Safety key out → Idle
+            WorkoutPhase.WARM_UP -> 0x02    // Warming Up
+            WorkoutPhase.COOL_DOWN -> 0x0B  // Cool Down
+            WorkoutPhase.UNKNOWN, null -> 0x00
         }
         return byteArrayOf(0x00, status) // Flags=0x00 (no string), TrainingStatus
     }

@@ -7,6 +7,7 @@ import com.nettarion.hyperborea.core.model.DeviceIdentity
 import com.nettarion.hyperborea.core.model.DeviceInfo
 import com.nettarion.hyperborea.core.model.DeviceType
 import com.nettarion.hyperborea.core.model.ExerciseData
+import com.nettarion.hyperborea.core.model.WorkoutPhase
 import com.nettarion.hyperborea.core.model.isBeltBased
 import com.nettarion.hyperborea.hardware.fitpro.session.BaseFitProSession
 import com.nettarion.hyperborea.hardware.fitpro.session.ConsoleKey
@@ -132,50 +133,34 @@ internal class V1Session(
             startPollLoop()
             logger.i(TAG, "V1 session started")
         } catch (e: CancellationException) {
+            // A cancelled bring-up (the user stopped while connecting) must not leave the USB
+            // interface claimed or the session scope alive — the adapter never sees this session.
+            abandon()
             throw e
         } catch (e: Exception) {
             logger.e(TAG, "Failed to start V1 session", e)
-            try { transport.close() } catch (_: Exception) {}
+            abandon()
             _sessionState.value = SessionState.Error(e.message ?: "V1 session failed", e)
         }
     }
 
-    override suspend fun stop() {
-        // First: no coalesced grade flush may enqueue after this point — gracefulEndForDisconnect
-        // writes GRADE = 0 on belt machines and nothing may land after it.
-        gradeCoalescer.close()
-        // Stop the poll loop and wait (briefly) for it to actually exit before we touch the transport
-        // — gracefulEndForDisconnect does its own request/response round-trips and must not race the
-        // poll's reads. Bounded so a wedged MCU read can't hang teardown.
+    /**
+     * Stops the poll loop and waits (briefly) for it to actually exit before the teardown touches
+     * the transport — gracefulEndForDisconnect does its own request/response round-trips and must
+     * not race the poll's reads. Bounded so a wedged MCU read can't hang teardown.
+     */
+    override suspend fun stopLoops() {
         pollJob?.let { job ->
             job.cancel()
             withTimeoutOrNull(POLL_JOIN_TIMEOUT_MS) { job.join() }
         }
         pollJob = null
+    }
 
-        try {
-            if (transport.isOpen) {
-                gracefulEndForDisconnect()
-                writeMessage(V1Message.Outgoing.Disconnect())
-                delay(COMMAND_DELAY_MS)
-            }
-        } catch (e: CancellationException) {
-            throw e
-        } catch (e: Exception) {
-            logger.w(TAG, "Error during V1 session stop: ${e.message}")
-        } finally {
-            // Always release the USB connection and detach receiver (idempotent), even after a
-            // detach (isOpen=false) or a failed teardown write — matching V2Session.stop().
-            try { transport.close() } catch (e: Exception) { logger.w(TAG, "Transport close failed: ${e.message}") }
-        }
-
-        accumulator.reset()
-        _exerciseData.value = null
-        _deviceIdentity.value = null
-        _degradedReason.value = null
-        _sessionState.value = SessionState.Disconnected
-        cancelSessionScope()
-        logger.i(TAG, "V1 session stopped")
+    override suspend fun writeTeardown() {
+        gracefulEndForDisconnect()
+        writeMessage(V1Message.Outgoing.Disconnect())
+        delay(COMMAND_DELAY_MS)
     }
 
     /**
@@ -257,7 +242,7 @@ internal class V1Session(
             logger.e(TAG, "Identify failed", e)
             return null
         } finally {
-            try { transport.close() } catch (_: Exception) {}
+            abandon() // transient instance — nothing may outlive identify()
         }
     }
 
@@ -271,7 +256,7 @@ internal class V1Session(
             // Connect → handshake → calibrate commands at 4s intervals → disconnect.
             runCalibration()
         } finally {
-            try { transport.close() } catch (_: Exception) {}
+            abandon() // transient instance — nothing may outlive calibrate()
         }
     }
 
@@ -287,16 +272,7 @@ internal class V1Session(
         }
 
         if (_sessionState.value !is SessionState.Streaming) return
-        if (command is DeviceCommand.PauseWorkout && detectedDeviceType.isBeltBased) {
-            latchBeltPause(explicit = true)
-            pendingResumeFromResults = false
-            gradeCoalescer.cancelPending()
-        }
-        if (command is DeviceCommand.ResumeWorkout) { beltRestartRequiresUser = false; beltHasRun = true }
-        if (beltRestartRequiresUser && (command is DeviceCommand.SetTargetSpeed || command is DeviceCommand.AdjustSpeed)) {
-            logger.w(TAG, "Ignoring belt-speed target while paused — explicit Resume or physical Start required")
-            return
-        }
+        if (!admitCommand(command)) return
 
         // Incline targets route through the grade coalescer (burst → one moving target per
         // interval); the coalescer's writes land in pendingWriteFields via writeGradeTarget.
@@ -307,6 +283,10 @@ internal class V1Session(
         pendingWriteMutex.withLock {
             pendingWriteFields = pendingWriteFields + fields
         }
+    }
+
+    override fun onExplicitBeltPause() {
+        pendingResumeFromResults = false
     }
 
     internal fun commandToFields(command: DeviceCommand): Map<V1DataField, Float> = when (command) {
@@ -751,21 +731,27 @@ internal class V1Session(
         // ReadWriteData targets DEVICE_MAIN (0x02) — FITNESS_BIKE (0x07) returns DEV_NOT_SUPPORTED.
         // pollFields is periodicReadFields ∩ supportedBitFields so the response payload size matches
         // the decoder's positional read; see V1Codec.decodeDataResponseForFields.
-        writeMessage(V1Message.Outgoing.ReadWriteData(
-            writeFields = writeFields,
-            readFields = pollFields,
-        ))
+        try {
+            writeMessage(V1Message.Outgoing.ReadWriteData(
+                writeFields = writeFields,
+                readFields = pollFields,
+            ))
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            // The drained commands never reached the MCU. Put them back before the loop counts
+            // this as a poll error, or a failed USB write silently eats a queued command — a
+            // PAUSE included.
+            requeueWrites(writeFields)
+            throw e
+        }
 
         delay(READ_DELAY_MS)
 
         // No timeout here on purpose: the poll loop is steady-state and just waits for the next reply.
         val firstPacket = transport.readPacket()
         if (firstPacket == null) {
-            if (writeFields.isNotEmpty()) {
-                pendingWriteMutex.withLock {
-                    pendingWriteFields = writeFields + pendingWriteFields
-                }
-            }
+            requeueWrites(writeFields)
             return
         }
 
@@ -773,21 +759,12 @@ internal class V1Session(
             readResponse(firstPacket, pollFields)
         } catch (e: Exception) {
             logger.w(TAG, "Malformed response (${firstPacket.size} bytes): ${e.message}")
-            // Re-queue write fields so commands aren't lost
-            if (writeFields.isNotEmpty()) {
-                pendingWriteMutex.withLock {
-                    pendingWriteFields = writeFields + pendingWriteFields
-                }
-            }
+            requeueWrites(writeFields)
             return
         }
         if (decoded is V1Message.Incoming.DataResponse) {
             if (decoded.status == V1Message.STATUS_SECURITY_BLOCK) {
-                if (writeFields.isNotEmpty()) {
-                    pendingWriteMutex.withLock {
-                        pendingWriteFields = writeFields + pendingWriteFields
-                    }
-                }
+                requeueWrites(writeFields)
                 // Capped: a controller that stays blocked despite accepting re-verification would
                 // otherwise be re-verified every poll (~100 ms) forever. After the cap, surface a
                 // degraded reason and keep polling plainly — a later DONE resets the counter.
@@ -853,6 +830,18 @@ internal class V1Session(
         }
     }
 
+    /**
+     * Returns fields a poll drained but could not deliver to the front of the queue. Anything
+     * queued since is newer and wins the merge (right side), so a Pause issued while the failed
+     * poll was in flight is never overwritten by the older write it supersedes.
+     */
+    private suspend fun requeueWrites(writeFields: Map<V1DataField, Float>) {
+        if (writeFields.isEmpty()) return
+        pendingWriteMutex.withLock {
+            pendingWriteFields = writeFields + pendingWriteFields
+        }
+    }
+
     private fun applyDataResponse(fields: Map<V1DataField, Float>) {
         for ((field, value) in fields) {
             when (field) {
@@ -893,28 +882,15 @@ internal class V1Session(
                     }
                     val previousMode = accumulator.snapshot().workoutMode
                     if (previousMode != mode) {
-                        when (WorkoutMode.fromRaw(mode)) {
-                            WorkoutMode.RESULTS -> if (detectedDeviceType.isBeltBased) {
+                        if (mode == WorkoutMode.RESULTS.raw.toInt()) {
+                            if (detectedDeviceType.isBeltBased) {
                                 if (!pendingResumeFromResults) latchBeltPause()
                                 accumulator.pause()
                             }
-                            WorkoutMode.DMK -> {
-                                latchBeltPause()
-                                if (detectedDeviceType.isBeltBased) accumulator.pause()
-                            }
-                            WorkoutMode.PAUSE -> {
-                                beltHasRun = true // a console-reported pause implies an active workout
-                                latchBeltPause()
-                                if (detectedDeviceType.isBeltBased) sessionScope.launch { gradeCoalescer.cancelPending() }
-                                accumulator.pause()
-                            }
-                            WorkoutMode.WARM_UP, WorkoutMode.COOL_DOWN -> if (detectedDeviceType.isBeltBased) beltHasRun = true
-                            WorkoutMode.RUNNING -> {
-                                beltHasRun = true
-                                accumulator.resume()
-                                accumulator.startTimer()
-                            }
-                            else -> {}
+                        } else {
+                            // V1 WORKOUT_MODE values are the WorkoutPhase codes; an unlisted one
+                            // has no latch/clock reaction.
+                            WorkoutPhase.fromCode(mode)?.let(::onWorkoutPhaseEntered)
                         }
                     }
                     if (detectedDeviceType.isBeltBased && mode == WorkoutMode.RESULTS.raw.toInt()) {

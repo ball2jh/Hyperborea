@@ -745,6 +745,105 @@ class V1SessionTest {
         assertThat(transport.isOpen).isFalse()
     }
 
+    /** Steps virtual time until the poll loop has attempted (and failed) the armed write. */
+    private fun TestScope.awaitFailedWrite() {
+        backgroundScope.launch { transport.emitIncoming(buildTreadmillStartResponse()) }
+        repeat(100) { if (transport.failNextWrites > 0) advanceTimeBy(10) }
+        assertThat(transport.failNextWrites).isEqualTo(0)
+    }
+
+    @Test
+    fun `a Pause drained by a poll whose USB write fails is re-sent on the next poll`() = runTest {
+        val session = startStreamingTreadmillSession()
+        val baseline = transport.writtenPackets.size
+
+        session.writeFeature(DeviceCommand.PauseWorkout)
+        transport.failNextWrites = 1
+        awaitFailedWrite() // the poll that drained the PAUSE failed its write
+        assertThat(transport.writtenPackets.drop(baseline).mapNotNull { it.workoutModeWriteValue() }).isEmpty()
+
+        advanceTimeBy(300)
+        assertThat(transport.writtenPackets.drop(baseline).mapNotNull { it.workoutModeWriteValue() }).contains(3)
+    }
+
+    @Test
+    fun `a newer Pause wins over a start re-queued from a failed write`() = runTest {
+        val session = startStreamingTreadmillSession()
+        val baseline = transport.writtenPackets.size
+
+        session.writeFeature(DeviceCommand.ResumeWorkout) // queues WORKOUT_MODE=RUNNING
+        transport.failNextWrites = 1
+        awaitFailedWrite() // RUNNING drained, write failed, re-queued
+        session.writeFeature(DeviceCommand.PauseWorkout)
+        advanceTimeBy(300)
+
+        val modes = transport.writtenPackets.drop(baseline).mapNotNull { it.workoutModeWriteValue() }
+        assertThat(modes).contains(3)
+        assertThat(modes).doesNotContain(2)
+    }
+
+    // --- Lifecycle: nothing outlives a session that never reached steady state ---
+
+    private fun TestScope.liveSessionJobs() =
+        backgroundScope.coroutineContext[kotlinx.coroutines.Job]!!.children.filter { it.isActive }.toList()
+
+    @Test
+    fun `failed start leaves no session coroutine scope behind`() = runTest {
+        val session = createSession(this)
+        transport.closeIncoming()
+
+        session.start()
+        advanceUntilIdle()
+
+        assertThat(session.sessionState.value).isInstanceOf(SessionState.Error::class.java)
+        assertThat(liveSessionJobs()).isEmpty()
+    }
+
+    @Test
+    fun `identify releases the transport and its session scope`() = runTest {
+        val session = createSession(this)
+        val responder = backgroundScope.launch { respondToHandshake() }
+
+        val identity = session.identify()
+        advanceUntilIdle()
+        responder.cancel()
+        advanceUntilIdle()
+
+        assertThat(identity).isNotNull()
+        assertThat(transport.closeCount).isAtLeast(1)
+        assertThat(liveSessionJobs()).isEmpty()
+    }
+
+    @Test
+    fun `cancelled start releases the transport instead of leaving the interface claimed`() = runTest {
+        val session = createSession(this)
+        // No handshake reply: start() is parked waiting on the controller when it is cancelled.
+        val starting = launch { session.start() }
+        advanceTimeBy(100)
+        assertThat(transport.isOpen).isTrue()
+
+        starting.cancel()
+        advanceUntilIdle()
+
+        assertThat(transport.closeCount).isAtLeast(1)
+        assertThat(transport.isOpen).isFalse()
+        assertThat(liveSessionJobs()).isEmpty()
+    }
+
+    @Test
+    fun `stop cancelled mid-teardown still releases the transport and reports Disconnected`() = runTest {
+        val session = startStreamingTreadmillSession()
+        // The belt-halt confirmation polls for replies that never come; cancel while it waits.
+        val stopping = launch { session.stop() }
+        advanceTimeBy(700)
+        stopping.cancel()
+        advanceUntilIdle()
+
+        assertThat(transport.closeCount).isAtLeast(1)
+        assertThat(session.sessionState.value).isEqualTo(SessionState.Disconnected)
+        assertThat(session.exerciseData.value).isNull()
+    }
+
     // --- Security skipped for old firmware ---
 
     @Test

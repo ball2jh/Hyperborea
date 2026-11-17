@@ -11,6 +11,7 @@ import com.nettarion.hyperborea.core.model.DeviceInfo
 import com.nettarion.hyperborea.core.model.DeviceType
 import com.nettarion.hyperborea.core.model.ExerciseData
 import com.nettarion.hyperborea.core.model.FanMode
+import com.nettarion.hyperborea.core.model.WorkoutPhase
 import com.nettarion.hyperborea.core.profile.ProfileRepository
 import com.nettarion.hyperborea.core.profile.RideRecorder
 import com.nettarion.hyperborea.core.profile.UserPreferences
@@ -20,6 +21,7 @@ import com.nettarion.hyperborea.core.system.SystemMonitor
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
@@ -86,6 +88,14 @@ class Orchestrator(
     private var probeJob: Job? = null
     private var resumeConfirmationJob: Job? = null
     private var resumeRequested = false
+
+    /**
+     * The in-flight bring-up, while [start] holds [mutex]. Bring-up can legitimately take minutes
+     * (the USB-permission dialog waits on a human) — [stop] cancels this instead of queueing
+     * behind it, so Stop always works.
+     */
+    @Volatile
+    private var bringUpJob: Job? = null
 
     private val reconnector = HardwareReconnector(
         hardwareAdapter,
@@ -189,8 +199,22 @@ class Orchestrator(
                 return
             }
 
-            try {
-                startInternal()
+            // Bring-up runs as a child job so stop() can cancel it without cancelling our caller.
+            // coroutineScope returns normally only when the child completed or was cancelled by
+            // stop(); a bring-up that *failed* rethrows here instead. (Job.isCancelled alone can't
+            // tell the two apart — it is also true for a failed job — so it is only consulted on
+            // the normal-return path, where failure is already excluded.)
+            val stoppedWhileStarting = try {
+                var bringUp: Job? = null
+                coroutineScope {
+                    bringUp = launch { startInternal() }
+                    bringUpJob = bringUp
+                }
+                bringUp?.isCancelled == true
+            } catch (e: CancellationException) {
+                // Our caller was cancelled mid-bring-up: don't strand a half-started workout.
+                abortBringUp("start cancelled")
+                throw e
             } catch (e: Exception) {
                 logger.e(TAG, "Unexpected error during start", e)
                 // Bring-up launches jobs before it can throw (command pipeline, monitors) — cancel
@@ -198,8 +222,24 @@ class Orchestrator(
                 // may never come.
                 cancelWorkoutJobs()
                 _state.value = OrchestratorState.Error("Unexpected: ${e.message}", e)
+                false
+            } finally {
+                bringUpJob = null
             }
+            if (stoppedWhileStarting) abortBringUp("stopped while starting")
         }
+    }
+
+    /**
+     * Unwinds a bring-up that [stop] (or the caller's cancellation) interrupted: whatever it had
+     * connected or launched is torn down and the orchestrator returns to Idle. Nothing is saved —
+     * no workout had started.
+     */
+    private suspend fun abortBringUp(reason: String) = withContext(NonCancellable) {
+        _state.value = OrchestratorState.Stopping
+        teardown(saveRide = false, turnOffFan = false)
+        _state.value = OrchestratorState.Idle
+        logger.i(TAG, "Bring-up aborted ($reason)")
     }
 
     private suspend fun ensureReady(): Boolean {
@@ -318,7 +358,7 @@ class Orchestrator(
                 .collect { data ->
                     mutex.withLock {
                         if (resumeRequested && _state.value is OrchestratorState.Paused &&
-                            data.workoutMode == WorkoutModeInterpreter.WORKOUT_MODE_RUNNING) {
+                            data.workoutMode == WorkoutPhase.RUNNING.code) {
                             clearResumeRequest()
                             _state.value = OrchestratorState.Running(degraded = hardwareAdapter.degradedReason.value)
                             logger.i(TAG, "Orchestrator resumed — console confirmed explicit user request")
@@ -391,9 +431,9 @@ class Orchestrator(
                                     // lands back in AwaitingConsoleStart, not Running.
                                     val newType = hardwareAdapter.deviceInfo.value?.type
                                     val mode = hardwareAdapter.exerciseData.value?.workoutMode
-                                        ?: WorkoutModeInterpreter.WORKOUT_MODE_IDLE
+                                        ?: WorkoutPhase.IDLE.code
                                     _state.value = if (newType == DeviceType.TREADMILL &&
-                                        mode != WorkoutModeInterpreter.WORKOUT_MODE_RUNNING) {
+                                        mode != WorkoutPhase.RUNNING.code) {
                                         // Re-armed: the earlier session's "left idle" confirmation
                                         // must not turn the new session's parked IDLE into a stop
                                         // that discards the ride in progress.
@@ -406,7 +446,10 @@ class Orchestrator(
                             }
                         } else if (isActive && _state.value.isWorkoutActive()) {
                             mutex.withLock {
-                                if (_state.value is OrchestratorState.Running) {
+                                // Any still-active workout ends here — including a treadmill
+                                // that was only armed, which would otherwise keep showing
+                                // "Press START" against hardware that is gone.
+                                if (_state.value.isWorkoutActive()) {
                                     stopInternal("Hardware reconnect failed after ${reconnector.maxAttempts} attempts")
                                 }
                             }
@@ -565,6 +608,9 @@ class Orchestrator(
     }
 
     suspend fun stop(saveRide: Boolean = true) {
+        // start() holds the mutex for the whole bring-up; cancel it rather than wait behind it.
+        // It unwinds itself to Idle, after which the check below makes this a no-op.
+        bringUpJob?.cancel()
         mutex.withLock {
             val current = _state.value
             if (current is OrchestratorState.Idle || current is OrchestratorState.Stopping) {
@@ -572,10 +618,15 @@ class Orchestrator(
                 return
             }
 
-            _state.value = OrchestratorState.Stopping
-            teardown(saveRide = saveRide, turnOffFan = true)
-            _state.value = OrchestratorState.Idle
-            logger.i(TAG, "Orchestrator stopped")
+            // Once begun, teardown must finish even if our caller is cancelled (e.g. the service's
+            // bounded onDestroy budget): a half-run teardown would strand the state in Stopping —
+            // where stop() is ignored — with the hardware adapter half torn down.
+            withContext(NonCancellable) {
+                _state.value = OrchestratorState.Stopping
+                teardown(saveRide = saveRide, turnOffFan = true)
+                _state.value = OrchestratorState.Idle
+                logger.i(TAG, "Orchestrator stopped")
+            }
         }
     }
 
