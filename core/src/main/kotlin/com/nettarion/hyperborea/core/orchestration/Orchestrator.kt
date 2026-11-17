@@ -200,12 +200,17 @@ class Orchestrator(
             }
 
             // Bring-up runs as a child job so stop() can cancel it without cancelling our caller.
-            var bringUp: Job? = null
-            try {
+            // coroutineScope returns normally only when the child completed or was cancelled by
+            // stop(); a bring-up that *failed* rethrows here instead. (Job.isCancelled alone can't
+            // tell the two apart — it is also true for a failed job — so it is only consulted on
+            // the normal-return path, where failure is already excluded.)
+            val stoppedWhileStarting = try {
+                var bringUp: Job? = null
                 coroutineScope {
                     bringUp = launch { startInternal() }
                     bringUpJob = bringUp
                 }
+                bringUp?.isCancelled == true
             } catch (e: CancellationException) {
                 // Our caller was cancelled mid-bring-up: don't strand a half-started workout.
                 abortBringUp("start cancelled")
@@ -217,10 +222,11 @@ class Orchestrator(
                 // may never come.
                 cancelWorkoutJobs()
                 _state.value = OrchestratorState.Error("Unexpected: ${e.message}", e)
+                false
             } finally {
                 bringUpJob = null
             }
-            if (bringUp?.isCancelled == true) abortBringUp("stopped while starting")
+            if (stoppedWhileStarting) abortBringUp("stopped while starting")
         }
     }
 

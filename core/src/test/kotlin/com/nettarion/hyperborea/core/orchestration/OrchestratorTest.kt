@@ -973,6 +973,22 @@ class OrchestratorTest {
     }
 
     @Test
+    fun `a bring-up that throws ends in Error, not a silent return to Idle`() = runTest {
+        val env = TestEnv(this)
+        // Fan AUTO makes enterRunning() send a command; the hardware rejecting it is an
+        // unexpected bring-up failure — not a stop — and must stay visible to the user.
+        env.preferences.fanMode.value = com.nettarion.hyperborea.core.model.FanMode.AUTO
+        env.hardware.shouldThrowOnSendCommand = true
+
+        env.orchestrator.start()
+        advanceUntilIdle()
+
+        val state = env.orchestrator.state.value
+        assertThat(state).isInstanceOf(OrchestratorState.Error::class.java)
+        assertThat((state as OrchestratorState.Error).message).contains("sendCommand failed")
+    }
+
+    @Test
     fun `a stop whose caller is cancelled mid-teardown still finishes in Idle`() = runTest {
         val env = TestEnv(this)
         env.orchestrator.start()
