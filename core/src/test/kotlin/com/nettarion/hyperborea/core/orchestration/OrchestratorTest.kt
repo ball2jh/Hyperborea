@@ -990,6 +990,22 @@ class OrchestratorTest {
         assertThat(env.orchestrator.state.value).isEqualTo(OrchestratorState.Idle)
     }
 
+    @Test
+    fun `armed treadmill surfaces an exhausted reconnect as Error instead of staying armed`() = runTest {
+        val env = TestEnv(this)
+        env.hardware.deviceInfo.value = buildDeviceInfo(type = DeviceType.TREADMILL)
+        env.orchestrator.start()
+        assertThat(env.orchestrator.state.value).isInstanceOf(OrchestratorState.AwaitingConsoleStart::class.java)
+
+        env.hardware.reconnectResult = AdapterState.Error("still broken")
+        env.hardware.mutableState.value = AdapterState.Error("USB disconnected")
+        advanceUntilIdle()
+
+        val state = env.orchestrator.state.value
+        assertThat(state).isInstanceOf(OrchestratorState.Error::class.java)
+        assertThat((state as OrchestratorState.Error).message).contains("reconnect failed")
+    }
+
     // --- Treadmill: AwaitingConsoleStart ---
 
     @Test

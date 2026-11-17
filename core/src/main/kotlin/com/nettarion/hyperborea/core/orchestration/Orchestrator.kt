@@ -440,7 +440,10 @@ class Orchestrator(
                             }
                         } else if (isActive && _state.value.isWorkoutActive()) {
                             mutex.withLock {
-                                if (_state.value is OrchestratorState.Running) {
+                                // Any still-active workout ends here — including a treadmill
+                                // that was only armed, which would otherwise keep showing
+                                // "Press START" against hardware that is gone.
+                                if (_state.value.isWorkoutActive()) {
                                     stopInternal("Hardware reconnect failed after ${reconnector.maxAttempts} attempts")
                                 }
                             }
