@@ -1,6 +1,8 @@
 # Changelog
 
 ## [Unreleased]
+
+## [1.5.2] - 2026-11-17
 - **Stop works while a workout is still starting.** Starting holds the hardware for as long as bring-up takes — up to ten minutes when the USB-permission dialog is waiting on an answer — and Stop used to queue behind it and do nothing. It now cancels the bring-up, releases the USB connection and returns to idle. A stop that is interrupted partway (the system tearing the service down) also always finishes, instead of leaving the app stuck on "Stopping…".
 - **A treadmill that loses its hardware while waiting for the Start key now reports the error** once reconnecting fails, instead of showing "Press START on the console" indefinitely.
 - **A treadmill saved as another equipment type in Settings → Device still behaves as a treadmill.** A custom device config with the wrong Type made the app treat the belt machine as a bike, and the workout stopped the moment it started. Hardware that identifies as a treadmill now stays one, with treadmill speed/incline limits rather than the other type's; the config's name and step sizes still apply.
