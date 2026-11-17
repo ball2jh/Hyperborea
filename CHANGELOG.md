@@ -1,6 +1,8 @@
 # Changelog
 
 ## [Unreleased]
+
+## [1.5.1] - 2026-11-17
 - **Fitness apps read treadmill data correctly again when the console reports elevation gain.** The FTMS Treadmill Data frame flagged elevation gain as bit 5 (Instantaneous Pace, a 1-byte field) instead of bit 4, so spec-compliant clients misread every field after it — calories, heart rate, elapsed time and power — on V1 treadmills that report vertical gain.
 - **A fitness app can no longer set the speed a treadmill launches at.** Speed targets from Bluetooth/WiFi apps are now ignored until the belt is actually running; previously a target received while waiting for the physical Start key became the belt's starting speed.
 - **Pulling and reinserting the safety key while a treadmill workout is armed no longer cancels it**, and a treadmill that reconnects mid-workout and re-arms no longer discards the ride on its first idle report.
