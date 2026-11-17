@@ -27,8 +27,8 @@ import javax.inject.Singleton
 /**
  * Owns the "sleep after idle" feature on the platform side.
  *
- * The console firmware ships with the system screen-off timeout effectively disabled, so the
- * display never sleeps. When the user enables the feature we write their chosen timeout to
+ * Console firmware varies: some devices have a finite screen-off timeout and cannot wake by
+ * touch once asleep. With this feature disabled the Activity therefore keeps the display on. When the user enables the feature we write their chosen timeout to
  * [Settings.System.SCREEN_OFF_TIMEOUT] (the OS then handles the actual sleep), and the Activity
  * holds `FLAG_KEEP_SCREEN_ON` while a workout is active so the screen never blanks mid-ride —
  * the OS screen-off timer counts *touch* inactivity, which a pedalling user doesn't generate.
@@ -56,15 +56,10 @@ class ScreenSleepController @Inject constructor(
 
     private var grantWatchJob: Job? = null
 
-    /**
-     * Whether the Activity should hold `FLAG_KEEP_SCREEN_ON` right now: only when the feature is
-     * enabled *and* a workout is in progress. When idle (or the feature is off) this is `false`
-     * and the OS screen-off timeout governs.
-     */
+    /** Keep the display awake when sleep is disabled, or while a workout is active. */
     val keepScreenOn: StateFlow<Boolean> =
-        combine(userPreferences.screenSleepEnabled, orchestratorState) { enabled, state ->
-            enabled && state.keepsScreenAwake()
-        }.stateIn(scope, SharingStarted.Eagerly, false)
+        combine(userPreferences.screenSleepEnabled, orchestratorState, ::shouldKeepScreenOn)
+            .stateIn(scope, SharingStarted.Eagerly, true)
 
     /** Apply the system timeout now and re-apply whenever the toggle or duration changes. */
     fun start() {
@@ -164,16 +159,6 @@ class ScreenSleepController @Inject constructor(
         }
     }
 
-    private fun OrchestratorState.keepsScreenAwake(): Boolean = when (this) {
-        is OrchestratorState.Preparing,
-        is OrchestratorState.AwaitingConsoleStart,
-        is OrchestratorState.Running,
-        OrchestratorState.Paused -> true
-        OrchestratorState.Idle,
-        OrchestratorState.Stopping,
-        is OrchestratorState.Error -> false
-    }
-
     private companion object {
         const val TAG = "Hyperborea.ScreenSleep"
         const val KEY_ORIGINAL_TIMEOUT = "original_screen_off_timeout"
@@ -185,3 +170,10 @@ class ScreenSleepController @Inject constructor(
         const val GRANT_WATCH_TIMEOUT_MS = 120_000
     }
 }
+
+internal fun shouldKeepScreenOn(sleepEnabled: Boolean, state: OrchestratorState): Boolean =
+    !sleepEnabled || when (state) {
+        is OrchestratorState.Preparing, is OrchestratorState.AwaitingConsoleStart,
+        is OrchestratorState.Running, OrchestratorState.Paused -> true
+        OrchestratorState.Idle, OrchestratorState.Stopping, is OrchestratorState.Error -> false
+    }

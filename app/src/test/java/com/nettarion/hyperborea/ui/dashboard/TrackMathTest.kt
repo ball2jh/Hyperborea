@@ -51,6 +51,28 @@ class TrackMathTest {
     }
 
     @Test
+    fun `runner wraps forward at every boundary through ten laps`() {
+        // Reproduce the reported long-run scenario, including either side of each finish line.
+        for (lap in 1..10) {
+            val boundaryKm = lap * 0.4f
+            val before = boundaryKm - 0.001f
+            val after = boundaryKm + 0.001f
+
+            assertThat(TrackMath.completedLaps(before)).isEqualTo(lap - 1)
+            assertThat(TrackMath.lapProgress(before)).isWithin(1e-4f).of(0.9975f)
+            assertThat(TrackMath.completedLaps(boundaryKm)).isEqualTo(lap)
+            assertThat(TrackMath.lapProgress(boundaryKm)).isWithin(1e-4f).of(0f)
+            assertThat(TrackMath.completedLaps(after)).isEqualTo(lap)
+            assertThat(TrackMath.lapProgress(after)).isWithin(1e-4f).of(0.0025f)
+
+            // The animation target must keep increasing while the drawn fraction wraps.
+            assertThat(TrackMath.continuousLaps(before)).isLessThan(lap.toFloat())
+            assertThat(TrackMath.continuousLaps(boundaryKm)).isWithin(1e-4f).of(lap.toFloat())
+            assertThat(TrackMath.continuousLaps(after)).isGreaterThan(lap.toFloat())
+        }
+    }
+
+    @Test
     fun `progress stays below one across float-precision edges`() {
         // Sweep values near lap boundaries — float rounding must never produce progress >= 1.
         var km = 0.3999f

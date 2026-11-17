@@ -6,6 +6,7 @@ import com.nettarion.hyperborea.core.model.DeviceIdentity
 import com.nettarion.hyperborea.core.model.DeviceInfo
 import com.nettarion.hyperborea.core.model.DeviceType
 import com.nettarion.hyperborea.core.model.ExerciseData
+import com.nettarion.hyperborea.core.model.isBeltBased
 import com.nettarion.hyperborea.hardware.fitpro.transport.HidTransport
 import kotlin.math.roundToInt
 import kotlinx.coroutines.CoroutineScope
@@ -100,10 +101,36 @@ internal abstract class BaseFitProSession(
     // Accumulated absolute targets behind the relative Adjust± commands: one press = one step from
     // the last value WE sent (not the console's read-back, which may self-step on some units).
     protected var lastSentGrade = 0f
+    private var lastGradeWasFine = false
     protected var lastSentSpeed = 0f
 
     /** Grip HR is a noisy analog contact reading — both protocols gate + smooth it with this. */
     protected val gripHeartRate = GripHeartRateFilter()
+
+    // Paused/DMK is latched until an explicit Resume command or physical Start key. An idle,
+    // START_REQUESTED, or READY_TO_START report alone cannot authorize a paused belt to restart.
+    @Volatile protected var beltRestartRequiresUser = false
+
+    // Set once this session has issued a belt start or the controller has reported an active
+    // workout (WARM_UP/RUNNING/PAUSE/COOL_DOWN). Before that there is no moving or paused belt to
+    // protect: console-reported DMK/OFF_MACHINE/STOP while still waiting for the first physical
+    // Start must not latch, or a start-only signal (START_REQUESTED/READY_TO_START) would be
+    // ignored and the workout could never begin. Setting it when the start is *issued* (not only
+    // when RUNNING is confirmed) means a Stop pressed mid-start still latches and wins.
+    // An explicit app Pause always latches.
+    @Volatile protected var beltHasRun = false
+
+    protected fun latchBeltPause(explicit: Boolean = false) {
+        if (detectedDeviceType.isBeltBased) {
+            if (explicit || beltHasRun) beltRestartRequiresUser = true
+            val snapshot = accumulator.snapshot()
+            // DMK can also be reported while merely parked/arming. Do not carry counters from
+            // the console's previous workout into a new one that has never started.
+            if (snapshot.elapsedTime > 0 || snapshot.workoutMode == 2 || snapshot.workoutMode == 3) {
+                accumulator.preserveCountersAcrossReset()
+            }
+        }
+    }
 
     private var lastKeyCode = 0
     private var lastLogTimeMs = 0L
@@ -114,12 +141,29 @@ internal abstract class BaseFitProSession(
      * only when the code changes to a new non-zero value, mapping it via [FitProKeypad] and
      * handing fresh presses to [onConsoleKeyPressed].
      */
-    protected fun onKeypadCode(code: Int, heldMs: Int? = null) {
+    private var consoleControlListener: suspend (DeviceCommand) -> Unit = {}
+    final override fun setConsoleControlListener(listener: suspend (DeviceCommand) -> Unit) { consoleControlListener = listener }
+
+    protected suspend fun onKeypadCode(code: Int, heldMs: Int? = null) {
         if (code == lastKeyCode) return
         lastKeyCode = code
         if (code == 0) return
         val key = FitProKeypad.consoleKeyFromCode(code)
         logger.d(tag, "Console keypad: code=$code${heldMs?.let { " held=${it}ms" } ?: ""}${key?.let { " ($it)" } ?: ""}")
+        if (detectedDeviceType == DeviceType.TREADMILL) {
+            val command = when (key) {
+                ConsoleKey.START -> DeviceCommand.ResumeWorkout
+                ConsoleKey.STOP -> DeviceCommand.PauseWorkout
+                ConsoleKey.SPEED_UP -> DeviceCommand.AdjustSpeed(true)
+                ConsoleKey.SPEED_DOWN -> DeviceCommand.AdjustSpeed(false)
+                ConsoleKey.INCLINE_UP -> DeviceCommand.AdjustIncline(true)
+                ConsoleKey.INCLINE_DOWN -> DeviceCommand.AdjustIncline(false)
+                else -> null
+            }
+            if (command != null) consoleControlListener(command)
+        }
+        if (key == ConsoleKey.STOP) latchBeltPause()
+        if (key == ConsoleKey.START) beltRestartRequiresUser = false
         if (key != null) onConsoleKeyPressed(key)
     }
 
@@ -140,9 +184,11 @@ internal abstract class BaseFitProSession(
 
     /** Steps the accumulated incline target by one [DeviceInfo.inclineStep], clamped to the device's range. */
     protected fun nextAdjustedGrade(increase: Boolean): Float {
+        val selected = if (lastGradeWasFine) roundToStep(lastSentGrade, deviceInfo.inclineStep) else lastSentGrade
         lastSentGrade = clampedInclineTarget(
-            lastSentGrade + if (increase) deviceInfo.inclineStep else -deviceInfo.inclineStep,
+            selected + if (increase) deviceInfo.inclineStep else -deviceInfo.inclineStep,
         )
+        lastGradeWasFine = false
         return lastSentGrade
     }
 
@@ -185,8 +231,8 @@ internal abstract class BaseFitProSession(
 
     /**
      * Incline target writes go through a throttle-with-trailing-flush so a burst of stepped
-     * targets (held +/− button, Zwift SIM gradient stream) reaches the deck as one moving target
-     * per interval instead of a step-settle-step staircase — see [TargetWriteCoalescer].
+     * targets reaches the equipment at a bounded rate. Treadmill relative selections use a
+     * trailing quiet interval; other targets keep leading/trailing throttling.
      */
     protected val gradeCoalescer by lazy {
         TargetWriteCoalescer(sessionScope, GRADE_WRITE_INTERVAL_MS) { writeGradeTarget(it) }
@@ -200,7 +246,8 @@ internal abstract class BaseFitProSession(
      */
     protected suspend fun handleInclineCommand(command: DeviceCommand): Boolean = when (command) {
         is DeviceCommand.SetIncline -> {
-            lastSentGrade = clampedInclineTarget(roundToStep(command.percent, deviceInfo.inclineStep))
+            lastGradeWasFine = detectedDeviceType.isBeltBased && !command.snapToStep
+            lastSentGrade = clampedInclineTarget(roundToStep(command.percent, if (lastGradeWasFine) .01f else deviceInfo.inclineStep))
             publishCommandedInclineTarget(lastSentGrade)
             gradeCoalescer.submit(lastSentGrade)
             true
@@ -208,7 +255,9 @@ internal abstract class BaseFitProSession(
         is DeviceCommand.AdjustIncline -> {
             val target = nextAdjustedGrade(command.increase)
             publishCommandedInclineTarget(target)
-            gradeCoalescer.submit(target)
+            // Select a destination in normal UI steps, then move to it once the held/repeated
+            // selection ends instead of settling at every intermediate half-percent.
+            gradeCoalescer.submit(target, deferUntilQuiet = detectedDeviceType.isBeltBased)
             true
         }
         else -> false
@@ -237,10 +286,9 @@ internal abstract class BaseFitProSession(
         private const val TELEMETRY_LOG_INTERVAL_MS = 1000L
 
         /**
-         * Minimum interval between incline target writes. Tunable 500–1000 ms: below ~500 ms the
-         * deck motor can catch (and settle at) each intermediate target on slow actuators; above
-         * ~1000 ms single Zwift gradient corrections start to feel laggy. Not yet measured against
-         * a specific deck — adjust from field testing.
+         * Wire-rate limit for streamed absolute targets, also the quiet interval after manual
+         * selection. Longer than the UI's initial 500 ms hold threshold, so a held button
+         * accumulates before the first motor write. Physical smoothness remains device-dependent.
          */
         internal const val GRADE_WRITE_INTERVAL_MS = 750L
     }

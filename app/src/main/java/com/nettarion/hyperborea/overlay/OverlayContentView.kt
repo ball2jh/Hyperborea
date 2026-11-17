@@ -10,6 +10,7 @@ import com.nettarion.hyperborea.core.orchestration.OrchestratorState
 internal interface OverlayContentView {
     fun updateExerciseData(data: ExerciseData?)
     fun updateState(state: OrchestratorState)
+    fun updateProgram(state: com.nettarion.hyperborea.core.program.ProgramRunState?, imperial: Boolean)
 }
 
 /**

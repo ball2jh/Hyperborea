@@ -260,6 +260,16 @@ internal class V2Session(
 
     override suspend fun writeFeature(command: DeviceCommand) {
         if (_sessionState.value !is SessionState.Streaming) return
+        if (command is DeviceCommand.PauseWorkout && detectedDeviceType.isBeltBased) {
+            latchBeltPause(explicit = true)
+            startRequestJob?.cancel()
+            gradeCoalescer.cancelPending()
+        }
+        if (command is DeviceCommand.ResumeWorkout) { beltRestartRequiresUser = false; beltHasRun = true }
+        if (beltRestartRequiresUser && (command is DeviceCommand.SetTargetSpeed || command is DeviceCommand.AdjustSpeed)) {
+            logger.w(TAG, "Ignoring belt-speed target while paused — explicit Resume or physical Start required")
+            return
+        }
 
         // Incline targets route through the grade coalescer (burst → one moving target per
         // interval) instead of the direct write below. Same declared-feature gate first.
@@ -303,7 +313,12 @@ internal class V2Session(
                 V2Message.Outgoing.WriteFeature(V2FeatureId.WORKOUT_STATE, V2WorkoutMode.PAUSED.raw)
             }
             is DeviceCommand.ResumeWorkout -> {
-                accumulator.resume()
+                val current = _workoutMode.value?.let(V2WorkoutMode::fromRaw)
+                if (detectedDeviceType.isBeltBased && (!consoleDeclaresStartRequested || current == V2WorkoutMode.NONE || current == V2WorkoutMode.RESULTS)) {
+                    requestWorkoutStart("explicit ResumeWorkout")
+                    return
+                }
+                if (!detectedDeviceType.isBeltBased) accumulator.resume()
                 V2Message.Outgoing.WriteFeature(V2FeatureId.WORKOUT_STATE, V2WorkoutMode.RUNNING.raw)
             }
             is DeviceCommand.CalibrateIncline -> {
@@ -422,6 +437,10 @@ internal class V2Session(
      */
     private fun requestWorkoutStart(trigger: String) {
         if (detectedDeviceType != DeviceType.TREADMILL) return
+        if (beltRestartRequiresUser) {
+            logger.w(TAG, "Ignoring start report while belt is paused — explicit Resume or physical Start required ($trigger)")
+            return
+        }
         if (_sessionState.value !is SessionState.Streaming) return
         val from = _workoutMode.value?.let { V2WorkoutMode.fromRaw(it) }
         if (from == V2WorkoutMode.RUNNING) return
@@ -435,8 +454,10 @@ internal class V2Session(
         //    WORKOUT_STATE to RUNNING, then command the belt (the firmware won't move it on its own).
         val acked = consoleDeclaresStartRequested
 
+        beltHasRun = true // a Stop/DMK from here on must latch, even before RUNNING is confirmed
         startRequestJob = sessionScope.launch {
             try {
+                if (from == V2WorkoutMode.RESULTS) writeWorkoutState(V2WorkoutMode.NONE)
                 if (acked) {
                     logger.i(TAG, "Start requested ($trigger, from=${from ?: "?"}) — acking with START_REQUESTED")
                     writeFeatureRaw(V2FeatureId.START_REQUESTED, START_REQUESTED_TRUE)
@@ -531,6 +552,12 @@ internal class V2Session(
      */
     private suspend fun writeInitConfiguration(supported: Set<V2FeatureId>?) {
         if (supported == null) return
+        // A pause should survive a longer break. Apply to both self-driving and host-driven
+        // treadmills; bikes/ellipticals/rowers keep their console defaults. Use positive seconds:
+        // zero is not a verified "disabled" sentinel across the supported firmware variants.
+        if (detectedDeviceType == DeviceType.TREADMILL && V2FeatureId.PAUSE_TIMEOUT in supported) {
+            writeFeatureRaw(V2FeatureId.PAUSE_TIMEOUT, TREADMILL_PAUSE_TIMEOUT_S)
+        }
         if (V2FeatureId.HEART_BEAT_INTERVAL in supported) {
             transport.write(V2Codec.encode(
                 V2Message.Outgoing.WriteFeature(V2FeatureId.HEART_BEAT_INTERVAL, HEART_BEAT_INTERVAL_MS),
@@ -578,7 +605,7 @@ internal class V2Session(
             V2FeatureId.DISPLAY_UNITS to DISPLAY_UNITS_METRIC,
             V2FeatureId.WARM_UP_TIMEOUT to WARM_UP_TIMEOUT_S,
             V2FeatureId.COOL_DOWN_TIMEOUT to COOL_DOWN_TIMEOUT_S,
-            V2FeatureId.PAUSE_TIMEOUT to PAUSE_TIMEOUT_S,
+            V2FeatureId.PAUSE_TIMEOUT to TREADMILL_PAUSE_TIMEOUT_S,
             V2FeatureId.GOAL_TIME to GOAL_TIME_S,
         )
         val sent = config.filter { (feature, _) -> feature in declared }
@@ -608,7 +635,7 @@ internal class V2Session(
         }
     }
 
-    private fun handleIncoming(data: ByteArray) {
+    private suspend fun handleIncoming(data: ByteArray) {
         val message = V2Codec.decode(data) ?: return
 
         when (message) {
@@ -647,7 +674,7 @@ internal class V2Session(
         }
     }
 
-    private fun applyEvent(feature: V2FeatureId, value: Float) {
+    private suspend fun applyEvent(feature: V2FeatureId, value: Float) {
         when (feature) {
             V2FeatureId.DEVICE_TYPE -> _reportedDeviceType.value = value
             V2FeatureId.KEY_COOKED -> onKeypadCode(value.toInt())
@@ -727,6 +754,13 @@ internal class V2Session(
                 val previous = _workoutMode.value?.let { V2WorkoutMode.fromRaw(it) }
                 _workoutMode.value = value
                 val mode = V2WorkoutMode.fromRaw(value)
+                if (beltRestartRequiresUser && mode == V2WorkoutMode.RUNNING) {
+                    logger.w(TAG, "Unrequested RUNNING report while paused — reasserting belt pause")
+                    _workoutMode.value = V2WorkoutMode.PAUSED.raw
+                    writeFeature(DeviceCommand.PauseWorkout)
+                    accumulator.updateWorkoutMode(V1_WORKOUT_MODE_PAUSE)
+                    return
+                }
                 // Info-level on purpose: which states a console actually reports (and when) is
                 // the load-bearing fact in field logs — e.g. whether READY_TO_START follows a
                 // Start-key press. Low volume: V2 events fire on change only.
@@ -737,8 +771,19 @@ internal class V2Session(
                     // just our own Pause/Resume commands. The accumulator guards make the
                     // overlap with writeFeature's pause()/resume() calls harmless.
                     when (mode) {
-                        V2WorkoutMode.PAUSED -> accumulator.pause()
+                        V2WorkoutMode.OFF_MACHINE -> {
+                            latchBeltPause()
+                            if (detectedDeviceType.isBeltBased) accumulator.pause()
+                        }
+                        V2WorkoutMode.PAUSED -> {
+                            beltHasRun = true // a console-reported pause implies an active workout
+                            latchBeltPause()
+                            if (detectedDeviceType.isBeltBased) sessionScope.launch { gradeCoalescer.cancelPending() }
+                            accumulator.pause()
+                        }
+                        V2WorkoutMode.WARM_UP, V2WorkoutMode.COOL_DOWN -> if (detectedDeviceType.isBeltBased) beltHasRun = true
                         V2WorkoutMode.RUNNING -> {
+                            beltHasRun = true
                             accumulator.resume()
                             accumulator.startTimer()
                             // The console started after all — clear the start-failure warning (but
@@ -747,6 +792,15 @@ internal class V2Session(
                         }
                         else -> {}
                     }
+                }
+                if (mode == V2WorkoutMode.RESULTS && detectedDeviceType.isBeltBased) {
+                    if (startRequestJob?.isActive != true) latchBeltPause()
+                    accumulator.pause()
+                    // Recover the controller's state without authorizing movement. User Resume
+                    // later runs the normal start configuration/acknowledgement sequence. Skip it
+                    // while a start is in flight: that job already cleared RESULTS itself, and a
+                    // trailing RESULTS report must not knock the console back out of the start.
+                    if (startRequestJob?.isActive != true) writeWorkoutState(V2WorkoutMode.NONE)
                 }
                 // READY_TO_START is the V2 MCU's "user pressed the physical Start key" report —
                 // it parks there waiting for the host to start the workout. Mirrors the stock
@@ -915,7 +969,8 @@ internal class V2Session(
         private const val DISPLAY_UNITS_METRIC = 1f
         private const val WARM_UP_TIMEOUT_S = 180f
         private const val COOL_DOWN_TIMEOUT_S = 600f
-        private const val PAUSE_TIMEOUT_S = 600f
+        // One hour instead of the stock ten-minute pause limit. This is deliberately finite.
+        private const val TREADMILL_PAUSE_TIMEOUT_S = 3600f
         private const val GOAL_TIME_S = 10_800f
         private const val MAX_SUBSCRIBE_BATCH = 8
         // How long to wait for the console to confirm a WORKOUT_STATE transition before continuing degraded.

@@ -2,6 +2,7 @@ package com.nettarion.hyperborea.ui
 
 sealed interface AppScreen {
     data class ProfilePicker(val autoSelect: Boolean = true) : AppScreen
+    data object Programs : AppScreen
     data object Dashboard : AppScreen
     data class ProfileStats(val profileId: Long) : AppScreen
     data class ProfileEdit(val profileId: Long?) : AppScreen

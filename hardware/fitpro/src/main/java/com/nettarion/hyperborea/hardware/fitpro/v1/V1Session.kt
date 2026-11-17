@@ -96,6 +96,8 @@ internal class V1Session(
 
     /** Edge detector for the V1 controller's app-mediated physical Start signal. */
     private var lastStartRequested: Boolean = false
+    @Volatile private var pendingResumeFromResults = false
+    private var pollQueuedWrites: Map<V1DataField, Float> = emptyMap()
 
     /**
      * Whether the MCU is in constant-watts (ERG) mode. Updated from the IS_CONSTANT_WATTS_MODE
@@ -282,6 +284,16 @@ internal class V1Session(
         }
 
         if (_sessionState.value !is SessionState.Streaming) return
+        if (command is DeviceCommand.PauseWorkout && detectedDeviceType.isBeltBased) {
+            latchBeltPause(explicit = true)
+            pendingResumeFromResults = false
+            gradeCoalescer.cancelPending()
+        }
+        if (command is DeviceCommand.ResumeWorkout) { beltRestartRequiresUser = false; beltHasRun = true }
+        if (beltRestartRequiresUser && (command is DeviceCommand.SetTargetSpeed || command is DeviceCommand.AdjustSpeed)) {
+            logger.w(TAG, "Ignoring belt-speed target while paused — explicit Resume or physical Start required")
+            return
+        }
 
         // Incline targets route through the grade coalescer (burst → one moving target per
         // interval); the coalescer's writes land in pendingWriteFields via writeGradeTarget.
@@ -303,7 +315,7 @@ internal class V1Session(
         // clamped anything arriving from the live path. An incline target implies manual/SIM
         // control, so it carries the ERG exit like every other manual-control command.
         is DeviceCommand.SetIncline -> {
-            ergExitFields() + mapOf(V1DataField.GRADE to roundToStep(command.percent, deviceInfo.inclineStep))
+            ergExitFields() + mapOf(V1DataField.GRADE to roundToStep(command.percent, if (command.snapToStep || !detectedDeviceType.isBeltBased) deviceInfo.inclineStep else .01f))
         }
         is DeviceCommand.SetTargetSpeed -> {
             lastSentSpeed = clampedSpeedTarget(command.kph)
@@ -334,7 +346,13 @@ internal class V1Session(
             mapOf(V1DataField.WORKOUT_MODE to WorkoutMode.PAUSE.raw)
         }
         is DeviceCommand.ResumeWorkout -> {
-            mapOf(V1DataField.WORKOUT_MODE to WorkoutMode.RUNNING.raw)
+            if (detectedDeviceType.isBeltBased && accumulator.snapshot().workoutMode == WorkoutMode.RESULTS.raw.toInt()) {
+                pendingResumeFromResults = true
+                mapOf(V1DataField.WORKOUT_MODE to WorkoutMode.IDLE.raw)
+            } else {
+                pendingResumeFromResults = false
+                mapOf(V1DataField.WORKOUT_MODE to WorkoutMode.RUNNING.raw)
+            }
         }
         is DeviceCommand.CalibrateIncline -> emptyMap()
         // No rider-weight field in the V1 field set we poll — quietly ignored.
@@ -376,7 +394,8 @@ internal class V1Session(
      * re-queued older one.
      */
     override suspend fun writeGradeTarget(target: Float) {
-        val fields = commandToFields(DeviceCommand.SetIncline(target))
+        // The shared handler has already snapped selections or retained fine ramp precision.
+        val fields = commandToFields(DeviceCommand.SetIncline(target, snapToStep = false))
         pendingWriteMutex.withLock {
             pendingWriteFields = pendingWriteFields + fields
         }
@@ -563,6 +582,9 @@ internal class V1Session(
         val supportsIdleLockout = supportedBitFields.isEmpty() ||
             V1DataField.IDLE_MODE_LOCKOUT.fieldIndex in supportedBitFields
 
+        if (isTreadmill && V1DataField.PAUSE_TIMEOUT.fieldIndex in supportedBitFields) {
+            writeConsoleField(V1DataField.PAUSE_TIMEOUT, TREADMILL_PAUSE_TIMEOUT_S)
+        }
         if (supportsRequireStart) {
             writeConsoleField(V1DataField.REQUIRE_START_REQUESTED, FIELD_ENABLED)
         }
@@ -803,6 +825,18 @@ internal class V1Session(
             lastTruncatedSeen = decoded.isTruncated
 
             applyDataResponse(decoded.fields)
+            if (pollQueuedWrites.isNotEmpty()) {
+                val queued = pollQueuedWrites
+                pollQueuedWrites = emptyMap()
+                pendingWriteMutex.withLock {
+                    // Explicit user Pause/Stop writes win over a queued recovery transition.
+                    val completingResume = queued[V1DataField.WORKOUT_MODE] == WorkoutMode.RUNNING.raw &&
+                        pendingWriteFields[V1DataField.WORKOUT_MODE] == WorkoutMode.IDLE.raw && !beltRestartRequiresUser
+                    // A duplicate IDLE from the same Resume must not overwrite its RUNNING phase.
+                    // A newer Pause remains authoritative and always wins the merge.
+                    pendingWriteFields = if (completingResume) pendingWriteFields + queued else queued + pendingWriteFields
+                }
+            }
             handleKeyObject(decoded.keyObject)
             estimatePowerIfNeeded()
             consecutivePollErrors = 0
@@ -847,16 +881,45 @@ internal class V1Session(
                 V1DataField.CURRENT_TIME -> accumulator.updateElapsedTime(value.toLong())
                 V1DataField.WORKOUT_MODE -> {
                     val mode = value.toInt()
+                    if (mode == WorkoutMode.RUNNING.raw.toInt() && beltRestartRequiresUser) {
+                        logger.w(TAG, "Unrequested RUNNING report while paused — reasserting belt pause")
+                        accumulator.pause()
+                        accumulator.updateWorkoutMode(WorkoutMode.PAUSE.raw.toInt())
+                        sessionScope.launch { writeFeature(DeviceCommand.PauseWorkout) }
+                        continue
+                    }
                     val previousMode = accumulator.snapshot().workoutMode
                     if (previousMode != mode) {
                         when (WorkoutMode.fromRaw(mode)) {
-                            WorkoutMode.PAUSE -> accumulator.pause()
+                            WorkoutMode.RESULTS -> if (detectedDeviceType.isBeltBased) {
+                                if (!pendingResumeFromResults) latchBeltPause()
+                                accumulator.pause()
+                            }
+                            WorkoutMode.DMK -> {
+                                latchBeltPause()
+                                if (detectedDeviceType.isBeltBased) accumulator.pause()
+                            }
+                            WorkoutMode.PAUSE -> {
+                                beltHasRun = true // a console-reported pause implies an active workout
+                                latchBeltPause()
+                                if (detectedDeviceType.isBeltBased) sessionScope.launch { gradeCoalescer.cancelPending() }
+                                accumulator.pause()
+                            }
+                            WorkoutMode.WARM_UP, WorkoutMode.COOL_DOWN -> if (detectedDeviceType.isBeltBased) beltHasRun = true
                             WorkoutMode.RUNNING -> {
+                                beltHasRun = true
                                 accumulator.resume()
                                 accumulator.startTimer()
                             }
                             else -> {}
                         }
+                    }
+                    if (detectedDeviceType.isBeltBased && mode == WorkoutMode.RESULTS.raw.toInt()) {
+                        // RESULTS rejects RUNNING on V1. Clearing it is safe and never starts a belt.
+                        pollQueuedWrites = pollQueuedWrites + (V1DataField.WORKOUT_MODE to WorkoutMode.IDLE.raw)
+                    } else if (mode == WorkoutMode.IDLE.raw.toInt() && pendingResumeFromResults && !beltRestartRequiresUser) {
+                        pendingResumeFromResults = false
+                        pollQueuedWrites = pollQueuedWrites + (V1DataField.WORKOUT_MODE to WorkoutMode.RUNNING.raw)
                     }
                     accumulator.updateWorkoutMode(mode)
                 }
@@ -913,7 +976,7 @@ internal class V1Session(
     }
 
     /** Passes fresh membrane-keypad presses through the base session's edge detector. */
-    private fun handleKeyObject(keyObject: KeyObject?) {
+    private suspend fun handleKeyObject(keyObject: KeyObject?) {
         onKeypadCode(keyObject?.code ?: 0, heldMs = keyObject?.timeHeld ?: 0)
     }
 
@@ -930,10 +993,28 @@ internal class V1Session(
 
     private fun requestTreadmillStart(source: String) {
         if (detectedDeviceType != DeviceType.TREADMILL) return
+        if (beltRestartRequiresUser) {
+            logger.w(TAG, "Ignoring start report while belt is paused — explicit Resume or physical Start required ($source)")
+            return
+        }
         if (accumulator.snapshot().workoutMode == WorkoutMode.RUNNING.raw.toInt()) return
 
         logger.i(TAG, "$source received while treadmill is idle — queueing WORKOUT_MODE=RUNNING")
-        sessionScope.launch { writeFeature(DeviceCommand.ResumeWorkout) }
+        sessionScope.launch {
+            if (_sessionState.value !is SessionState.Streaming) return@launch
+            // Never clear the pause latch from this passive start path, and re-check it under the
+            // write lock: a Pause that lands after the check above either aborts this start or
+            // queues its PAUSE after our RUNNING (later write wins), and a RUNNING report that
+            // still slips through is rejected by the latch.
+            pendingWriteMutex.withLock {
+                if (beltRestartRequiresUser) {
+                    logger.w(TAG, "Start from $source dropped — belt was paused before it could be queued")
+                    return@withLock
+                }
+                beltHasRun = true
+                pendingWriteFields = pendingWriteFields + commandToFields(DeviceCommand.ResumeWorkout)
+            }
+        }
     }
 
     private fun estimatePowerIfNeeded() {
@@ -1061,6 +1142,7 @@ internal class V1Session(
 
         // Console-init field values: 1 = ENABLED (REQUIRE_START_REQUESTED) / LOCKED (IDLE_MODE_LOCKOUT),
         // 0 = DISABLED / UNLOCKED.
+        private const val TREADMILL_PAUSE_TIMEOUT_S = 3600f
         private const val FIELD_ENABLED = 1f
         private const val FIELD_DISABLED = 0f
 

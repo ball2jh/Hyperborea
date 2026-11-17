@@ -178,7 +178,7 @@ class DemoHardwareAdapter(
             elapsedTime = elapsedSeconds,
             targetSpeed = if (running && abs(targetSpeedKph - speedKph) > 0.05f) targetSpeedKph else null,
             targetIncline = if (running && abs(targetIncline - incline) > 0.05f) targetIncline else null,
-            workoutMode = workoutMode,
+            workoutMode = if (paused) WORKOUT_MODE_PAUSE else workoutMode,
         )
     }
 
@@ -197,6 +197,7 @@ class DemoHardwareAdapter(
         // Mirrors WorkoutModeInterpreter's wire constants (internal to :core).
         private const val WORKOUT_MODE_IDLE = 1
         private const val WORKOUT_MODE_RUNNING = 2
+        private const val WORKOUT_MODE_PAUSE = 3
 
         private const val TICK_MS = 1000L
         private const val CONSOLE_START_DELAY_MS = 5000L

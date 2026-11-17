@@ -38,6 +38,16 @@ class OverlayBarView(
 
     private var isPaused = false
 
+    private val programPanel = ProgramOverlayView(context, onPauseClick, onResumeClick, onStopClick)
+    private lateinit var legacyRow: LinearLayout
+
+    override fun updateProgram(state: com.nettarion.hyperborea.core.program.ProgramRunState?, imperial: Boolean) {
+        programPanel.updateProgram(state, imperial)
+        legacyRow.visibility = if (state?.active == true) View.GONE else View.VISIBLE
+        setBackgroundColor(if (state?.active == true) android.graphics.Color.TRANSPARENT else OverlayPalette.SURFACE)
+        alpha = if (state?.active == true) 1f else .92f
+    }
+
     init {
         val dp = { value: Int -> dpToPx(value) }
 
@@ -101,10 +111,18 @@ class OverlayBarView(
         }
         root.addView(stopButton)
 
-        addView(root, LayoutParams(LayoutParams.WRAP_CONTENT, LayoutParams.WRAP_CONTENT))
+        legacyRow = root
+        setupDragHandle(programPanel.dragHandle)
+        val column = LinearLayout(context).apply {
+            orientation = LinearLayout.VERTICAL
+            addView(programPanel, LinearLayout.LayoutParams(minOf(dp(340), (resources.displayMetrics.widthPixels * .9f).toInt()), LinearLayout.LayoutParams.WRAP_CONTENT))
+            addView(root)
+        }
+        addView(column, LayoutParams(LayoutParams.WRAP_CONTENT, LayoutParams.WRAP_CONTENT))
     }
 
     override fun updateExerciseData(data: ExerciseData?) {
+        programPanel.updateData(data)
         if (data == null) {
             resValue.text = "—"
             pwrValue.text = "—"
@@ -137,6 +155,7 @@ class OverlayBarView(
     }
 
     override fun updateState(state: OrchestratorState) {
+        programPanel.updateWorkout(state)
         isPaused = state is OrchestratorState.Paused
         pauseResumeButton.text = if (isPaused) "▶" else "⏸"
         pauseResumeButton.setTextColor(if (isPaused) STATUS_ACTIVE_COLOR else AMBER_COLOR)

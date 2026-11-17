@@ -10,9 +10,10 @@ import android.os.Build
  * calls `startForeground()` synchronously in `onCreate()`, satisfying the 5-second window the
  * platform allows after a `startForegroundService()`.
  */
-fun Context.startHyperboreaService(action: String? = null) {
+fun Context.startHyperboreaService(action: String? = null, programJson: String? = null) {
     val intent = Intent(this, HyperboreaService::class.java)
     if (action != null) intent.action = action
+    if (programJson != null) intent.putExtra(HyperboreaService.EXTRA_PROGRAM, programJson)
     if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
         startForegroundService(intent)
     } else {

@@ -53,6 +53,7 @@ class Orchestrator(
     private val scope: CoroutineScope,
     private val sensorAdapter: SensorAdapter? = null,
     private val profileRepository: ProfileRepository? = null,
+    private val beforeExternalCommand: suspend (DeviceCommand) -> Unit = {},
 ) {
 
     private val _state = MutableStateFlow<OrchestratorState>(OrchestratorState.Idle)
@@ -83,6 +84,8 @@ class Orchestrator(
     private var commandPipelineJob: Job? = null
     private var workoutModeMonitorJob: Job? = null
     private var probeJob: Job? = null
+    private var resumeConfirmationJob: Job? = null
+    private var resumeRequested = false
 
     private val reconnector = HardwareReconnector(
         hardwareAdapter,
@@ -273,8 +276,15 @@ class Orchestrator(
                 .catch { e -> logger.e(TAG, "Command pipeline error", e) }
                 .collect { command ->
                     try {
+                        beforeExternalCommand(command)
                         logger.d(TAG, "Forwarding command: $command")
-                        hardwareAdapter.sendCommand(command)
+                        if (hardwareAdapter.deviceInfo.value?.type == DeviceType.TREADMILL) {
+                            when (command) {
+                                DeviceCommand.PauseWorkout -> pause()
+                                DeviceCommand.ResumeWorkout -> resume()
+                                else -> hardwareAdapter.sendCommand(command)
+                            }
+                        } else hardwareAdapter.sendCommand(command)
                     } catch (e: CancellationException) { throw e }
                     catch (e: Exception) { logger.e(TAG, "Failed to forward command", e) }
                 }
@@ -296,28 +306,36 @@ class Orchestrator(
         workoutModeMonitorJob = scope.launch {
             hardwareAdapter.exerciseData.filterNotNull()
                 .collect { data ->
-                    when (val action = workoutModeInterpreter.interpret(data.workoutMode, _state.value)) {
-                        is WorkoutModeInterpreter.Action.PromoteToRunning -> {
-                            logger.i(TAG, "Console Start pressed — entering Running")
-                            enterRunning()
-                        }
-                        is WorkoutModeInterpreter.Action.PauseForSafetyKey -> {
-                            logger.w(TAG, "Safety key removed — pausing")
-                            _state.value = OrchestratorState.Paused
-                        }
-                        is WorkoutModeInterpreter.Action.ResumeFromSafetyKey -> {
-                            logger.i(TAG, "Safety key re-inserted — resuming")
-                            hardwareAdapter.sendCommand(DeviceCommand.ResumeWorkout)
+                    mutex.withLock {
+                        if (resumeRequested && _state.value is OrchestratorState.Paused &&
+                            data.workoutMode == WorkoutModeInterpreter.WORKOUT_MODE_RUNNING) {
+                            clearResumeRequest()
                             _state.value = OrchestratorState.Running(degraded = hardwareAdapter.degradedReason.value)
+                            logger.i(TAG, "Orchestrator resumed — console confirmed explicit user request")
                         }
-                        is WorkoutModeInterpreter.Action.StopWorkout -> {
-                            // User pressed the physical Stop key. The Dashboard's save-ride dialog
-                            // gates on elapsed ≥ 60 s, so calling stop() with saveRide=false from
-                            // AwaitingConsoleStart (elapsed=0) is a clean silent teardown.
-                            logger.i(TAG, "Console returned to IDLE — stopping workout (running=${action.wasRunning})")
-                            scope.launch { stop(saveRide = action.wasRunning) }
+                        when (val action = workoutModeInterpreter.interpret(data.workoutMode, _state.value, hardwareAdapter.deviceInfo.value?.type)) {
+                            is WorkoutModeInterpreter.Action.PromoteToRunning -> {
+                                logger.i(TAG, "Console Start pressed — entering Running")
+                                enterRunning()
+                            }
+                            is WorkoutModeInterpreter.Action.PauseFromConsole -> {
+                                logger.w(TAG, "Console pause or safety interlock — pausing")
+                                _state.value = OrchestratorState.Paused
+                            }
+                            is WorkoutModeInterpreter.Action.ResumeFromSafetyKey -> {
+                                logger.i(TAG, "Safety key re-inserted — resuming")
+                                hardwareAdapter.sendCommand(DeviceCommand.ResumeWorkout)
+                                _state.value = OrchestratorState.Running(degraded = hardwareAdapter.degradedReason.value)
+                            }
+                            is WorkoutModeInterpreter.Action.StopWorkout -> {
+                                // User pressed the physical Stop key. The Dashboard's save-ride dialog
+                                // gates on elapsed ≥ 60 s, so calling stop() with saveRide=false from
+                                // AwaitingConsoleStart (elapsed=0) is a clean silent teardown.
+                                logger.i(TAG, "Console returned to IDLE — stopping workout (running=${action.wasRunning})")
+                                scope.launch { stop(saveRide = action.wasRunning) }
+                            }
+                            is WorkoutModeInterpreter.Action.None -> {}
                         }
-                        is WorkoutModeInterpreter.Action.None -> {}
                     }
                 }
         }
@@ -327,6 +345,13 @@ class Orchestrator(
             hardwareAdapter.state.collect { hwState ->
                 if ((hwState is AdapterState.Error || hwState is AdapterState.Inactive)
                     && _state.value.isWorkoutActive() && !isReconnecting) {
+                    if (deviceInfo.type == DeviceType.TREADMILL && _state.value is OrchestratorState.Paused) {
+                        // Rebuilding a protocol session would discard its pause latch. End safely
+                        // rather than allowing a reconnect/start report to restart a paused belt.
+                        logger.w(TAG, "Paused treadmill disconnected — ending workout without automatic reconnect")
+                        scope.launch { stop(saveRide = true) }
+                        return@collect
+                    }
                     isReconnecting = true
                     try {
                         val reason = if (hwState is AdapterState.Error) hwState.message else "Hardware disconnected"
@@ -467,12 +492,23 @@ class Orchestrator(
         return true
     }
 
+    /** Serialized with pause/stop: automation cannot restart a belt during teardown. */
+    suspend fun sendProgramCommand(command: DeviceCommand): Boolean = mutex.withLock {
+        require(command is DeviceCommand.SetTargetSpeed || command is DeviceCommand.SetIncline)
+        val running = _state.value as? OrchestratorState.Running ?: return@withLock false
+        if (hardwareAdapter.deviceInfo.value?.type != DeviceType.TREADMILL) return@withLock false
+        if (running.degraded != null || hardwareAdapter.state.value !is AdapterState.Active) return@withLock false
+        hardwareAdapter.sendCommand(command)
+        true
+    }
+
     suspend fun pause() {
         mutex.withLock {
-            if (_state.value !is OrchestratorState.Running) {
+            if (_state.value !is OrchestratorState.Running && !(_state.value is OrchestratorState.Paused && resumeRequested)) {
                 logger.d(TAG, "pause() ignored (not Running, current: ${_state.value})")
                 return
             }
+            clearResumeRequest()
             hardwareAdapter.sendCommand(DeviceCommand.PauseWorkout)
             _state.value = OrchestratorState.Paused
             logger.i(TAG, "Orchestrator paused")
@@ -485,9 +521,32 @@ class Orchestrator(
                 logger.d(TAG, "resume() ignored (not Paused, current: ${_state.value})")
                 return
             }
-            hardwareAdapter.sendCommand(DeviceCommand.ResumeWorkout)
-            _state.value = OrchestratorState.Running(degraded = hardwareAdapter.degradedReason.value)
-            logger.i(TAG, "Orchestrator resumed")
+            if (resumeRequested) return
+            val treadmill = hardwareAdapter.deviceInfo.value?.type == DeviceType.TREADMILL
+            resumeRequested = treadmill
+            try { hardwareAdapter.sendCommand(DeviceCommand.ResumeWorkout) }
+            catch (e: Exception) { clearResumeRequest(); throw e }
+            if (!treadmill) {
+                _state.value = OrchestratorState.Running(degraded = hardwareAdapter.degradedReason.value)
+                logger.i(TAG, "Orchestrator resumed")
+            } else {
+                // Paused/expired consoles can emit trailing IDLE/RESULTS frames during recovery.
+                // Keep program time and target writes frozen until a fresh RUNNING confirmation.
+                resumeConfirmationJob = scope.launch {
+                    delay(RESUME_CONFIRMATION_TIMEOUT_MS)
+                    mutex.withLock {
+                        if (resumeRequested && _state.value is OrchestratorState.Paused) {
+                            resumeRequested = false
+                            resumeConfirmationJob = null
+                            try { hardwareAdapter.sendCommand(DeviceCommand.PauseWorkout) }
+                            catch (e: CancellationException) { throw e }
+                            catch (e: Exception) { logger.e(TAG, "Couldn't reassert pause after unconfirmed Resume", e) }
+                            logger.w(TAG, "Resume not confirmed — keeping workout paused; explicit retry required")
+                        }
+                    }
+                }
+                logger.i(TAG, "Resume requested — awaiting console confirmation")
+            }
         }
     }
 
@@ -522,6 +581,14 @@ class Orchestrator(
      */
     private suspend fun teardown(saveRide: Boolean, turnOffFan: Boolean) {
         reconnector.reset()
+        clearResumeRequest()
+        if (hardwareAdapter.deviceInfo.value?.type == DeviceType.TREADMILL && hardwareAdapter.state.value is AdapterState.Active) {
+            // Revoke any pending start before recording IO can suspend teardown. Stopping must
+            // never leave a recovery job free to write RUNNING while the ride is being saved.
+            try { hardwareAdapter.sendCommand(DeviceCommand.PauseWorkout) }
+            catch (e: CancellationException) { throw e }
+            catch (e: Exception) { logger.w(TAG, "Couldn't pause belt before teardown: ${e.message}") }
+        }
         rideRecorder.stop(save = saveRide)
 
         cancelWorkoutJobs()
@@ -539,7 +606,14 @@ class Orchestrator(
     }
 
     /** Cancels the per-workout jobs launched by [startInternal]. Safe on partially-started bring-up. */
+    private fun clearResumeRequest() {
+        resumeRequested = false
+        resumeConfirmationJob?.cancel()
+        resumeConfirmationJob = null
+    }
+
     private fun cancelWorkoutJobs() {
+        clearResumeRequest()
         commandPipelineJob?.cancel()
         commandPipelineJob = null
         hardwareMonitorJob?.cancel()
@@ -562,6 +636,7 @@ class Orchestrator(
 
     private companion object {
         const val TAG = "Orchestrator"
+        const val RESUME_CONFIRMATION_TIMEOUT_MS = 10_000L
         const val PROBE_TIMEOUT_MS = 10_000L
         const val PREREQUISITE_TIMEOUT_MS = 10_000L
         const val REFRESH_TIMEOUT_MS = 5_000L

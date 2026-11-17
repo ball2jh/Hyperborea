@@ -12,8 +12,8 @@ package com.nettarion.hyperborea.ui.util
  * incline cluster already took.
  *
  * Every repeat is still exactly one step — the ramp changes only how often they arrive — so a
- * held button keeps its one-press-one-step meaning, and the incline path's write coalescer still
- * collapses the burst into one moving target per interval on the wire.
+ * held button keeps its one-press-one-step meaning, and the incline path publishes each selection immediately while deferring the motor write
+ * until the held selection settles.
  */
 object HoldRepeat {
 

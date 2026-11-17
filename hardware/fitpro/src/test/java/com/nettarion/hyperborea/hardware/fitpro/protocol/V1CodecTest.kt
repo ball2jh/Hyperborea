@@ -10,6 +10,15 @@ import org.junit.Test
 class V1CodecTest {
 
     @Test
+    fun `grade hundredths round rather than truncate float representation error`() {
+        for ((value, raw) in listOf(.53f to 53, -.53f to -53, 1.23f to 123)) {
+            val packet = V1Codec.encode(V1Message.Outgoing.ReadWriteData(writeFields = mapOf(V1DataField.GRADE to value))).single()
+            val encoded = ((packet[5].toInt() and 0xff) or ((packet[6].toInt() and 0xff) shl 8)).toShort().toInt()
+            assertThat(encoded).isEqualTo(raw)
+        }
+    }
+
+    @Test
     fun `encode SupportedDevices produces correct packet`() {
         val packets = V1Codec.encode(V1Message.Outgoing.SupportedDevices())
         assertThat(packets).hasSize(1)

@@ -58,6 +58,16 @@ class OverlayControlBarView(
      */
     private val holdHandler = Handler(Looper.getMainLooper())
 
+    private val programPanel = ProgramOverlayView(context, onPauseClick, onResumeClick, onStopClick)
+    private lateinit var legacyRow: LinearLayout
+
+    override fun updateProgram(state: com.nettarion.hyperborea.core.program.ProgramRunState?, imperial: Boolean) {
+        programPanel.updateProgram(state, imperial)
+        legacyRow.visibility = if (state?.active == true) View.GONE else View.VISIBLE
+        setBackgroundColor(if (state?.active == true) android.graphics.Color.TRANSPARENT else OverlayPalette.SURFACE)
+        alpha = if (state?.active == true) 1f else .92f
+    }
+
     init {
         val dp = { value: Int -> dpToPx(value) }
 
@@ -134,7 +144,14 @@ class OverlayControlBarView(
         }
         root.addView(stopButton)
 
-        addView(root, LayoutParams(LayoutParams.WRAP_CONTENT, LayoutParams.WRAP_CONTENT))
+        legacyRow = root
+        setupDragHandle(programPanel.dragHandle)
+        val column = LinearLayout(context).apply {
+            orientation = LinearLayout.VERTICAL
+            addView(programPanel, LinearLayout.LayoutParams(minOf(dp(340), (resources.displayMetrics.widthPixels * .9f).toInt()), LinearLayout.LayoutParams.WRAP_CONTENT))
+            addView(root)
+        }
+        addView(column, LayoutParams(LayoutParams.WRAP_CONTENT, LayoutParams.WRAP_CONTENT))
         applyState()
     }
 
@@ -144,6 +161,7 @@ class OverlayControlBarView(
     }
 
     override fun updateExerciseData(data: ExerciseData?) {
+        programPanel.updateData(data)
         lastData = data
         inclValue.text = data?.incline?.let { formatIncline(it) } ?: "—"
         spdValue.text = data?.speed?.let {
@@ -153,6 +171,7 @@ class OverlayControlBarView(
     }
 
     override fun updateState(state: OrchestratorState) {
+        programPanel.updateWorkout(state)
         this.state = state
         applyState()
     }

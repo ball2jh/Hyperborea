@@ -84,6 +84,8 @@ class FitProAdapter @Inject constructor(
     private val _degradedReason = MutableStateFlow<String?>(null)
     override val degradedReason: StateFlow<String?> = _degradedReason.asStateFlow()
 
+    @Volatile private var consoleControlListener: suspend (DeviceCommand) -> Unit = {}
+    override fun setConsoleControlListener(listener: suspend (DeviceCommand) -> Unit) { consoleControlListener = listener }
     private var session: FitProSession? = null
     private var initialElapsedSeconds: Long = 0L
 
@@ -141,6 +143,7 @@ class FitProAdapter @Inject constructor(
                 }
             }
 
+            newSession.setConsoleControlListener { consoleControlListener(it) }
             newSession.start()
 
             // start() never throws — it captures handshake failures into sessionState — so a failed

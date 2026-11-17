@@ -48,6 +48,9 @@ interface HardwareAdapter : Adapter {
 
     suspend fun sendCommand(command: DeviceCommand)
 
+    /** Observe a physical Start/speed/incline press before host routing can apply it. */
+    fun setConsoleControlListener(listener: suspend (DeviceCommand) -> Unit) {}
+
     fun setInitialElapsedTime(seconds: Long)
 
     /**

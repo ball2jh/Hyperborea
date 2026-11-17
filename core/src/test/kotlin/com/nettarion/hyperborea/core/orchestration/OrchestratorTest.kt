@@ -32,18 +32,275 @@ import com.nettarion.hyperborea.core.test.buildSystemSnapshot
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.test.TestScope
 import kotlinx.coroutines.test.UnconfinedTestDispatcher
+import kotlinx.coroutines.test.advanceTimeBy
+import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.advanceUntilIdle
 import kotlinx.coroutines.test.runTest
 import org.junit.Test
 
 @OptIn(ExperimentalCoroutinesApi::class)
 class OrchestratorTest {
+
+    @Test fun `hardware failure while reasserting unconfirmed Resume cannot crash or resume the workout`() = runTest {
+        val env = TestEnv(this)
+        env.hardware.deviceInfo.value = buildDeviceInfo(type = DeviceType.TREADMILL)
+        env.orchestrator.start()
+        env.hardware.exerciseData.value = ExerciseData.ZERO.copy(workoutMode = 2); runCurrent()
+        env.orchestrator.pause(); env.orchestrator.resume()
+        env.hardware.shouldThrowOnSendCommand = true
+        advanceTimeBy(10_001); runCurrent()
+        assertThat(env.orchestrator.state.value).isEqualTo(OrchestratorState.Paused)
+        env.hardware.shouldThrowOnSendCommand = false
+        env.orchestrator.stop(saveRide = false)
+    }
+
+    @Test fun `residual RESULTS is cleared while a newly armed treadmill waits for physical Start`() = runTest {
+        val env = TestEnv(this)
+        env.hardware.deviceInfo.value = buildDeviceInfo(type = DeviceType.TREADMILL)
+        env.orchestrator.start()
+        for (mode in listOf(4, 1)) {
+            env.hardware.exerciseData.value = ExerciseData.ZERO.copy(workoutMode = mode); runCurrent()
+        }
+        assertThat(env.orchestrator.state.value).isInstanceOf(OrchestratorState.AwaitingConsoleStart::class.java)
+        assertThat(env.hardware.receivedCommands).doesNotContain(DeviceCommand.ResumeWorkout)
+        env.orchestrator.stop(saveRide = false)
+    }
+
+    @Test fun `external treadmill Resume uses the same explicit confirmation gate`() = runTest {
+        val env = TestEnv(this)
+        env.hardware.deviceInfo.value = buildDeviceInfo(type = DeviceType.TREADMILL)
+        env.orchestrator.start()
+        env.hardware.exerciseData.value = ExerciseData.ZERO.copy(workoutMode = 2); runCurrent()
+        env.broadcast1.emitCommand(DeviceCommand.PauseWorkout); runCurrent()
+        assertThat(env.orchestrator.state.value).isEqualTo(OrchestratorState.Paused)
+        env.broadcast1.emitCommand(DeviceCommand.ResumeWorkout); runCurrent()
+        assertThat(env.orchestrator.state.value).isEqualTo(OrchestratorState.Paused)
+        env.hardware.exerciseData.value = ExerciseData.ZERO.copy(workoutMode = 2, elapsedTime = 1); runCurrent()
+        assertThat(env.orchestrator.state.value).isEqualTo(OrchestratorState.Running())
+        env.orchestrator.stop(saveRide = false)
+    }
+
+    @Test fun `Stop revokes pending treadmill start before recording save can block`() = runTest {
+        val env = TestEnv(this)
+        (env.profileRepository.activeProfile as MutableStateFlow<Profile?>).value = Profile(id = 1, name = "Runner")
+        env.hardware.deviceInfo.value = buildDeviceInfo(type = DeviceType.TREADMILL)
+        env.orchestrator.start()
+        for (second in listOf(1L, 120L)) {
+            env.hardware.exerciseData.value = ExerciseData.ZERO.copy(workoutMode = 2, elapsedTime = second, speed = 5f, power = 100)
+            runCurrent()
+        }
+        env.orchestrator.pause(); env.orchestrator.resume()
+        val saving = CompletableDeferred<Unit>(); val allowSave = CompletableDeferred<Unit>()
+        env.profileRepository.beforeSave = { saving.complete(Unit); allowSave.await() }
+        val stopJob = launch { env.orchestrator.stop() }
+        runCurrent(); assertThat(saving.isCompleted).isTrue()
+        assertThat(env.orchestrator.state.value).isEqualTo(OrchestratorState.Stopping)
+        assertThat(env.hardware.receivedCommands.last()).isEqualTo(DeviceCommand.PauseWorkout)
+        allowSave.complete(Unit); stopJob.join()
+        env.hardware.exerciseData.value = ExerciseData.ZERO.copy(workoutMode = 2, elapsedTime = 121); runCurrent()
+        assertThat(env.orchestrator.state.value).isEqualTo(OrchestratorState.Idle)
+    }
+
+    @Test fun `a new Pause cancels an unconfirmed treadmill Resume`() = runTest {
+        val env = TestEnv(this)
+        env.hardware.deviceInfo.value = buildDeviceInfo(type = DeviceType.TREADMILL)
+        env.orchestrator.start()
+        env.hardware.exerciseData.value = ExerciseData.ZERO.copy(workoutMode = 2); runCurrent()
+        env.orchestrator.pause(); env.orchestrator.resume(); env.orchestrator.pause()
+        env.hardware.exerciseData.value = ExerciseData.ZERO.copy(workoutMode = 2, elapsedTime = 5)
+        advanceTimeBy(20_000); runCurrent()
+        assertThat(env.orchestrator.state.value).isEqualTo(OrchestratorState.Paused)
+        assertThat(env.hardware.receivedCommands.filterIsInstance<DeviceCommand.PauseWorkout>()).hasSize(2)
+        env.orchestrator.stop(saveRide = false)
+    }
+
+    @Test fun `explicit treadmill resume waits through trailing expiry reports for fresh confirmation`() = runTest {
+        val env = TestEnv(this)
+        env.hardware.deviceInfo.value = buildDeviceInfo(type = DeviceType.TREADMILL)
+        env.orchestrator.start()
+        env.hardware.exerciseData.value = ExerciseData.ZERO.copy(workoutMode = 2); runCurrent()
+        env.orchestrator.pause()
+        env.hardware.exerciseData.value = ExerciseData.ZERO.copy(workoutMode = 4); runCurrent()
+        env.orchestrator.resume()
+        for (mode in listOf(4, 1, 1)) {
+            env.hardware.exerciseData.value = ExerciseData.ZERO.copy(workoutMode = mode, elapsedTime = 20 + mode.toLong())
+            runCurrent()
+            assertThat(env.orchestrator.state.value).isEqualTo(OrchestratorState.Paused)
+            assertThat(env.orchestrator.sendProgramCommand(DeviceCommand.SetTargetSpeed(8f))).isFalse()
+        }
+        env.hardware.exerciseData.value = ExerciseData.ZERO.copy(workoutMode = 2, elapsedTime = 25); runCurrent()
+        assertThat(env.orchestrator.state.value).isEqualTo(OrchestratorState.Running())
+        assertThat(env.orchestrator.sendProgramCommand(DeviceCommand.SetTargetSpeed(8f))).isTrue()
+        env.orchestrator.stop(saveRide = false)
+    }
+
+    @Test fun `unconfirmed treadmill resume reasserts pause and cannot be confirmed by later unsolicited telemetry`() = runTest {
+        val env = TestEnv(this)
+        env.hardware.deviceInfo.value = buildDeviceInfo(type = DeviceType.TREADMILL)
+        env.orchestrator.start()
+        env.hardware.exerciseData.value = ExerciseData.ZERO.copy(workoutMode = 2); runCurrent()
+        env.orchestrator.pause(); env.orchestrator.resume()
+        advanceTimeBy(10_001); runCurrent()
+        assertThat(env.hardware.receivedCommands.filterIsInstance<DeviceCommand.PauseWorkout>()).hasSize(2)
+        env.hardware.exerciseData.value = ExerciseData.ZERO.copy(workoutMode = 2, elapsedTime = 2); runCurrent()
+        assertThat(env.orchestrator.state.value).isEqualTo(OrchestratorState.Paused)
+        env.orchestrator.stop(saveRide = false)
+    }
+
+    @Test fun `Stop cancels pending treadmill resume and later console frames cannot revive the workout`() = runTest {
+        val env = TestEnv(this)
+        env.hardware.deviceInfo.value = buildDeviceInfo(type = DeviceType.TREADMILL)
+        env.orchestrator.start()
+        env.hardware.exerciseData.value = ExerciseData.ZERO.copy(workoutMode = 2); runCurrent()
+        env.orchestrator.pause(); env.orchestrator.resume(); env.orchestrator.stop(saveRide = false)
+        env.hardware.exerciseData.value = ExerciseData.ZERO.copy(workoutMode = 2, elapsedTime = 2)
+        advanceTimeBy(20_000); runCurrent()
+        assertThat(env.orchestrator.state.value).isEqualTo(OrchestratorState.Idle)
+        assertThat(env.hardware.receivedCommands.filterIsInstance<DeviceCommand.ResumeWorkout>()).hasSize(1)
+    }
+
+    @Test fun `paused treadmill disconnect ends session without automatic reconnect or Resume`() = runTest {
+        val env = TestEnv(this)
+        env.hardware.deviceInfo.value = buildDeviceInfo(type = DeviceType.TREADMILL)
+        env.orchestrator.start()
+        env.hardware.exerciseData.value = ExerciseData.ZERO.copy(workoutMode = 2); advanceUntilIdle()
+        env.orchestrator.pause()
+        env.hardware.mutableState.value = AdapterState.Error("USB disconnected")
+        advanceUntilIdle()
+        assertThat(env.orchestrator.state.value).isEqualTo(OrchestratorState.Idle)
+        assertThat(env.hardware.connectCallCount).isEqualTo(1)
+        assertThat(env.hardware.receivedCommands).doesNotContain(DeviceCommand.ResumeWorkout)
+    }
+
+    @Test fun `treadmill pause survives controller timeout until explicit Stop without restarting the belt`() = runTest {
+        val env = TestEnv(this)
+        (env.profileRepository.activeProfile as MutableStateFlow<Profile?>).value = Profile(id = 1, name = "Runner")
+        env.hardware.deviceInfo.value = buildDeviceInfo(type = DeviceType.TREADMILL)
+        env.orchestrator.start()
+        env.hardware.exerciseData.value = ExerciseData.ZERO.copy(workoutMode = 2, elapsedTime = 1, speed = 5f, power = 100)
+        advanceUntilIdle()
+        env.hardware.exerciseData.value = ExerciseData.ZERO.copy(workoutMode = 2, elapsedTime = 120, speed = 5f, power = 100)
+        advanceUntilIdle()
+        env.orchestrator.pause()
+        val baseline = env.hardware.receivedCommands.size
+        for (mode in listOf(4, 1, 4, 1)) {
+            env.hardware.exerciseData.value = ExerciseData.ZERO.copy(workoutMode = mode, elapsedTime = 120)
+            advanceUntilIdle()
+        }
+        advanceTimeBy(2 * 60 * 60 * 1000L); runCurrent()
+        assertThat(env.orchestrator.state.value).isEqualTo(OrchestratorState.Paused)
+        assertThat(env.hardware.receivedCommands.drop(baseline)).doesNotContain(DeviceCommand.ResumeWorkout)
+        assertThat(env.hardware.disconnectCalled).isFalse()
+        assertThat(env.rideRecorder.lastSavedRideId.value).isNull()
+        env.orchestrator.stop()
+        assertThat(env.orchestrator.state.value).isEqualTo(OrchestratorState.Idle)
+        assertThat(env.rideRecorder.lastSavedRideId.value).isEqualTo(0)
+    }
+
+    @Test fun `reinserting treadmill safety key never automatically resumes belt`() = runTest {
+        val env = TestEnv(this)
+        env.hardware.deviceInfo.value = buildDeviceInfo(type = DeviceType.TREADMILL)
+        env.orchestrator.start()
+        for (mode in listOf(2, 8, 1)) {
+            env.hardware.exerciseData.value = ExerciseData.ZERO.copy(workoutMode = mode)
+            advanceUntilIdle()
+        }
+        assertThat(env.orchestrator.state.value).isEqualTo(OrchestratorState.Paused)
+        assertThat(env.hardware.receivedCommands).doesNotContain(DeviceCommand.ResumeWorkout)
+    }
+
+    @Test fun `treadmill console pause blocks program targets and RUNNING telemetry cannot authorize resume`() = runTest {
+        val env = TestEnv(this)
+        env.hardware.deviceInfo.value = buildDeviceInfo(type = DeviceType.TREADMILL)
+        env.orchestrator.start()
+        env.hardware.exerciseData.value = ExerciseData.ZERO.copy(workoutMode = 2); advanceUntilIdle()
+        env.hardware.exerciseData.value = ExerciseData.ZERO.copy(workoutMode = 3); advanceUntilIdle()
+        assertThat(env.orchestrator.state.value).isEqualTo(OrchestratorState.Paused)
+        assertThat(env.orchestrator.sendProgramCommand(DeviceCommand.SetTargetSpeed(8f))).isFalse()
+        // Even stale/unsolicited RUNNING telemetry cannot substitute for a human Resume.
+        env.hardware.exerciseData.value = ExerciseData.ZERO.copy(workoutMode = 2); advanceUntilIdle()
+        assertThat(env.orchestrator.state.value).isEqualTo(OrchestratorState.Paused)
+        assertThat(env.hardware.receivedCommands).doesNotContain(DeviceCommand.ResumeWorkout)
+        env.orchestrator.resume()
+        assertThat(env.orchestrator.state.value).isEqualTo(OrchestratorState.Paused)
+        env.hardware.exerciseData.value = ExerciseData.ZERO.copy(workoutMode = 2, elapsedTime = 1)
+        runCurrent()
+        assertThat(env.orchestrator.state.value).isEqualTo(OrchestratorState.Running())
+    }
+
+    @Test fun `treadmill program targets cannot be sent to other equipment types`() = runTest {
+        for (type in listOf(DeviceType.BIKE, DeviceType.ELLIPTICAL, DeviceType.ROWER)) {
+            val env = TestEnv(this)
+            env.hardware.deviceInfo.value = buildDeviceInfo(type = type)
+            env.orchestrator.start()
+            assertThat(env.orchestrator.sendProgramCommand(DeviceCommand.SetTargetSpeed(8f))).isFalse()
+            assertThat(env.orchestrator.sendProgramCommand(DeviceCommand.SetIncline(3f, snapToStep = false))).isFalse()
+            assertThat(env.hardware.receivedCommands).doesNotContain(DeviceCommand.SetTargetSpeed(8f))
+            env.orchestrator.stop(saveRide = false)
+        }
+    }
+
+    @Test
+    fun `program commands require a running non degraded workout and stop stays authoritative`() = runTest {
+        val env = TestEnv(this)
+        env.hardware.deviceInfo.value = buildDeviceInfo(type = DeviceType.TREADMILL)
+        val command = DeviceCommand.SetTargetSpeed(8f)
+        assertThat(env.orchestrator.sendProgramCommand(command)).isFalse()
+        env.orchestrator.start()
+        env.hardware.exerciseData.value = ExerciseData.ZERO.copy(workoutMode = 2)
+        advanceUntilIdle()
+        assertThat(env.orchestrator.sendProgramCommand(command)).isTrue()
+        env.orchestrator.pause()
+        assertThat(env.orchestrator.sendProgramCommand(command)).isFalse()
+        env.orchestrator.resume()
+        env.hardware.exerciseData.value = ExerciseData.ZERO.copy(workoutMode = 2, elapsedTime = 1)
+        runCurrent()
+        assertThat(env.orchestrator.sendProgramCommand(command)).isTrue()
+        env.hardware.deviceInfo.value = buildDeviceInfo(type = DeviceType.BIKE)
+        assertThat(env.orchestrator.sendProgramCommand(command)).isFalse()
+        env.orchestrator.stop()
+        assertThat(env.orchestrator.sendProgramCommand(command)).isFalse()
+    }
+
+    @Test
+    fun `program commands cannot bypass treadmill physical start`() = runTest {
+        val env = TestEnv(this)
+        env.hardware.deviceInfo.value = buildDeviceInfo(type = DeviceType.TREADMILL)
+        env.orchestrator.start()
+        assertThat(env.orchestrator.sendProgramCommand(DeviceCommand.SetTargetSpeed(8f))).isFalse()
+        assertThat(env.hardware.receivedCommands).doesNotContain(DeviceCommand.SetTargetSpeed(8f))
+    }
+
+    @Test
+    fun `program commands are blocked when the hardware reports degradation`() = runTest {
+        val env = TestEnv(this)
+        env.hardware.degradedReason.value = "Connection interrupted"
+        env.orchestrator.start()
+        assertThat(env.orchestrator.sendProgramCommand(DeviceCommand.SetTargetSpeed(8f))).isFalse()
+    }
+
+    @Test
+    fun `external control notifies automation before forwarding a target`() = runTest {
+        val observed = mutableListOf<DeviceCommand>()
+        lateinit var env: TestEnv
+        env = TestEnv(this, beforeExternalCommand = {
+            assertThat(env.hardware.receivedCommands).doesNotContain(it)
+            observed += it
+        })
+        env.orchestrator.start()
+        val command = DeviceCommand.SetTargetSpeed(7f)
+        env.broadcast1.emitCommand(command)
+        assertThat(observed).containsExactly(command)
+        assertThat(env.hardware.receivedCommands).contains(command)
+    }
 
     // --- Happy path ---
 
@@ -789,6 +1046,7 @@ class OrchestratorTest {
         hardwareCanOperate: Boolean = true,
         enabledBroadcasts: Set<BroadcastId> = BroadcastId.entries.toSet(),
         sensorAdapter: SensorAdapter? = FakeSensorAdapter(),
+        beforeExternalCommand: suspend (DeviceCommand) -> Unit = {},
     ) {
         val monitor = FakeSystemMonitor()
         val controller = FakeSystemController()
@@ -827,6 +1085,7 @@ class OrchestratorTest {
                 logger = logger,
                 scope = scope,
                 sensorAdapter = sensorAdapter,
+                beforeExternalCommand = beforeExternalCommand,
             )
         }
     }
@@ -1025,7 +1284,8 @@ class OrchestratorTest {
         override suspend fun setActiveProfile(id: Long) {}
         override fun getRideSummary(id: Long): Flow<RideSummary?> = MutableStateFlow(null)
         override fun getRideSummaries(profileId: Long): Flow<List<RideSummary>> = MutableStateFlow(emptyList())
-        override suspend fun saveRideSummary(summary: RideSummary, samples: List<WorkoutSample>): Long = 0
+        var beforeSave: suspend () -> Unit = {}
+        override suspend fun saveRideSummary(summary: RideSummary, samples: List<WorkoutSample>): Long { beforeSave(); return 0 }
         override suspend fun deleteRideSummary(id: Long) {}
         override fun getWorkoutSamples(rideId: Long): Flow<List<WorkoutSample>> = MutableStateFlow(emptyList())
     }

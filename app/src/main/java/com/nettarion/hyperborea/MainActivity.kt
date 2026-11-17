@@ -74,6 +74,13 @@ class MainActivity : ComponentActivity() {
         }
     }
 
+    override fun onStart() {
+        super.onStart()
+        // Idempotent idle service start; also retries a start deferred by Application's
+        // background-start restriction. It never activates a workout on its own.
+        (application as HyperboreaApp).scheduleIdleServiceStart()
+    }
+
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
         logUsbAttachIntent(intent)
@@ -195,6 +202,11 @@ private fun MainApp(
             onViewRide = { rideId -> navigateTo(AppScreen.RideDetail(rideId)) },
             onOpenSettings = { navigateTo(AppScreen.Settings) },
             pendingStopDialog = pendingStopDialog,
+            onOpenPrograms = { navigateTo(AppScreen.Programs) },
+        )
+        is AppScreen.Programs -> com.nettarion.hyperborea.ui.program.ProgramsScreen(
+            onBack = { navigateBack() },
+            onStarted = { navigateReplace(AppScreen.Dashboard) },
         )
         is AppScreen.ProfileEdit -> ProfileEditScreen(
             profileId = screen.profileId,
