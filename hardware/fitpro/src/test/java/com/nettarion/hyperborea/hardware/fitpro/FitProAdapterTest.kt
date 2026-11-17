@@ -676,16 +676,52 @@ class FitProAdapterTest {
     }
 
     @Test
-    fun `a saved config cannot relabel a hardware-detected treadmill as a bike`() = runTest {
+    fun `a saved Bike config on a hardware-detected treadmill keeps treadmill type and limits`() = runTest {
         fakeDeviceConfigRepo.configs[-3] = DeviceInfo(
             name = "My Machine",
             type = DeviceType.BIKE, // saved from a wrong default — the console says otherwise
-            supportedMetrics = setOf(Metric.SPEED, Metric.INCLINE),
-            maxResistance = 0, minResistance = 0,
-            minIncline = 0f, maxIncline = 10f,
-            maxPower = 1200, minPower = 0, powerStep = 1,
+            supportedMetrics = setOf(Metric.POWER, Metric.CADENCE),
+            maxResistance = 24, minResistance = 1,
+            minIncline = -10f, maxIncline = 20f,
+            maxPower = 2000, minPower = 0, powerStep = 1,
             resistanceStep = 1.0f, inclineStep = 1.0f,
-            speedStep = 0.5f, maxSpeed = 15f,
+            speedStep = 0.5f, maxSpeed = 60f, // bike values: must not become the belt's clamps
+        )
+        val adapter = createAdapter(this, productId = 3)
+        buildV2SupportedFeatures(
+            V2FeatureId.DEVICE_TYPE, V2FeatureId.TARGET_KPH, V2FeatureId.MAX_KPH, V2FeatureId.WORKOUT_STATE,
+        ).forEach { transport.emitIncoming(it) }
+        transport.emitIncoming(buildV2Event(V2FeatureId.DEVICE_TYPE, 4f)) // treadmill
+        transport.emitIncoming(buildV2Event(V2FeatureId.MAX_KPH, 19f))
+
+        adapter.connect()
+        advanceUntilIdle()
+
+        val info = adapter.deviceInfo.value!!
+        val treadmill = DeviceDatabase.defaultsForType(DeviceType.TREADMILL)
+        // The orchestrator's physical-Start gate keys off this type; it must follow the hardware.
+        assertThat(info.type).isEqualTo(DeviceType.TREADMILL)
+        // Type-dependent limits come from the MCU / treadmill defaults, not the bike config.
+        assertThat(info.maxSpeed).isEqualTo(19f)
+        assertThat(info.speedStep).isEqualTo(treadmill.speedStep)
+        assertThat(info.minIncline).isEqualTo(treadmill.minIncline)
+        assertThat(info.maxIncline).isEqualTo(treadmill.maxIncline)
+        assertThat(info.maxResistance).isEqualTo(treadmill.maxResistance)
+        assertThat(info.supportedMetrics).isEqualTo(treadmill.supportedMetrics)
+        // What isn't tied to the equipment type is still the user's.
+        assertThat(info.name).isEqualTo("My Machine")
+        assertThat(info.inclineStep).isEqualTo(1.0f)
+        assertThat(info.configKey).isEqualTo(-3)
+    }
+
+    @Test
+    fun `without an MCU-reported limit the mismatched config falls back to treadmill defaults`() = runTest {
+        fakeDeviceConfigRepo.configs[-3] = DeviceInfo(
+            name = "My Machine", type = DeviceType.BIKE,
+            supportedMetrics = setOf(Metric.POWER),
+            maxResistance = 24, minResistance = 1, minIncline = -10f, maxIncline = 20f,
+            maxPower = 2000, minPower = 0, powerStep = 1,
+            resistanceStep = 1.0f, inclineStep = 0.5f, speedStep = 0.5f, maxSpeed = 60f,
         )
         val adapter = createAdapter(this, productId = 3)
         buildV2SupportedFeatures(
@@ -697,12 +733,9 @@ class FitProAdapterTest {
         advanceUntilIdle()
 
         val info = adapter.deviceInfo.value!!
-        // The orchestrator's physical-Start gate keys off this type; it must follow the hardware.
         assertThat(info.type).isEqualTo(DeviceType.TREADMILL)
-        // Everything else in the user's config still wins.
-        assertThat(info.name).isEqualTo("My Machine")
-        assertThat(info.inclineStep).isEqualTo(1.0f)
-        assertThat(info.maxSpeed).isEqualTo(15f)
+        assertThat(info.maxSpeed).isEqualTo(DeviceDatabase.defaultsForType(DeviceType.TREADMILL).maxSpeed)
+        assertThat(info.maxSpeed).isLessThan(60f)
     }
 
     @Test

@@ -352,34 +352,44 @@ class FitProAdapter @Inject constructor(
         // default bike and silently drop every save.
         val modelNumber = identity.model?.toIntOrNull()
         val configKey = modelNumber ?: lastProductId?.let { -it }
-        if (configKey != null) {
-            val custom = deviceConfigRepository.getConfig(configKey)
-            // The user's saved config wins outright — including over the MCU-reported limits (we
-            // skip the capability overlay below for it) and, with one exception, the detected type.
-            // The exception: hardware that identified as a belt machine stays a treadmill. The
-            // orchestrator keys its start gate (wait for the physical Start key) and pause/resume
-            // rules off this type while the session keys its own off the hardware; a config that
-            // relabels a treadmill makes the two disagree, and the workout stops the moment it
-            // starts.
-            if (custom != null) {
-                val type = if (hardwareIsBeltMachine && !custom.type.isBeltBased) {
-                    logger.w(TAG, "Saved config says ${custom.type} but the hardware is a belt machine — keeping ${DeviceType.TREADMILL}")
-                    DeviceType.TREADMILL
-                } else {
-                    custom.type
-                }
-                return custom.copy(configKey = configKey, type = type)
-            }
+        val custom = configKey?.let { deviceConfigRepository.getConfig(it) }
+        // The user's saved config wins outright — including over the MCU-reported limits (the
+        // capability overlay is skipped for it) and, with one exception below, the detected type.
+        if (custom != null && !(hardwareIsBeltMachine && !custom.type.isBeltBased)) {
+            return custom.copy(configKey = configKey)
         }
+
         val partNum = identity.partNumber?.toIntOrNull()
         val base = if (modelNumber != null || partNum != null)
             DeviceDatabase.fromHandshake(modelNumber ?: 0, partNum ?: 0)
         else DeviceDatabase.fallback()
         val typed = lastDetectedType?.let { applyTypeDefaults(base, it) } ?: base
-        // Overlay the live session's MCU-reported limits (null during identify(), where there's no
-        // subscription). Re-applied on every identity update so lifetime-stat events don't wipe it.
+        // Overlay the source session's MCU-reported limits (null when there is no session).
+        // Re-applied on every identity update so lifetime-stat events don't wipe it.
         val withCaps = source?.deviceCapabilities?.let { overlayCapabilities(typed, it) } ?: typed
-        return withCaps.copy(configKey = configKey)
+        val resolved = withCaps.copy(configKey = configKey)
+        if (custom == null) return resolved
+
+        // The exception: hardware that identified as a belt machine stays a treadmill. The
+        // orchestrator keys its start gate (wait for the physical Start key) and pause/resume
+        // rules off this type while the session keys its own off the hardware; a config that
+        // relabels a treadmill makes the two disagree, and the workout stops the moment it
+        // starts. A config written for another equipment type also describes that type's
+        // machine — its speed/incline/resistance/power bounds would become this belt's command
+        // clamps (a bike's 60 km/h max speed, say) — so those come from the catalog/MCU/treadmill
+        // defaults instead. Only what isn't tied to the equipment type is kept from the config.
+        logger.w(
+            TAG,
+            "Saved device config says ${custom.type} but the hardware is a belt machine — ignoring its " +
+                "type and type-dependent limits; keeping its name and incline/resistance/power steps",
+        )
+        return resolved.copy(
+            type = DeviceType.TREADMILL,
+            name = custom.name,
+            inclineStep = custom.inclineStep,
+            resistanceStep = custom.resistanceStep,
+            powerStep = custom.powerStep,
+        )
     }
 
     override suspend fun refreshDeviceInfo() {
