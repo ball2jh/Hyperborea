@@ -745,6 +745,68 @@ class V1SessionTest {
         assertThat(transport.isOpen).isFalse()
     }
 
+    // --- Lifecycle: nothing outlives a session that never reached steady state ---
+
+    private fun TestScope.liveSessionJobs() =
+        backgroundScope.coroutineContext[kotlinx.coroutines.Job]!!.children.filter { it.isActive }.toList()
+
+    @Test
+    fun `failed start leaves no session coroutine scope behind`() = runTest {
+        val session = createSession(this)
+        transport.closeIncoming()
+
+        session.start()
+        advanceUntilIdle()
+
+        assertThat(session.sessionState.value).isInstanceOf(SessionState.Error::class.java)
+        assertThat(liveSessionJobs()).isEmpty()
+    }
+
+    @Test
+    fun `identify releases the transport and its session scope`() = runTest {
+        val session = createSession(this)
+        val responder = backgroundScope.launch { respondToHandshake() }
+
+        val identity = session.identify()
+        advanceUntilIdle()
+        responder.cancel()
+        advanceUntilIdle()
+
+        assertThat(identity).isNotNull()
+        assertThat(transport.closeCount).isAtLeast(1)
+        assertThat(liveSessionJobs()).isEmpty()
+    }
+
+    @Test
+    fun `cancelled start releases the transport instead of leaving the interface claimed`() = runTest {
+        val session = createSession(this)
+        // No handshake reply: start() is parked waiting on the controller when it is cancelled.
+        val starting = launch { session.start() }
+        advanceTimeBy(100)
+        assertThat(transport.isOpen).isTrue()
+
+        starting.cancel()
+        advanceUntilIdle()
+
+        assertThat(transport.closeCount).isAtLeast(1)
+        assertThat(transport.isOpen).isFalse()
+        assertThat(liveSessionJobs()).isEmpty()
+    }
+
+    @Test
+    fun `stop cancelled mid-teardown still releases the transport and reports Disconnected`() = runTest {
+        val session = startStreamingTreadmillSession()
+        // The belt-halt confirmation polls for replies that never come; cancel while it waits.
+        val stopping = launch { session.stop() }
+        advanceTimeBy(700)
+        stopping.cancel()
+        advanceUntilIdle()
+
+        assertThat(transport.closeCount).isAtLeast(1)
+        assertThat(session.sessionState.value).isEqualTo(SessionState.Disconnected)
+        assertThat(session.exerciseData.value).isNull()
+    }
+
     // --- Security skipped for old firmware ---
 
     @Test

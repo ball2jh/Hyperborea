@@ -1174,6 +1174,21 @@ class V2SessionTest {
         assertThat(session.sessionState.value).isEqualTo(SessionState.Disconnected)
     }
 
+    @Test
+    fun `cancelled start releases the transport and the receive loop`() = runTest {
+        val session = createSession(this)
+        // The console never answers the features query; cancel while start() waits on it.
+        val starting = launch { session.start() }
+        advanceTimeBy(100)
+        assertThat(transport.isOpen).isTrue()
+
+        starting.cancel()
+        advanceUntilIdle()
+
+        assertThat(transport.closeCount).isAtLeast(1)
+        assertThat(backgroundScope.coroutineContext[kotlinx.coroutines.Job]!!.children.filter { it.isActive }.toList()).isEmpty()
+    }
+
     // --- Error during start ---
 
     @Test

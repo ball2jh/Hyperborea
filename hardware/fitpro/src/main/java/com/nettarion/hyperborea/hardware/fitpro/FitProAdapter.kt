@@ -86,7 +86,7 @@ class FitProAdapter @Inject constructor(
 
     @Volatile private var consoleControlListener: suspend (DeviceCommand) -> Unit = {}
     override fun setConsoleControlListener(listener: suspend (DeviceCommand) -> Unit) { consoleControlListener = listener }
-    private var session: FitProSession? = null
+    @Volatile private var session: FitProSession? = null
     private var initialElapsedSeconds: Long = 0L
 
     /**
@@ -237,6 +237,10 @@ class FitProAdapter @Inject constructor(
                 }
             }
         } catch (e: CancellationException) {
+            // Cancelled mid-bring-up (the session released its own transport). Without a live
+            // session there is nothing to disconnect — don't strand the adapter in Activating,
+            // where every later connect() would be a silent no-op.
+            if (session == null) _state.value = AdapterState.Inactive
             throw e
         } catch (e: Exception) {
             logger.e(TAG, "Failed to connect", e)

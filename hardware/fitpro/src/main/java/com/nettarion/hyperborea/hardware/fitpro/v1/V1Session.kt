@@ -132,50 +132,34 @@ internal class V1Session(
             startPollLoop()
             logger.i(TAG, "V1 session started")
         } catch (e: CancellationException) {
+            // A cancelled bring-up (the user stopped while connecting) must not leave the USB
+            // interface claimed or the session scope alive — the adapter never sees this session.
+            abandon()
             throw e
         } catch (e: Exception) {
             logger.e(TAG, "Failed to start V1 session", e)
-            try { transport.close() } catch (_: Exception) {}
+            abandon()
             _sessionState.value = SessionState.Error(e.message ?: "V1 session failed", e)
         }
     }
 
-    override suspend fun stop() {
-        // First: no coalesced grade flush may enqueue after this point — gracefulEndForDisconnect
-        // writes GRADE = 0 on belt machines and nothing may land after it.
-        gradeCoalescer.close()
-        // Stop the poll loop and wait (briefly) for it to actually exit before we touch the transport
-        // — gracefulEndForDisconnect does its own request/response round-trips and must not race the
-        // poll's reads. Bounded so a wedged MCU read can't hang teardown.
+    /**
+     * Stops the poll loop and waits (briefly) for it to actually exit before the teardown touches
+     * the transport — gracefulEndForDisconnect does its own request/response round-trips and must
+     * not race the poll's reads. Bounded so a wedged MCU read can't hang teardown.
+     */
+    override suspend fun stopLoops() {
         pollJob?.let { job ->
             job.cancel()
             withTimeoutOrNull(POLL_JOIN_TIMEOUT_MS) { job.join() }
         }
         pollJob = null
+    }
 
-        try {
-            if (transport.isOpen) {
-                gracefulEndForDisconnect()
-                writeMessage(V1Message.Outgoing.Disconnect())
-                delay(COMMAND_DELAY_MS)
-            }
-        } catch (e: CancellationException) {
-            throw e
-        } catch (e: Exception) {
-            logger.w(TAG, "Error during V1 session stop: ${e.message}")
-        } finally {
-            // Always release the USB connection and detach receiver (idempotent), even after a
-            // detach (isOpen=false) or a failed teardown write — matching V2Session.stop().
-            try { transport.close() } catch (e: Exception) { logger.w(TAG, "Transport close failed: ${e.message}") }
-        }
-
-        accumulator.reset()
-        _exerciseData.value = null
-        _deviceIdentity.value = null
-        _degradedReason.value = null
-        _sessionState.value = SessionState.Disconnected
-        cancelSessionScope()
-        logger.i(TAG, "V1 session stopped")
+    override suspend fun writeTeardown() {
+        gracefulEndForDisconnect()
+        writeMessage(V1Message.Outgoing.Disconnect())
+        delay(COMMAND_DELAY_MS)
     }
 
     /**
@@ -257,7 +241,7 @@ internal class V1Session(
             logger.e(TAG, "Identify failed", e)
             return null
         } finally {
-            try { transport.close() } catch (_: Exception) {}
+            abandon() // transient instance — nothing may outlive identify()
         }
     }
 
@@ -271,7 +255,7 @@ internal class V1Session(
             // Connect → handshake → calibrate commands at 4s intervals → disconnect.
             runCalibration()
         } finally {
-            try { transport.close() } catch (_: Exception) {}
+            abandon() // transient instance — nothing may outlive calibrate()
         }
     }
 

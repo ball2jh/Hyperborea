@@ -9,13 +9,16 @@ import com.nettarion.hyperborea.core.model.ExerciseData
 import com.nettarion.hyperborea.core.model.isBeltBased
 import com.nettarion.hyperborea.hardware.fitpro.transport.HidTransport
 import kotlin.math.roundToInt
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.withContext
 
 /**
  * The protocol-neutral scaffold shared by the V1 and V2 sessions: the published state flows, the
@@ -274,10 +277,66 @@ internal abstract class BaseFitProSession(
         _exerciseData.value = accumulator.snapshot()
     }
 
-    /** Call as the last step of [stop]: no session coroutine survives past teardown. */
-    protected fun cancelSessionScope() {
+    /**
+     * The one teardown sequence for both protocols. Order matters and is the same on V1 and V2:
+     *
+     * 1. Close the grade coalescer, so no trailing flush can land after the teardown writes.
+     * 2. [stopLoops] — nothing may race the protocol's own teardown round-trips.
+     * 3. [writeTeardown] (only on a still-open link): halt the belt, return the console to idle.
+     * 4. Release — always, even when a teardown write failed, the link was already detached
+     *    (`isOpen == false`), or the caller was cancelled mid-teardown: close the transport, clear
+     *    the published flows and cancel [sessionScope].
+     */
+    final override suspend fun stop() {
+        try {
+            gradeCoalescer.close()
+            stopLoops()
+            try {
+                if (transport.isOpen) writeTeardown()
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                logger.w(tag, "Error during session stop: ${e.message}")
+            }
+        } finally {
+            withContext(NonCancellable) {
+                closeTransport()
+                // No per-field state resets: sessions are single-use (the adapter builds a fresh
+                // instance per connect), so only the externally-observed flows need clearing.
+                accumulator.reset()
+                _exerciseData.value = null
+                _deviceIdentity.value = null
+                _degradedReason.value = null
+                _sessionState.value = SessionState.Disconnected
+                sessionScope.cancel()
+            }
+        }
+        logger.i(tag, "Session stopped")
+    }
+
+    /**
+     * Releases everything a session that never reached (or is not meant to reach) steady state
+     * holds: its loops, the USB transport and [sessionScope]. Used by the transient
+     * identify/calibrate paths and by a failed or cancelled [start] — the published flows are
+     * left alone so the caller can still read what the handshake learned.
+     */
+    protected suspend fun abandon() = withContext(NonCancellable) {
+        stopLoops()
+        closeTransport()
         sessionScope.cancel()
     }
+
+    private suspend fun closeTransport() {
+        // Idempotent in the transport; must run even after a detach (isOpen == false) or the
+        // USB connection and its detach receiver leak.
+        try { transport.close() } catch (e: Exception) { logger.w(tag, "Transport close failed: ${e.message}") }
+    }
+
+    /** Cancels the protocol's receive/poll/start jobs. Must be safe to call when none are running. */
+    protected abstract suspend fun stopLoops()
+
+    /** Protocol teardown writes on an open link (belt halt, console back to idle, disconnect). */
+    protected abstract suspend fun writeTeardown()
 
     companion object {
         /** Degraded reason shared by both protocols' bring-up when the console never confirms RUNNING. */

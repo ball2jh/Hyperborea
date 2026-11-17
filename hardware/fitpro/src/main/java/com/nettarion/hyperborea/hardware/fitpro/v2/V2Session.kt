@@ -130,54 +130,31 @@ internal class V2Session(
             _sessionState.value = SessionState.Streaming
             logger.i(TAG, "V2 session started")
         } catch (e: CancellationException) {
+            // A cancelled bring-up (the user stopped while connecting) must not leave the USB
+            // interface claimed or the receive loop alive — the adapter never sees this session.
+            abandon()
             throw e
         } catch (e: Exception) {
             logger.e(TAG, "Failed to start V2 session", e)
-            receiveJob?.cancel()
-            receiveJob = null
-            try { transport.close() } catch (_: Exception) {}
+            abandon()
             _sessionState.value = SessionState.Error(e.message ?: "V2 session failed", e)
         }
     }
 
-    override suspend fun stop() {
-        // First: no coalesced grade flush may land after the teardown writes below (which include
-        // TARGET_GRADE = 0). close() also waits out any in-flight coalesced write.
-        gradeCoalescer.close()
+    override suspend fun stopLoops() {
         receiveJob?.cancel()
         receiveJob = null
         startRequestJob?.cancel()
         startRequestJob = null
+    }
 
-        try {
-            if (transport.isOpen) {
-                haltForTeardown()
-                // Return the console to idle before disconnecting
-                transport.write(V2Codec.encode(
-                    V2Message.Outgoing.WriteFeature(V2FeatureId.WORKOUT_STATE, V2WorkoutMode.NONE.raw),
-                ))
-                transport.write(V2Codec.encode(V2Message.Outgoing.Unsubscribe(V2FeatureId.subscribable)))
-            }
-        } catch (e: CancellationException) {
-            throw e
-        } catch (e: Exception) {
-            logger.w(TAG, "Error during V2 session stop: ${e.message}")
-        } finally {
-            // Always release the USB connection, even when the teardown writes fail on a dead
-            // link — skipping this leaks the connection (and the interface claim) until the GC
-            // finalizer complains.
-            try { transport.close() } catch (e: Exception) { logger.w(TAG, "Transport close failed: ${e.message}") }
-        }
-
-        // No per-field state resets: sessions are single-use (the adapter builds a fresh
-        // instance per connect), so only the externally-observed flows need clearing.
-        accumulator.reset()
-        _exerciseData.value = null
-        _deviceIdentity.value = null
-        _degradedReason.value = null
-        _sessionState.value = SessionState.Disconnected
-        cancelSessionScope()
-        logger.i(TAG, "V2 session stopped")
+    override suspend fun writeTeardown() {
+        haltForTeardown()
+        // Return the console to idle before disconnecting
+        transport.write(V2Codec.encode(
+            V2Message.Outgoing.WriteFeature(V2FeatureId.WORKOUT_STATE, V2WorkoutMode.NONE.raw),
+        ))
+        transport.write(V2Codec.encode(V2Message.Outgoing.Unsubscribe(V2FeatureId.subscribable)))
     }
 
     /**
@@ -221,10 +198,7 @@ internal class V2Session(
             logger.e(TAG, "Identify failed", e)
             return null
         } finally {
-            receiveJob?.cancel()
-            receiveJob = null
-            try { transport.close() } catch (_: Exception) {}
-            cancelSessionScope() // transient instance — nothing may outlive identify()
+            abandon() // transient instance — nothing may outlive identify()
         }
     }
 
