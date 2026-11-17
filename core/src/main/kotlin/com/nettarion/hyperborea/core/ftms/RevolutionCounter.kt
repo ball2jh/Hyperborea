@@ -1,6 +1,7 @@
 package com.nettarion.hyperborea.core.ftms
 
 import com.nettarion.hyperborea.core.model.ExerciseData
+import kotlin.math.roundToLong
 
 // Not thread-safe — must be called from a single collector
 class RevolutionCounter {
@@ -38,7 +39,9 @@ class RevolutionCounter {
         wheelRevRemainder -= wholeWheelRevs
         cumulativeWheelRevs += wholeWheelRevs
         // 1/2048s resolution, wraps at 0xFFFF
-        lastWheelEventTime = ((nowMs * 2048 / 1000) % 0x10000).toInt()
+        if (wholeWheelRevs > 0) {
+            lastWheelEventTime = eventTime(nowMs, deltaMs, wheelRevsInDelta, wheelRevRemainder, 2048)
+        }
 
         // Crank revolutions from cadence
         val rpm = data.cadence ?: 0
@@ -48,9 +51,22 @@ class RevolutionCounter {
         crankRevRemainder -= wholeCrankRevs
         cumulativeCrankRevs += wholeCrankRevs
         // 1/1024s resolution, wraps at 0xFFFF
-        lastCrankEventTime = ((nowMs * 1024 / 1000) % 0x10000).toInt()
+        if (wholeCrankRevs > 0) {
+            lastCrankEventTime = eventTime(nowMs, deltaMs, crankRevsInDelta, crankRevRemainder, 1024)
+        }
 
         lastTimestampMs = nowMs
+    }
+
+    /**
+     * CSC/CPS "last event time" is when the most recent *whole* revolution completed — not the
+     * sample time. It must stay put when no revolution completed (clients divide the revolution
+     * delta by the event-time delta), and is interpolated back from [nowMs] by the fractional
+     * revolution carried over, assuming a constant rate across this sample.
+     */
+    private fun eventTime(nowMs: Long, deltaMs: Long, revsInDelta: Double, remainder: Double, ticksPerSecond: Long): Int {
+        val eventMs = nowMs - (remainder / revsInDelta) * deltaMs
+        return ((eventMs * ticksPerSecond / 1000.0).roundToLong() % 0x10000).toInt()
     }
 
     fun reset() {

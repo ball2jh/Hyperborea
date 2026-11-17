@@ -158,12 +158,15 @@ internal class V1Session(
                 gracefulEndForDisconnect()
                 writeMessage(V1Message.Outgoing.Disconnect())
                 delay(COMMAND_DELAY_MS)
-                transport.close()
             }
         } catch (e: CancellationException) {
             throw e
         } catch (e: Exception) {
             logger.w(TAG, "Error during V1 session stop: ${e.message}")
+        } finally {
+            // Always release the USB connection and detach receiver (idempotent), even after a
+            // detach (isOpen=false) or a failed teardown write — matching V2Session.stop().
+            try { transport.close() } catch (e: Exception) { logger.w(TAG, "Transport close failed: ${e.message}") }
         }
 
         accumulator.reset()

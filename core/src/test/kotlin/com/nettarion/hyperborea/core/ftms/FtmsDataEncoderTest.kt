@@ -266,11 +266,13 @@ class FtmsDataEncoderTest {
     }
 
     @Test
-    fun `encodeTreadmillData with vertical gain sets bit 5 and encodes elevation gain`() {
+    fun `encodeTreadmillData with vertical gain sets bit 4 and encodes elevation gain`() {
         val data = exerciseData(verticalGain = 123.4f) // 123.4 meters
         val result = FtmsDataEncoder.encodeTreadmillData(data)
         val flags = uint16LE(result, 0)
-        assertThat(flags and (1 shl 5)).isNotEqualTo(0)
+        assertThat(flags and (1 shl 4)).isNotEqualTo(0)
+        // Bit 5 is Instantaneous Pace (1 byte) — setting it would misalign every later field.
+        assertThat(flags and (1 shl 5)).isEqualTo(0)
         // Positive gain: 123.4 * 10 = 1234
         assertThat(uint16LE(result, 4)).isEqualTo(1234)
         // Negative gain: 0
@@ -278,11 +280,11 @@ class FtmsDataEncoderTest {
     }
 
     @Test
-    fun `encodeTreadmillData without vertical gain does not set bit 5`() {
+    fun `encodeTreadmillData without vertical gain does not set bit 4`() {
         val data = exerciseData()
         val result = FtmsDataEncoder.encodeTreadmillData(data)
         val flags = uint16LE(result, 0)
-        assertThat(flags and (1 shl 5)).isEqualTo(0)
+        assertThat(flags and (1 shl 4)).isEqualTo(0)
     }
 
     @Test
@@ -719,8 +721,8 @@ class FtmsDataEncoderTest {
             "bike_full" to "740bb80baa007c150064009600fa00ffffff8c0807",
             "bike_boundary" to "740bffffffffffffffceffecfffeffffffffffffff",
             "tread_nulls" to "00000000",
-            "tread_full" to "ac15e8038813001e000000d20400002c01ffffff8c60090000c800",
-            "tread_boundary" to "ac15ffffffffffddff0000ffff0000feffffffffffffff00009cff",
+            "tread_full" to "9c15e8038813001e000000d20400002c01ffffff8c60090000c800",
+            "tread_boundary" to "9c15ffffffffffddff0000ffff0000feffffffffffffff00009cff",
             "rower_nulls" to "0000000000",
             "rower_full" to "a40b38f401d00700c8003c00b400ffffff91b004",
             "rower_strokeRate" to "0000305802",
