@@ -1,6 +1,12 @@
 # Changelog
 
 ## [Unreleased]
+- **Stop works while a workout is still starting.** Starting holds the hardware for as long as bring-up takes — up to ten minutes when the USB-permission dialog is waiting on an answer — and Stop used to queue behind it and do nothing. It now cancels the bring-up, releases the USB connection and returns to idle. A stop that is interrupted partway (the system tearing the service down) also always finishes, instead of leaving the app stuck on "Stopping…".
+- **A treadmill that loses its hardware while waiting for the Start key now reports the error** once reconnecting fails, instead of showing "Press START on the console" indefinitely.
+- **A treadmill saved as another equipment type in Settings → Device still behaves as a treadmill.** A custom device config with the wrong Type made the app treat the belt machine as a bike, and the workout stopped the moment it started. Hardware that identifies as a treadmill now stays one, with treadmill speed/incline limits rather than the other type's; the config's name and step sizes still apply.
+- **A fitness app paired while idle is no longer disconnected when the workout starts** on V1 consoles whose reported limits differ from the built-in catalog (the idle probe now reads the same limits a connect does, so the Bluetooth/WiFi services aren't restarted).
+- **A command is no longer lost when a V1 console momentarily refuses a USB write** — it is re-sent on the next poll, a treadmill Pause included.
+- **Bluetooth diagnostics:** the log now notes when a connected app's MTU is too small for a full data frame (the frame arrives truncated on that client).
 
 ## [1.5.1] - 2026-11-17
 - **Fitness apps read treadmill data correctly again when the console reports elevation gain.** The FTMS Treadmill Data frame flagged elevation gain as bit 5 (Instantaneous Pace, a 1-byte field) instead of bit 4, so spec-compliant clients misread every field after it — calories, heart rate, elapsed time and power — on V1 treadmills that report vertical gain.
@@ -8,12 +14,6 @@
 - **Pulling and reinserting the safety key while a treadmill workout is armed no longer cancels it**, and a treadmill that reconnects mid-workout and re-arms no longer discards the ride on its first idle report.
 - **Power-meter (CPS) cadence and wheel speed are steadier.** Revolution event times now mark when the last whole revolution completed instead of advancing on every sample, so apps that derive cadence/speed from the Cycling Power service no longer see zeros and spikes.
 - **V1 consoles release the USB connection after a cable dropout**, instead of leaking it on every reconnect.
-- **Stop works while a workout is still starting.** Starting holds the hardware for as long as bring-up takes — up to ten minutes when the USB-permission dialog is waiting on an answer — and Stop used to queue behind it and do nothing. It now cancels the bring-up, releases the USB connection and returns to idle. A stop that is interrupted partway (the system tearing the service down) also always finishes, instead of leaving the app stuck on "Stopping…".
-- **A treadmill that loses its hardware while waiting for the Start key now reports the error** once reconnecting fails, instead of showing "Press START on the console" indefinitely.
-- **A treadmill saved as another equipment type in Settings → Device still behaves as a treadmill.** A custom device config with the wrong Type made the app treat the belt machine as a bike, and the workout stopped the moment it started. Hardware that identifies as a treadmill now stays one; everything else in your config still applies.
-- **A fitness app paired while idle is no longer disconnected when the workout starts** on V1 consoles whose reported limits differ from the built-in catalog (the idle probe now reads the same limits a connect does, so the Bluetooth/WiFi services aren't restarted).
-- **A command is no longer lost when a V1 console momentarily refuses a USB write** — it is re-sent on the next poll, a treadmill Pause included.
-- **Bluetooth diagnostics:** the log now notes when a connected app's MTU is too small for a full data frame (the frame arrives truncated on that client).
 
 ## [1.5.0] - 2026-11-17
 - **Programmed treadmill sessions.** Choose a ready-made program or build your own from timed speed/incline blocks with graphs, drag reordering, repeats and gradual ramps, and an optional **Loop program** toggle that repeats until you stop. Programs start from the library; the physical console Start key still gates the belt, and a manual warm-up can hand off into a program (after confirmation) without losing the recording. Contributed by Curtis Searle.
