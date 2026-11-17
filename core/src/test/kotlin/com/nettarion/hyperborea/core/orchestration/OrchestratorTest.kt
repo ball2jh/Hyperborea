@@ -928,6 +928,68 @@ class OrchestratorTest {
         assertThat(env.orchestrator.state.value).isEqualTo(OrchestratorState.Paused)
     }
 
+    // --- Stop always works: during bring-up, and to completion ---
+
+    @Test
+    fun `stop cancels a bring-up waiting on a prerequisite instead of queueing behind it`() = runTest {
+        // A USB-permission dialog nobody answers: fulfill() suspends for as long as it is allowed.
+        val neverAnswered = Prerequisite(
+            id = "usb-permission",
+            description = "waits on a human",
+            isMet = { false },
+            fulfill = { kotlinx.coroutines.awaitCancellation() },
+            fulfillTimeoutMs = 10 * 60 * 1000L,
+        )
+        val env = TestEnv(this, hardwarePrereqs = listOf(neverAnswered))
+        val starting = env.scope.launch { env.orchestrator.start() }
+        assertThat(env.orchestrator.state.value).isInstanceOf(OrchestratorState.Preparing::class.java)
+
+        env.orchestrator.stop()
+
+        // Immediate — not after the ten-minute fulfil timeout — and back to a startable Idle.
+        assertThat(testScheduler.currentTime).isEqualTo(0L)
+        assertThat(env.orchestrator.state.value).isEqualTo(OrchestratorState.Idle)
+        assertThat(starting.isCompleted).isTrue()
+        assertThat(env.hardware.connectCalled).isFalse()
+    }
+
+    @Test
+    fun `start works again after a bring-up was stopped`() = runTest {
+        var answer = false
+        val prereq = Prerequisite(
+            id = "usb-permission",
+            description = "waits on a human",
+            isMet = { false },
+            fulfill = { if (answer) FulfillResult.Success else kotlinx.coroutines.awaitCancellation() },
+        )
+        val env = TestEnv(this, hardwarePrereqs = listOf(prereq))
+        env.scope.launch { env.orchestrator.start() }
+        env.orchestrator.stop()
+
+        answer = true
+        env.orchestrator.start()
+
+        assertThat(env.orchestrator.state.value).isEqualTo(OrchestratorState.Running())
+    }
+
+    @Test
+    fun `a stop whose caller is cancelled mid-teardown still finishes in Idle`() = runTest {
+        val env = TestEnv(this)
+        env.orchestrator.start()
+        val gate = kotlinx.coroutines.CompletableDeferred<Unit>()
+        env.hardware.disconnectGate = gate
+
+        // The service's onDestroy gives teardown a bounded budget and cancels it when it runs out.
+        val stopping = env.scope.launch { env.orchestrator.stop() }
+        assertThat(env.orchestrator.state.value).isEqualTo(OrchestratorState.Stopping)
+        stopping.cancel()
+        gate.complete(Unit)
+        advanceUntilIdle()
+
+        // Not stranded in Stopping (where every later stop() is ignored).
+        assertThat(env.orchestrator.state.value).isEqualTo(OrchestratorState.Idle)
+    }
+
     // --- Treadmill: AwaitingConsoleStart ---
 
     @Test
@@ -1177,8 +1239,12 @@ class OrchestratorTest {
             mutableState.value = if (connectCallCount > 1 && reconnectResult != null) reconnectResult!! else connectState
         }
 
+        /** When set, [disconnect] parks on it — lets a test hold the orchestrator mid-teardown. */
+        var disconnectGate: kotlinx.coroutines.CompletableDeferred<Unit>? = null
+
         override suspend fun disconnect() {
             disconnectCalled = true
+            disconnectGate?.await()
             // FitProAdapter clears its exercise data on disconnect — mirror that here so the
             // reconnect path can't re-read stale pre-dropout data.
             exerciseData.value = null

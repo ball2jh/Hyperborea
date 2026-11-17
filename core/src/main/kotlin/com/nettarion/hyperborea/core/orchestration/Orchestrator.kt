@@ -21,6 +21,7 @@ import com.nettarion.hyperborea.core.system.SystemMonitor
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
@@ -87,6 +88,14 @@ class Orchestrator(
     private var probeJob: Job? = null
     private var resumeConfirmationJob: Job? = null
     private var resumeRequested = false
+
+    /**
+     * The in-flight bring-up, while [start] holds [mutex]. Bring-up can legitimately take minutes
+     * (the USB-permission dialog waits on a human) — [stop] cancels this instead of queueing
+     * behind it, so Stop always works.
+     */
+    @Volatile
+    private var bringUpJob: Job? = null
 
     private val reconnector = HardwareReconnector(
         hardwareAdapter,
@@ -190,8 +199,17 @@ class Orchestrator(
                 return
             }
 
+            // Bring-up runs as a child job so stop() can cancel it without cancelling our caller.
+            var bringUp: Job? = null
             try {
-                startInternal()
+                coroutineScope {
+                    bringUp = launch { startInternal() }
+                    bringUpJob = bringUp
+                }
+            } catch (e: CancellationException) {
+                // Our caller was cancelled mid-bring-up: don't strand a half-started workout.
+                abortBringUp("start cancelled")
+                throw e
             } catch (e: Exception) {
                 logger.e(TAG, "Unexpected error during start", e)
                 // Bring-up launches jobs before it can throw (command pipeline, monitors) — cancel
@@ -199,8 +217,23 @@ class Orchestrator(
                 // may never come.
                 cancelWorkoutJobs()
                 _state.value = OrchestratorState.Error("Unexpected: ${e.message}", e)
+            } finally {
+                bringUpJob = null
             }
+            if (bringUp?.isCancelled == true) abortBringUp("stopped while starting")
         }
+    }
+
+    /**
+     * Unwinds a bring-up that [stop] (or the caller's cancellation) interrupted: whatever it had
+     * connected or launched is torn down and the orchestrator returns to Idle. Nothing is saved —
+     * no workout had started.
+     */
+    private suspend fun abortBringUp(reason: String) = withContext(NonCancellable) {
+        _state.value = OrchestratorState.Stopping
+        teardown(saveRide = false, turnOffFan = false)
+        _state.value = OrchestratorState.Idle
+        logger.i(TAG, "Bring-up aborted ($reason)")
     }
 
     private suspend fun ensureReady(): Boolean {
@@ -566,6 +599,9 @@ class Orchestrator(
     }
 
     suspend fun stop(saveRide: Boolean = true) {
+        // start() holds the mutex for the whole bring-up; cancel it rather than wait behind it.
+        // It unwinds itself to Idle, after which the check below makes this a no-op.
+        bringUpJob?.cancel()
         mutex.withLock {
             val current = _state.value
             if (current is OrchestratorState.Idle || current is OrchestratorState.Stopping) {
@@ -573,10 +609,15 @@ class Orchestrator(
                 return
             }
 
-            _state.value = OrchestratorState.Stopping
-            teardown(saveRide = saveRide, turnOffFan = true)
-            _state.value = OrchestratorState.Idle
-            logger.i(TAG, "Orchestrator stopped")
+            // Once begun, teardown must finish even if our caller is cancelled (e.g. the service's
+            // bounded onDestroy budget): a half-run teardown would strand the state in Stopping —
+            // where stop() is ignored — with the hardware adapter half torn down.
+            withContext(NonCancellable) {
+                _state.value = OrchestratorState.Stopping
+                teardown(saveRide = saveRide, turnOffFan = true)
+                _state.value = OrchestratorState.Idle
+                logger.i(TAG, "Orchestrator stopped")
+            }
         }
     }
 
