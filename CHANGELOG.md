@@ -1,6 +1,11 @@
 # Changelog
 
 ## [Unreleased]
+- **Fitness apps read treadmill data correctly again when the console reports elevation gain.** The FTMS Treadmill Data frame flagged elevation gain as bit 5 (Instantaneous Pace, a 1-byte field) instead of bit 4, so spec-compliant clients misread every field after it — calories, heart rate, elapsed time and power — on V1 treadmills that report vertical gain.
+- **A fitness app can no longer set the speed a treadmill launches at.** Speed targets from Bluetooth/WiFi apps are now ignored until the belt is actually running; previously a target received while waiting for the physical Start key became the belt's starting speed.
+- **Pulling and reinserting the safety key while a treadmill workout is armed no longer cancels it**, and a treadmill that reconnects mid-workout and re-arms no longer discards the ride on its first idle report.
+- **Power-meter (CPS) cadence and wheel speed are steadier.** Revolution event times now mark when the last whole revolution completed instead of advancing on every sample, so apps that derive cadence/speed from the Cycling Power service no longer see zeros and spikes.
+- **V1 consoles release the USB connection after a cable dropout**, instead of leaking it on every reconnect.
 
 ## [1.5.0] - 2026-11-17
 - **Programmed treadmill sessions.** Choose a ready-made program or build your own from timed speed/incline blocks with graphs, drag reordering, repeats and gradual ramps, and an optional **Loop program** toggle that repeats until you stop. Programs start from the library; the physical console Start key still gates the belt, and a manual warm-up can hand off into a program (after confirmation) without losing the recording. Contributed by Curtis Searle.

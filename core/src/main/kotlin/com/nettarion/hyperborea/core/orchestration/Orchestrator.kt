@@ -276,6 +276,16 @@ class Orchestrator(
                 .catch { e -> logger.e(TAG, "Command pipeline error", e) }
                 .collect { command ->
                     try {
+                        // A treadmill belt only takes speed targets while Running. Before the first
+                        // physical Start, a stored target would become the speed the belt launches
+                        // at; while paused the session already rejects them.
+                        if (hardwareAdapter.deviceInfo.value?.type == DeviceType.TREADMILL &&
+                            (command is DeviceCommand.SetTargetSpeed || command is DeviceCommand.AdjustSpeed) &&
+                            _state.value !is OrchestratorState.Running
+                        ) {
+                            logger.d(TAG, "Dropping external $command — treadmill is not running (${_state.value})")
+                            return@collect
+                        }
                         beforeExternalCommand(command)
                         logger.d(TAG, "Forwarding command: $command")
                         if (hardwareAdapter.deviceInfo.value?.type == DeviceType.TREADMILL) {
@@ -384,6 +394,10 @@ class Orchestrator(
                                         ?: WorkoutModeInterpreter.WORKOUT_MODE_IDLE
                                     _state.value = if (newType == DeviceType.TREADMILL &&
                                         mode != WorkoutModeInterpreter.WORKOUT_MODE_RUNNING) {
+                                        // Re-armed: the earlier session's "left idle" confirmation
+                                        // must not turn the new session's parked IDLE into a stop
+                                        // that discards the ride in progress.
+                                        workoutModeInterpreter.reset()
                                         OrchestratorState.AwaitingConsoleStart(CONSOLE_START_MESSAGE)
                                     } else {
                                         OrchestratorState.Running(degraded = hardwareAdapter.degradedReason.value)

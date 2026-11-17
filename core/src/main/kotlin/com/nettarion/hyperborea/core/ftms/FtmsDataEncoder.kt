@@ -123,7 +123,7 @@ object FtmsDataEncoder {
      * Encodes ExerciseData into FTMS Treadmill Data (0x2ACD) characteristic value.
      *
      * Flags (uint16 LE): bit0=0 → speed present, bit2 → total distance, bit3 → inclination,
-     * bit7 → expended energy, bit8 → heart rate, bit10 → elapsed time,
+     * bit4 → elevation gain, bit7 → expended energy, bit8 → heart rate, bit10 → elapsed time,
      * bit12 → force on belt and power output.
      */
     fun encodeTreadmillData(data: ExerciseData): ByteArray = FtmsFrameBuilder(2).apply {
@@ -143,9 +143,11 @@ object FtmsDataEncoder {
             }
         }
 
-        // Elevation Gain: uint16 positive gain + uint16 negative gain, 0.1m resolution (bit 5)
+        // Elevation Gain: uint16 positive gain + uint16 negative gain, 0.1m resolution (bit 4).
+        // Bit 5 is Instantaneous Pace (a 1-byte field); flagging this 4-byte field as bit 5 would
+        // shift every later field (energy, HR, elapsed time, power) for spec-compliant clients.
         data.verticalGain?.let { gain ->
-            field(5) {
+            field(4) {
                 addUint16LE((gain * 10).toInt().coerceIn(0, 0xFFFF)) // positive gain
                 addUint16LE(0) // negative gain (not tracked separately)
             }

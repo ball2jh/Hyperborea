@@ -36,8 +36,11 @@ internal class WorkoutModeInterpreter(private val logger: AppLogger) {
     }
 
     fun interpret(workoutMode: Int?, state: OrchestratorState, deviceType: DeviceType?): Action {
+        // DMK is a safety-key interlock, not the console leaving idle: pulling and reinserting the
+        // key while armed must not turn the following IDLE report into a stop of the armed workout.
         if (workoutMode != null &&
-            workoutMode != WORKOUT_MODE_IDLE && workoutMode != WORKOUT_MODE_UNKNOWN && workoutMode != WORKOUT_MODE_RESULTS) {
+            workoutMode != WORKOUT_MODE_IDLE && workoutMode != WORKOUT_MODE_UNKNOWN &&
+            workoutMode != WORKOUT_MODE_RESULTS && workoutMode != WORKOUT_MODE_DMK) {
             consoleLeftIdle = true
         }
         return when (workoutMode) {

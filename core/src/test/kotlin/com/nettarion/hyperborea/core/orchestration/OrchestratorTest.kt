@@ -74,6 +74,19 @@ class OrchestratorTest {
         env.orchestrator.stop(saveRide = false)
     }
 
+    @Test fun `safety key pulled and reinserted while armed keeps the treadmill armed`() = runTest {
+        val env = TestEnv(this)
+        env.hardware.deviceInfo.value = buildDeviceInfo(type = DeviceType.TREADMILL)
+        env.orchestrator.start()
+        for (mode in listOf(8, 1)) {
+            env.hardware.exerciseData.value = ExerciseData.ZERO.copy(workoutMode = mode); runCurrent()
+        }
+        assertThat(env.orchestrator.state.value).isInstanceOf(OrchestratorState.AwaitingConsoleStart::class.java)
+        env.hardware.exerciseData.value = ExerciseData.ZERO.copy(workoutMode = 2); runCurrent()
+        assertThat(env.orchestrator.state.value).isEqualTo(OrchestratorState.Running())
+        env.orchestrator.stop(saveRide = false)
+    }
+
     @Test fun `external treadmill Resume uses the same explicit confirmation gate`() = runTest {
         val env = TestEnv(this)
         env.hardware.deviceInfo.value = buildDeviceInfo(type = DeviceType.TREADMILL)
@@ -569,6 +582,22 @@ class OrchestratorTest {
         val command = DeviceCommand.SetResistance(5)
         env.broadcast1.emitCommand(command)
         assertThat(env.hardware.receivedCommands).contains(command)
+    }
+
+    @Test
+    fun `external speed target is dropped while a treadmill waits for physical Start`() = runTest {
+        val env = TestEnv(this)
+        env.hardware.deviceInfo.value = buildDeviceInfo(type = DeviceType.TREADMILL)
+        env.orchestrator.start()
+        assertThat(env.orchestrator.state.value).isInstanceOf(OrchestratorState.AwaitingConsoleStart::class.java)
+        env.broadcast1.emitCommand(DeviceCommand.SetTargetSpeed(16f)); runCurrent()
+        env.broadcast1.emitCommand(DeviceCommand.AdjustSpeed(true)); runCurrent()
+        assertThat(env.hardware.receivedCommands.none { it is DeviceCommand.SetTargetSpeed || it is DeviceCommand.AdjustSpeed }).isTrue()
+        // Once running, the same target is forwarded.
+        env.hardware.exerciseData.value = ExerciseData.ZERO.copy(workoutMode = 2); runCurrent()
+        env.broadcast1.emitCommand(DeviceCommand.SetTargetSpeed(8f)); runCurrent()
+        assertThat(env.hardware.receivedCommands).contains(DeviceCommand.SetTargetSpeed(8f))
+        env.orchestrator.stop(saveRide = false)
     }
 
     @Test

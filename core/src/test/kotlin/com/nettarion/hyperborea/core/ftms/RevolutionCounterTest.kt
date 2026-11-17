@@ -62,11 +62,32 @@ class RevolutionCounterTest {
     }
 
     @Test
-    fun `wheel event time uses 2048 resolution`() {
+    fun `wheel event time uses 2048 resolution at the last whole revolution`() {
         counter.update(exerciseData(speed = 10.0f), 1000L)
         counter.update(exerciseData(speed = 10.0f), 2000L)
-        // 2000 * 2048 / 1000 = 4096
-        assertThat(counter.lastWheelEventTime).isEqualTo(4096)
+        // 10 km/h over 1 s = 1.325 revs → the 1st whole rev completed 0.325/1.325 s before 2000 ms
+        val revs = (10.0 / 3.6) / 2.096
+        val expected = Math.round((2000 - ((revs - 1) / revs) * 1000) * 2048 / 1000).toInt()
+        assertThat(counter.cumulativeWheelRevs).isEqualTo(1)
+        assertThat(counter.lastWheelEventTime).isEqualTo(expected)
+    }
+
+    @Test
+    fun `event time does not advance when no whole revolution completed`() {
+        counter.update(exerciseData(speed = 10.0f, cadence = 30), 1000L)
+        counter.update(exerciseData(speed = 10.0f, cadence = 30), 1100L) // 0.05 crank rev, 0.13 wheel rev
+        assertThat(counter.lastCrankEventTime).isEqualTo(0)
+        assertThat(counter.lastWheelEventTime).isEqualTo(0)
+    }
+
+    @Test
+    fun `crank event time marks the moment the revolution completed, not the sample time`() {
+        counter.update(exerciseData(cadence = 60), 1000L)
+        counter.update(exerciseData(cadence = 60), 1500L) // 0.5 rev — no event
+        assertThat(counter.lastCrankEventTime).isEqualTo(0)
+        counter.update(exerciseData(cadence = 60), 2250L) // 1.25 revs total — rev 1 completed at 2000 ms
+        assertThat(counter.cumulativeCrankRevs).isEqualTo(1)
+        assertThat(counter.lastCrankEventTime).isEqualTo(2048)
     }
 
     @Test

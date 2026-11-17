@@ -268,6 +268,15 @@ class V1SessionTest {
     }
 
     @Test
+    fun `stop releases the transport even after a USB detach`() = runTest {
+        val session = startStreamingTreadmillSession()
+        transport.simulateDetach()
+        session.stop()
+        advanceUntilIdle()
+        assertThat(transport.closeCount).isAtLeast(1)
+    }
+
+    @Test
     fun `stop transitions to DISCONNECTED`() = runTest {
         val session = createSession(this)
 

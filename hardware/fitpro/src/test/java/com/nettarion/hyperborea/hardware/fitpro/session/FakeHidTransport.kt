@@ -17,7 +17,11 @@ class FakeHidTransport : HidTransport {
         _isOpen = true
     }
 
+    var closeCount = 0
+        private set
+
     override suspend fun close() {
+        closeCount++
         _isOpen = false
         incomingChannel.close()
     }
@@ -34,6 +38,11 @@ class FakeHidTransport : HidTransport {
 
     suspend fun emitIncoming(data: ByteArray) {
         incomingChannel.send(data)
+    }
+
+    /** Mimics a USB detach: the transport reports closed without close() having been called. */
+    fun simulateDetach() {
+        _isOpen = false
     }
 
     fun closeIncoming() {
