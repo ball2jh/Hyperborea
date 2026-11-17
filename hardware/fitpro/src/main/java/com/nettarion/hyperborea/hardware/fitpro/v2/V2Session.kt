@@ -261,11 +261,11 @@ internal class V2Session(
     override suspend fun writeFeature(command: DeviceCommand) {
         if (_sessionState.value !is SessionState.Streaming) return
         if (command is DeviceCommand.PauseWorkout && detectedDeviceType.isBeltBased) {
-            latchBeltPause()
+            latchBeltPause(explicit = true)
             startRequestJob?.cancel()
             gradeCoalescer.cancelPending()
         }
-        if (command is DeviceCommand.ResumeWorkout) beltRestartRequiresUser = false
+        if (command is DeviceCommand.ResumeWorkout) { beltRestartRequiresUser = false; beltHasRun = true }
         if (beltRestartRequiresUser && (command is DeviceCommand.SetTargetSpeed || command is DeviceCommand.AdjustSpeed)) {
             logger.w(TAG, "Ignoring belt-speed target while paused — explicit Resume or physical Start required")
             return
@@ -454,6 +454,7 @@ internal class V2Session(
         //    WORKOUT_STATE to RUNNING, then command the belt (the firmware won't move it on its own).
         val acked = consoleDeclaresStartRequested
 
+        beltHasRun = true // a Stop/DMK from here on must latch, even before RUNNING is confirmed
         startRequestJob = sessionScope.launch {
             try {
                 if (from == V2WorkoutMode.RESULTS) writeWorkoutState(V2WorkoutMode.NONE)
@@ -775,11 +776,14 @@ internal class V2Session(
                             if (detectedDeviceType.isBeltBased) accumulator.pause()
                         }
                         V2WorkoutMode.PAUSED -> {
+                            beltHasRun = true // a console-reported pause implies an active workout
                             latchBeltPause()
                             if (detectedDeviceType.isBeltBased) sessionScope.launch { gradeCoalescer.cancelPending() }
                             accumulator.pause()
                         }
+                        V2WorkoutMode.WARM_UP, V2WorkoutMode.COOL_DOWN -> if (detectedDeviceType.isBeltBased) beltHasRun = true
                         V2WorkoutMode.RUNNING -> {
+                            beltHasRun = true
                             accumulator.resume()
                             accumulator.startTimer()
                             // The console started after all — clear the start-failure warning (but
@@ -793,8 +797,10 @@ internal class V2Session(
                     if (startRequestJob?.isActive != true) latchBeltPause()
                     accumulator.pause()
                     // Recover the controller's state without authorizing movement. User Resume
-                    // later runs the normal start configuration/acknowledgement sequence.
-                    writeWorkoutState(V2WorkoutMode.NONE)
+                    // later runs the normal start configuration/acknowledgement sequence. Skip it
+                    // while a start is in flight: that job already cleared RESULTS itself, and a
+                    // trailing RESULTS report must not knock the console back out of the start.
+                    if (startRequestJob?.isActive != true) writeWorkoutState(V2WorkoutMode.NONE)
                 }
                 // READY_TO_START is the V2 MCU's "user pressed the physical Start key" report —
                 // it parks there waiting for the host to start the workout. Mirrors the stock

@@ -100,7 +100,17 @@ class HyperboreaService : Service() {
                     val program = com.nettarion.hyperborea.program.ProgramCodec.decode(intent.getStringExtra(EXTRA_PROGRAM) ?: error("Missing program"))
                     programController.start(program)
                 } catch (e: kotlinx.coroutines.CancellationException) { throw e }
-                catch (e: Exception) { logger.e(TAG, "Couldn't start program", e) }
+                catch (e: Exception) {
+                    logger.e(TAG, "Couldn't start program", e)
+                    // The Programs screen has already navigated away; tell the user why nothing runs.
+                    kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Main) {
+                        android.widget.Toast.makeText(
+                            this@HyperboreaService,
+                            "Couldn't start program: ${e.message ?: "unexpected error"}",
+                            android.widget.Toast.LENGTH_LONG,
+                        ).show()
+                    }
+                }
             }
             ACTION_ACTIVATE -> activate()
             ACTION_DEACTIVATE -> deactivate(saveRide = true)

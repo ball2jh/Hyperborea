@@ -102,6 +102,57 @@ class V1SessionTest {
         assertThat(transport.writtenPackets.drop(baseline).mapNotNull { it.workoutModeWriteValue() }).contains(2)
     }
 
+    @Test fun `safety key cycled before the first start does not block START_REQUESTED`() = runTest {
+        startStreamingTreadmillSession()
+        val baseline = transport.writtenPackets.size
+        backgroundScope.launch { transport.emitIncoming(buildTreadmillStartResponse(workoutMode = 8)) }
+        advanceTimeBy(300); advanceUntilIdle()
+        backgroundScope.launch { transport.emitIncoming(buildTreadmillStartResponse(workoutMode = 1)) }
+        advanceTimeBy(300); advanceUntilIdle()
+        backgroundScope.launch { transport.emitIncoming(buildTreadmillStartResponse(startRequested = true)) }
+        advanceTimeBy(300); advanceUntilIdle()
+        assertThat(transport.writtenPackets.drop(baseline).mapNotNull { it.workoutModeWriteValue() }).containsExactly(2)
+    }
+
+    @Test fun `safety key pulled after the belt has run still requires explicit Resume`() = runTest {
+        startStreamingTreadmillSession()
+        backgroundScope.launch { transport.emitIncoming(buildTreadmillStartResponse(workoutMode = 2)) }
+        advanceTimeBy(300); advanceUntilIdle()
+        backgroundScope.launch { transport.emitIncoming(buildTreadmillStartResponse(workoutMode = 8)) }
+        advanceTimeBy(300); advanceUntilIdle()
+        val baseline = transport.writtenPackets.size
+        backgroundScope.launch { transport.emitIncoming(buildTreadmillStartResponse(workoutMode = 1, startRequested = true)) }
+        advanceTimeBy(300); advanceUntilIdle()
+        assertThat(transport.writtenPackets.drop(baseline).mapNotNull { it.workoutModeWriteValue() }).doesNotContain(2)
+    }
+
+    @Test fun `physical Stop pressed before a queued start is confirmed still latches the pause`() = runTest {
+        val session = startStreamingTreadmillSession()
+        backgroundScope.launch { transport.emitIncoming(buildTreadmillStartResponse(startRequested = true)) }
+        advanceTimeBy(300); advanceUntilIdle()
+        backgroundScope.launch { transport.emitIncoming(buildTreadmillStartResponse(keyCode = 1 /* STOP */)) }
+        advanceTimeBy(300); advanceUntilIdle()
+        val baseline = transport.writtenPackets.size
+        backgroundScope.launch { transport.emitIncoming(buildTreadmillStartResponse(workoutMode = 2)) }
+        advanceTimeBy(300); advanceUntilIdle()
+        assertThat(session.exerciseData.value?.workoutMode).isEqualTo(3)
+        assertThat(transport.writtenPackets.drop(baseline).mapNotNull { it.workoutModeWriteValue() }).contains(3)
+        assertThat(transport.writtenPackets.drop(baseline).mapNotNull { it.workoutModeWriteValue() }).doesNotContain(2)
+    }
+
+    @Test fun `passive start report does not clear a pause that follows it`() = runTest {
+        val session = startStreamingTreadmillSession()
+        backgroundScope.launch { transport.emitIncoming(buildTreadmillStartResponse(startRequested = true)) }
+        advanceTimeBy(300); advanceUntilIdle()
+        session.writeFeature(DeviceCommand.PauseWorkout)
+        val baseline = transport.writtenPackets.size
+        // The controller reports RUNNING from the earlier start; the pause must still win.
+        backgroundScope.launch { transport.emitIncoming(buildTreadmillStartResponse(workoutMode = 2)) }
+        advanceTimeBy(300); advanceUntilIdle()
+        assertThat(session.exerciseData.value?.workoutMode).isEqualTo(3)
+        assertThat(transport.writtenPackets.drop(baseline).mapNotNull { it.workoutModeWriteValue() }).doesNotContain(2)
+    }
+
     @Test fun `paused treadmill does not accept START_REQUESTED without physical Start`() = runTest {
         val session = startStreamingTreadmillSession()
         session.writeFeature(DeviceCommand.PauseWorkout)

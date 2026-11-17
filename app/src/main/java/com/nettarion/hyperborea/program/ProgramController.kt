@@ -9,6 +9,7 @@ import com.nettarion.hyperborea.core.orchestration.Orchestrator
 import com.nettarion.hyperborea.core.orchestration.OrchestratorState
 import com.nettarion.hyperborea.core.program.*
 import kotlinx.coroutines.*
+import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.sync.Mutex
@@ -16,6 +17,14 @@ import kotlinx.coroutines.sync.withLock
 import kotlin.math.roundToInt
 import javax.inject.Inject
 import javax.inject.Singleton
+
+/**
+ * True while [state] is counting down to a single-pass program's scheduled stop: the 3-2-1 within
+ * the last block. Looping programs never stop on their own, and the lead-in count is excluded.
+ */
+internal fun isFinalStopCountdown(state: ProgramRunState): Boolean =
+    !state.program.loop && state.status == ProgramStatus.RUNNING &&
+        state.blockIndex == state.program.blocks.lastIndex && state.countdown != null
 
 @Singleton
 class ProgramController @Inject constructor(
@@ -39,16 +48,23 @@ class ProgramController @Inject constructor(
     private var sentIncline: Float? = null
     private fun clearSent() { sentSpeed = null; sentIncline = null }
 
+    private var consoleKeys: Job? = null
+
     fun startMonitoring() {
         if (ticker?.isActive == true) return
-        hardware.setConsoleControlListener { command ->
-            if (command is DeviceCommand.ResumeWorkout) {
-                // This callback is a physical Start edge, not a workout-mode/timeout report.
-                // Initial starts remain gated by the protocol; only an existing pause resumes here.
-                if (orchestrator.state.value is OrchestratorState.Paused) orchestrator.resume()
-            } else if (command is DeviceCommand.PauseWorkout) orchestrator.pause()
-            else manualControl(command)
+        // The FitPro session invokes this listener from its USB receive/poll loop. Handling a key
+        // can wait on the orchestrator lock (held during connect and while a ride is saved), so
+        // hand presses to a single ordered consumer instead of stalling the hardware loop — a
+        // stalled loop would also delay the belt PAUSE that Stop queues before recording IO.
+        val keys = Channel<DeviceCommand>(Channel.UNLIMITED)
+        consoleKeys = scope.launch {
+            for (command in keys) {
+                try { handleConsoleKey(command) }
+                catch (e: CancellationException) { throw e }
+                catch (e: Exception) { logger.e(TAG, "Console key ${command::class.simpleName} failed", e) }
+            }
         }
+        hardware.setConsoleControlListener { command -> keys.trySend(command) }
         telemetry = scope.launch { hardware.exerciseData.collect { if (it != null) lastTelemetry = SystemClock.elapsedRealtime() } }
         ticker = scope.launch {
             var previous = SystemClock.elapsedRealtime()
@@ -65,6 +81,15 @@ class ProgramController @Inject constructor(
                 previous = now
             }
         }
+    }
+
+    private suspend fun handleConsoleKey(command: DeviceCommand) {
+        if (command is DeviceCommand.ResumeWorkout) {
+            // This callback is a physical Start edge, not a workout-mode/timeout report.
+            // Initial starts remain gated by the protocol; only an existing pause resumes here.
+            if (orchestrator.state.value is OrchestratorState.Paused) orchestrator.resume()
+        } else if (command is DeviceCommand.PauseWorkout) orchestrator.pause()
+        else manualControl(command)
     }
 
     suspend fun start(program: WorkoutProgram) {
@@ -124,7 +149,7 @@ class ProgramController @Inject constructor(
         engine?.takeIf { it.state.active }?.end(ProgramStatus.CANCELLED, "Program ended")
         _state.value = engine?.state; cues.stop()
     }
-    suspend fun stopMonitoring() { hardware.setConsoleControlListener {}; ticker?.cancelAndJoin(); telemetry?.cancelAndJoin(); cancel(); cues.close(); ticker = null; telemetry = null }
+    suspend fun stopMonitoring() { hardware.setConsoleControlListener {}; consoleKeys?.cancelAndJoin(); consoleKeys = null; ticker?.cancelAndJoin(); telemetry?.cancelAndJoin(); cancel(); cues.close(); ticker = null; telemetry = null }
 
     private suspend fun tick(delta: Long, now: Long) {
         var completed = false
@@ -158,6 +183,11 @@ class ProgramController @Inject constructor(
                     // All three stop warnings have already played. A missing acknowledgement
                     // must never prevent the scheduled stop or leave a completed session running.
                     logger.w(TAG, "End tone unavailable — continuing the scheduled stop")
+                } else if (event.count > 0 && engine?.state?.let(::isFinalStopCountdown) == true) {
+                    // Stopping is the safe direction. A silent stop warning (muted media, lost audio
+                    // focus) must not drop to manual and leave the belt running at the last block's
+                    // speed indefinitely; the on-screen countdown continues to the scheduled stop.
+                    logger.w(TAG, "Stop warning tone ${event.count} unavailable — continuing the scheduled stop")
                 } else {
                     engine?.hold(true, "Countdown sound unavailable · check media volume, then resume program")
                     cues.stop(); return false

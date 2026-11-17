@@ -110,9 +110,19 @@ internal abstract class BaseFitProSession(
     // Paused/DMK is latched until an explicit Resume command or physical Start key. An idle,
     // START_REQUESTED, or READY_TO_START report alone cannot authorize a paused belt to restart.
     @Volatile protected var beltRestartRequiresUser = false
-    protected fun latchBeltPause() {
+
+    // Set once this session has issued a belt start or the controller has reported an active
+    // workout (WARM_UP/RUNNING/PAUSE/COOL_DOWN). Before that there is no moving or paused belt to
+    // protect: console-reported DMK/OFF_MACHINE/STOP while still waiting for the first physical
+    // Start must not latch, or a start-only signal (START_REQUESTED/READY_TO_START) would be
+    // ignored and the workout could never begin. Setting it when the start is *issued* (not only
+    // when RUNNING is confirmed) means a Stop pressed mid-start still latches and wins.
+    // An explicit app Pause always latches.
+    @Volatile protected var beltHasRun = false
+
+    protected fun latchBeltPause(explicit: Boolean = false) {
         if (detectedDeviceType.isBeltBased) {
-            beltRestartRequiresUser = true
+            if (explicit || beltHasRun) beltRestartRequiresUser = true
             val snapshot = accumulator.snapshot()
             // DMK can also be reported while merely parked/arming. Do not carry counters from
             // the console's previous workout into a new one that has never started.

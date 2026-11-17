@@ -285,11 +285,11 @@ internal class V1Session(
 
         if (_sessionState.value !is SessionState.Streaming) return
         if (command is DeviceCommand.PauseWorkout && detectedDeviceType.isBeltBased) {
-            latchBeltPause()
+            latchBeltPause(explicit = true)
             pendingResumeFromResults = false
             gradeCoalescer.cancelPending()
         }
-        if (command is DeviceCommand.ResumeWorkout) beltRestartRequiresUser = false
+        if (command is DeviceCommand.ResumeWorkout) { beltRestartRequiresUser = false; beltHasRun = true }
         if (beltRestartRequiresUser && (command is DeviceCommand.SetTargetSpeed || command is DeviceCommand.AdjustSpeed)) {
             logger.w(TAG, "Ignoring belt-speed target while paused — explicit Resume or physical Start required")
             return
@@ -900,11 +900,14 @@ internal class V1Session(
                                 if (detectedDeviceType.isBeltBased) accumulator.pause()
                             }
                             WorkoutMode.PAUSE -> {
+                                beltHasRun = true // a console-reported pause implies an active workout
                                 latchBeltPause()
                                 if (detectedDeviceType.isBeltBased) sessionScope.launch { gradeCoalescer.cancelPending() }
                                 accumulator.pause()
                             }
+                            WorkoutMode.WARM_UP, WorkoutMode.COOL_DOWN -> if (detectedDeviceType.isBeltBased) beltHasRun = true
                             WorkoutMode.RUNNING -> {
+                                beltHasRun = true
                                 accumulator.resume()
                                 accumulator.startTimer()
                             }
@@ -997,7 +1000,21 @@ internal class V1Session(
         if (accumulator.snapshot().workoutMode == WorkoutMode.RUNNING.raw.toInt()) return
 
         logger.i(TAG, "$source received while treadmill is idle — queueing WORKOUT_MODE=RUNNING")
-        sessionScope.launch { writeFeature(DeviceCommand.ResumeWorkout) }
+        sessionScope.launch {
+            if (_sessionState.value !is SessionState.Streaming) return@launch
+            // Never clear the pause latch from this passive start path, and re-check it under the
+            // write lock: a Pause that lands after the check above either aborts this start or
+            // queues its PAUSE after our RUNNING (later write wins), and a RUNNING report that
+            // still slips through is rejected by the latch.
+            pendingWriteMutex.withLock {
+                if (beltRestartRequiresUser) {
+                    logger.w(TAG, "Start from $source dropped — belt was paused before it could be queued")
+                    return@withLock
+                }
+                beltHasRun = true
+                pendingWriteFields = pendingWriteFields + commandToFields(DeviceCommand.ResumeWorkout)
+            }
+        }
     }
 
     private fun estimatePowerIfNeeded() {
