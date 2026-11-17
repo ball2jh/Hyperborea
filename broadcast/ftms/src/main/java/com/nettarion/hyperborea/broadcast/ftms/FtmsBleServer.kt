@@ -84,6 +84,7 @@ class FtmsBleServer(
             char.value = payload
             for ((address, device) in connectedDevices) {
                 if (!cb.isSubscribed(address, charUuid)) continue
+                cb.checkNotificationFits(address, charUuid, payload.size) // diagnostic only
                 try {
                     if (!server.notifyCharacteristicChanged(device, char, false)) {
                         logger.w(TAG, "Failed to send $characteristic notification to $address")

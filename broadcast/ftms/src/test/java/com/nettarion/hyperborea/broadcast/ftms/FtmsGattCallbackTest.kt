@@ -48,6 +48,24 @@ class FtmsGattCallbackTest {
     }
 
     @Test
+    fun `notification payload limit follows the negotiated MTU and resets on disconnect`() {
+        val dataUuid = FtmsServiceBuilder.dataCharacteristicUuid(DeviceType.TREADMILL)
+        callback.onConnectionStateChange(device, 0, BluetoothProfile.STATE_CONNECTED)
+
+        // Default ATT MTU 23 → 20 payload bytes: a 27-byte treadmill frame does not fit.
+        assertThat(callback.maxNotificationPayload(device.address)).isEqualTo(20)
+        assertThat(callback.checkNotificationFits(device.address, dataUuid, 20)).isTrue()
+        assertThat(callback.checkNotificationFits(device.address, dataUuid, 27)).isFalse()
+
+        callback.onMtuChanged(device, 185)
+        assertThat(callback.maxNotificationPayload(device.address)).isEqualTo(182)
+        assertThat(callback.checkNotificationFits(device.address, dataUuid, 27)).isTrue()
+
+        callback.onConnectionStateChange(device, 0, BluetoothProfile.STATE_DISCONNECTED)
+        assertThat(callback.maxNotificationPayload(device.address)).isEqualTo(20)
+    }
+
+    @Test
     fun `connected invokes onClientConnected`() {
         callback.onConnectionStateChange(device, 0, BluetoothProfile.STATE_CONNECTED)
 
