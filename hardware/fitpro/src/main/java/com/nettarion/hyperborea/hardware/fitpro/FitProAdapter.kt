@@ -9,6 +9,7 @@ import com.nettarion.hyperborea.core.model.DeviceInfo
 import com.nettarion.hyperborea.core.model.DeviceType
 import com.nettarion.hyperborea.core.model.ExerciseData
 import com.nettarion.hyperborea.core.model.displayName
+import com.nettarion.hyperborea.core.model.isBeltBased
 import com.nettarion.hyperborea.core.orchestration.FulfillResult
 import com.nettarion.hyperborea.core.adapter.HardwareAdapter
 import com.nettarion.hyperborea.core.orchestration.Prerequisite
@@ -102,6 +103,14 @@ class FitProAdapter @Inject constructor(
 
     /** Equipment type the V2 session derived from the console's feature set, if any. */
     private var lastDetectedType: DeviceType? = null
+
+    /**
+     * True when the hardware itself identified as a belt machine (V1: the MCU's equipment id; V2:
+     * the console's device-type report or feature set). Unlike [lastDetectedType] this covers both
+     * protocols and exists for one rule: a saved device config may not relabel a treadmill as
+     * something else (see [resolveDeviceInfo]).
+     */
+    private var hardwareIsBeltMachine = false
     private var dataForwardJob: Job? = null
     private var identityForwardJob: Job? = null
     private var degradedForwardJob: Job? = null
@@ -172,6 +181,7 @@ class FitProAdapter @Inject constructor(
                 lastDetectedType = newSession.detectedDeviceType
                 logger.i(TAG, "Detected device type: ${newSession.detectedDeviceType}")
             }
+            hardwareIsBeltMachine = newSession.detectedDeviceType.isBeltBased
 
             // Capture identity / health available from start() (the forwarding coroutines below may
             // not have run yet). resolveDeviceInfo() overlays the session's MCU-reported limits, so
@@ -272,8 +282,12 @@ class FitProAdapter @Inject constructor(
             // capture it so resolveDeviceInfo() overlays it and the idle dashboard shows the right
             // device type. V1 reports its type via capabilities at connect, so leave its path alone.
             if (session is V2Session) lastDetectedType = session.detectedDeviceType
-            updateIdentity(identity)
-            return resolveDeviceInfo(identity)
+            hardwareIsBeltMachine = session.detectedDeviceType.isBeltBased
+            // Resolve against the transient session so the probe result carries the same
+            // MCU-reported limits a connect will: otherwise the two differ, and the orchestrator
+            // restarts every broadcast (dropping an already-paired client) at workout start.
+            updateIdentity(identity, source = session)
+            return _deviceInfo.value
         } catch (e: CancellationException) { throw e }
         catch (e: Exception) {
             logger.e(TAG, "Identify failed", e)
@@ -297,6 +311,7 @@ class FitProAdapter @Inject constructor(
         session?.stop()
         session = null
         lastDetectedType = null
+        hardwareIsBeltMachine = false
 
         _exerciseData.value = null
         _deviceIdentity.value = null
@@ -305,11 +320,11 @@ class FitProAdapter @Inject constructor(
         _state.value = AdapterState.Inactive
     }
 
-    private suspend fun updateIdentity(identity: DeviceIdentity?) {
+    private suspend fun updateIdentity(identity: DeviceIdentity?, source: FitProSession? = session) {
         _deviceIdentity.value = identity
         val info = when {
             identity == null -> null
-            else -> resolveDeviceInfo(identity)
+            else -> resolveDeviceInfo(identity, source)
         }
         _deviceInfo.value = info
         // Keep the live session's step sizes and clamp bounds in sync — without this the user's
@@ -326,7 +341,11 @@ class FitProAdapter @Inject constructor(
         }
     }
 
-    private suspend fun resolveDeviceInfo(identity: DeviceIdentity): DeviceInfo {
+    /**
+     * [source] is the session whose MCU-reported limits are overlaid: the live session by default,
+     * or the transient one during [identify].
+     */
+    private suspend fun resolveDeviceInfo(identity: DeviceIdentity, source: FitProSession? = session): DeviceInfo {
         // Config key: the MCU-reported model number when there is one, else a synthetic negative
         // key from the USB product id — model-less consoles (V2 boards report no identity fields)
         // otherwise have no stable handle for custom configs, which made the config screen show a
@@ -335,9 +354,22 @@ class FitProAdapter @Inject constructor(
         val configKey = modelNumber ?: lastProductId?.let { -it }
         if (configKey != null) {
             val custom = deviceConfigRepository.getConfig(configKey)
-            // The user's saved config wins outright — including over the session-detected type and
-            // the MCU-reported limits (we skip the capability overlay below for it).
-            if (custom != null) return custom.copy(configKey = configKey)
+            // The user's saved config wins outright — including over the MCU-reported limits (we
+            // skip the capability overlay below for it) and, with one exception, the detected type.
+            // The exception: hardware that identified as a belt machine stays a treadmill. The
+            // orchestrator keys its start gate (wait for the physical Start key) and pause/resume
+            // rules off this type while the session keys its own off the hardware; a config that
+            // relabels a treadmill makes the two disagree, and the workout stops the moment it
+            // starts.
+            if (custom != null) {
+                val type = if (hardwareIsBeltMachine && !custom.type.isBeltBased) {
+                    logger.w(TAG, "Saved config says ${custom.type} but the hardware is a belt machine — keeping ${DeviceType.TREADMILL}")
+                    DeviceType.TREADMILL
+                } else {
+                    custom.type
+                }
+                return custom.copy(configKey = configKey, type = type)
+            }
         }
         val partNum = identity.partNumber?.toIntOrNull()
         val base = if (modelNumber != null || partNum != null)
@@ -346,7 +378,7 @@ class FitProAdapter @Inject constructor(
         val typed = lastDetectedType?.let { applyTypeDefaults(base, it) } ?: base
         // Overlay the live session's MCU-reported limits (null during identify(), where there's no
         // subscription). Re-applied on every identity update so lifetime-stat events don't wipe it.
-        val withCaps = session?.deviceCapabilities?.let { overlayCapabilities(typed, it) } ?: typed
+        val withCaps = source?.deviceCapabilities?.let { overlayCapabilities(typed, it) } ?: typed
         return withCaps.copy(configKey = configKey)
     }
 
