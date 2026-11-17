@@ -11,6 +11,7 @@ import com.nettarion.hyperborea.core.model.DeviceInfo
 import com.nettarion.hyperborea.core.model.DeviceType
 import com.nettarion.hyperborea.core.model.ExerciseData
 import com.nettarion.hyperborea.core.model.FanMode
+import com.nettarion.hyperborea.core.model.WorkoutPhase
 import com.nettarion.hyperborea.core.profile.ProfileRepository
 import com.nettarion.hyperborea.core.profile.RideRecorder
 import com.nettarion.hyperborea.core.profile.UserPreferences
@@ -318,7 +319,7 @@ class Orchestrator(
                 .collect { data ->
                     mutex.withLock {
                         if (resumeRequested && _state.value is OrchestratorState.Paused &&
-                            data.workoutMode == WorkoutModeInterpreter.WORKOUT_MODE_RUNNING) {
+                            data.workoutMode == WorkoutPhase.RUNNING.code) {
                             clearResumeRequest()
                             _state.value = OrchestratorState.Running(degraded = hardwareAdapter.degradedReason.value)
                             logger.i(TAG, "Orchestrator resumed — console confirmed explicit user request")
@@ -391,9 +392,9 @@ class Orchestrator(
                                     // lands back in AwaitingConsoleStart, not Running.
                                     val newType = hardwareAdapter.deviceInfo.value?.type
                                     val mode = hardwareAdapter.exerciseData.value?.workoutMode
-                                        ?: WorkoutModeInterpreter.WORKOUT_MODE_IDLE
+                                        ?: WorkoutPhase.IDLE.code
                                     _state.value = if (newType == DeviceType.TREADMILL &&
-                                        mode != WorkoutModeInterpreter.WORKOUT_MODE_RUNNING) {
+                                        mode != WorkoutPhase.RUNNING.code) {
                                         // Re-armed: the earlier session's "left idle" confirmation
                                         // must not turn the new session's parked IDLE into a stop
                                         // that discards the ride in progress.

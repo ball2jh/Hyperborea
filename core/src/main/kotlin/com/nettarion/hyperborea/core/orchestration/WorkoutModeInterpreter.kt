@@ -2,6 +2,7 @@ package com.nettarion.hyperborea.core.orchestration
 
 import com.nettarion.hyperborea.core.AppLogger
 import com.nettarion.hyperborea.core.model.DeviceType
+import com.nettarion.hyperborea.core.model.WorkoutPhase
 
 /**
  * Translates the console's polled WORKOUT_MODE into orchestrator actions:
@@ -36,27 +37,27 @@ internal class WorkoutModeInterpreter(private val logger: AppLogger) {
     }
 
     fun interpret(workoutMode: Int?, state: OrchestratorState, deviceType: DeviceType?): Action {
+        val phase = WorkoutPhase.fromCode(workoutMode)
         // DMK is a safety-key interlock, not the console leaving idle: pulling and reinserting the
         // key while armed must not turn the following IDLE report into a stop of the armed workout.
-        if (workoutMode != null &&
-            workoutMode != WORKOUT_MODE_IDLE && workoutMode != WORKOUT_MODE_UNKNOWN &&
-            workoutMode != WORKOUT_MODE_RESULTS && workoutMode != WORKOUT_MODE_DMK) {
+        // A code outside the known set (phase == null) still counts as having left idle.
+        if (workoutMode != null && phase !in NOT_LEFT_IDLE) {
             consoleLeftIdle = true
         }
-        return when (workoutMode) {
-            WORKOUT_MODE_RUNNING ->
+        return when (phase) {
+            WorkoutPhase.RUNNING ->
                 if (state is OrchestratorState.AwaitingConsoleStart) Action.PromoteToRunning
                 else Action.None
-            WORKOUT_MODE_PAUSE ->
+            WorkoutPhase.PAUSE ->
                 if (state is OrchestratorState.Running && deviceType == DeviceType.TREADMILL) Action.PauseFromConsole
                 else Action.None
-            WORKOUT_MODE_DMK ->
+            WorkoutPhase.DMK ->
                 if (state is OrchestratorState.Running) Action.PauseFromConsole
                 else Action.None
-            WORKOUT_MODE_RESULTS -> if (deviceType == DeviceType.TREADMILL && state is OrchestratorState.Running) {
+            WorkoutPhase.RESULTS -> if (deviceType == DeviceType.TREADMILL && state is OrchestratorState.Running) {
                 Action.StopWorkout(wasRunning = true)
             } else Action.None
-            WORKOUT_MODE_IDLE -> when (state) {
+            WorkoutPhase.IDLE -> when (state) {
                 is OrchestratorState.Paused -> if (deviceType == null || deviceType == DeviceType.TREADMILL) {
                     Action.None
                 } else Action.ResumeFromSafetyKey
@@ -74,13 +75,8 @@ internal class WorkoutModeInterpreter(private val logger: AppLogger) {
         }
     }
 
-    companion object {
-        private const val TAG = "WorkoutModeInterpreter"
-        const val WORKOUT_MODE_UNKNOWN = 0
-        const val WORKOUT_MODE_IDLE = 1
-        const val WORKOUT_MODE_RUNNING = 2
-        const val WORKOUT_MODE_PAUSE = 3
-        const val WORKOUT_MODE_RESULTS = 4
-        const val WORKOUT_MODE_DMK = 8
+    private companion object {
+        const val TAG = "WorkoutModeInterpreter"
+        val NOT_LEFT_IDLE = setOf(WorkoutPhase.IDLE, WorkoutPhase.UNKNOWN, WorkoutPhase.RESULTS, WorkoutPhase.DMK)
     }
 }

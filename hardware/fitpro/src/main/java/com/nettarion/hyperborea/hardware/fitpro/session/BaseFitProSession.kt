@@ -6,6 +6,7 @@ import com.nettarion.hyperborea.core.model.DeviceIdentity
 import com.nettarion.hyperborea.core.model.DeviceInfo
 import com.nettarion.hyperborea.core.model.DeviceType
 import com.nettarion.hyperborea.core.model.ExerciseData
+import com.nettarion.hyperborea.core.model.WorkoutPhase
 import com.nettarion.hyperborea.core.model.isBeltBased
 import com.nettarion.hyperborea.hardware.fitpro.transport.HidTransport
 import kotlin.math.roundToInt
@@ -18,6 +19,7 @@ import kotlinx.coroutines.cancel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
 /**
@@ -129,9 +131,66 @@ internal abstract class BaseFitProSession(
             val snapshot = accumulator.snapshot()
             // DMK can also be reported while merely parked/arming. Do not carry counters from
             // the console's previous workout into a new one that has never started.
-            if (snapshot.elapsedTime > 0 || snapshot.workoutMode == 2 || snapshot.workoutMode == 3) {
+            if (snapshot.elapsedTime > 0 || snapshot.workoutMode == WorkoutPhase.RUNNING.code || snapshot.workoutMode == WorkoutPhase.PAUSE.code) {
                 accumulator.preserveCountersAcrossReset()
             }
+        }
+    }
+
+    /**
+     * The safety gate every command passes before a protocol encodes it; returns false when the
+     * command must be dropped. One home for the paused-belt rules both protocols share:
+     *
+     *  - An explicit Pause on a belt machine always latches, revokes any start/resume the protocol
+     *    still has in flight ([onExplicitBeltPause]) and drops queued incline motion.
+     *  - An explicit Resume is the *only* command that clears the latch.
+     *  - While latched, belt-speed targets are refused — a speed write must never be what restarts
+     *    a paused belt.
+     */
+    protected suspend fun admitCommand(command: DeviceCommand): Boolean {
+        if (command is DeviceCommand.PauseWorkout && detectedDeviceType.isBeltBased) {
+            latchBeltPause(explicit = true)
+            onExplicitBeltPause()
+            gradeCoalescer.cancelPending()
+        }
+        if (command is DeviceCommand.ResumeWorkout) { beltRestartRequiresUser = false; beltHasRun = true }
+        if (beltRestartRequiresUser && (command is DeviceCommand.SetTargetSpeed || command is DeviceCommand.AdjustSpeed)) {
+            logger.w(tag, "Ignoring belt-speed target while paused — explicit Resume or physical Start required")
+            return false
+        }
+        return true
+    }
+
+    /** Revoke whatever start/resume the protocol has pending; runs after the latch is set. */
+    protected open fun onExplicitBeltPause() {}
+
+    /**
+     * Latch and ride-clock reactions to the console *entering* [phase] (call on change only),
+     * identical on both protocols once V2 has translated its state into [WorkoutPhase]. The ride
+     * clock must follow console-initiated transitions too (pause timeout, safety interlock), not
+     * just our own Pause/Resume commands. RESULTS is protocol-specific (each recovers the
+     * controller differently) and stays in the subclasses.
+     */
+    protected fun onWorkoutPhaseEntered(phase: WorkoutPhase) {
+        val belt = detectedDeviceType.isBeltBased
+        when (phase) {
+            WorkoutPhase.DMK -> {
+                latchBeltPause()
+                if (belt) accumulator.pause()
+            }
+            WorkoutPhase.PAUSE -> {
+                beltHasRun = true // a console-reported pause implies an active workout
+                latchBeltPause()
+                if (belt) sessionScope.launch { gradeCoalescer.cancelPending() }
+                accumulator.pause()
+            }
+            WorkoutPhase.WARM_UP, WorkoutPhase.COOL_DOWN -> if (belt) beltHasRun = true
+            WorkoutPhase.RUNNING -> {
+                beltHasRun = true
+                accumulator.resume()
+                accumulator.startTimer()
+            }
+            WorkoutPhase.UNKNOWN, WorkoutPhase.IDLE, WorkoutPhase.RESULTS -> {}
         }
     }
 

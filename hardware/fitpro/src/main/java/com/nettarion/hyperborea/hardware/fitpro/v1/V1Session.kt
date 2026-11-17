@@ -7,6 +7,7 @@ import com.nettarion.hyperborea.core.model.DeviceIdentity
 import com.nettarion.hyperborea.core.model.DeviceInfo
 import com.nettarion.hyperborea.core.model.DeviceType
 import com.nettarion.hyperborea.core.model.ExerciseData
+import com.nettarion.hyperborea.core.model.WorkoutPhase
 import com.nettarion.hyperborea.core.model.isBeltBased
 import com.nettarion.hyperborea.hardware.fitpro.session.BaseFitProSession
 import com.nettarion.hyperborea.hardware.fitpro.session.ConsoleKey
@@ -271,16 +272,7 @@ internal class V1Session(
         }
 
         if (_sessionState.value !is SessionState.Streaming) return
-        if (command is DeviceCommand.PauseWorkout && detectedDeviceType.isBeltBased) {
-            latchBeltPause(explicit = true)
-            pendingResumeFromResults = false
-            gradeCoalescer.cancelPending()
-        }
-        if (command is DeviceCommand.ResumeWorkout) { beltRestartRequiresUser = false; beltHasRun = true }
-        if (beltRestartRequiresUser && (command is DeviceCommand.SetTargetSpeed || command is DeviceCommand.AdjustSpeed)) {
-            logger.w(TAG, "Ignoring belt-speed target while paused — explicit Resume or physical Start required")
-            return
-        }
+        if (!admitCommand(command)) return
 
         // Incline targets route through the grade coalescer (burst → one moving target per
         // interval); the coalescer's writes land in pendingWriteFields via writeGradeTarget.
@@ -291,6 +283,10 @@ internal class V1Session(
         pendingWriteMutex.withLock {
             pendingWriteFields = pendingWriteFields + fields
         }
+    }
+
+    override fun onExplicitBeltPause() {
+        pendingResumeFromResults = false
     }
 
     internal fun commandToFields(command: DeviceCommand): Map<V1DataField, Float> = when (command) {
@@ -886,28 +882,15 @@ internal class V1Session(
                     }
                     val previousMode = accumulator.snapshot().workoutMode
                     if (previousMode != mode) {
-                        when (WorkoutMode.fromRaw(mode)) {
-                            WorkoutMode.RESULTS -> if (detectedDeviceType.isBeltBased) {
+                        if (mode == WorkoutMode.RESULTS.raw.toInt()) {
+                            if (detectedDeviceType.isBeltBased) {
                                 if (!pendingResumeFromResults) latchBeltPause()
                                 accumulator.pause()
                             }
-                            WorkoutMode.DMK -> {
-                                latchBeltPause()
-                                if (detectedDeviceType.isBeltBased) accumulator.pause()
-                            }
-                            WorkoutMode.PAUSE -> {
-                                beltHasRun = true // a console-reported pause implies an active workout
-                                latchBeltPause()
-                                if (detectedDeviceType.isBeltBased) sessionScope.launch { gradeCoalescer.cancelPending() }
-                                accumulator.pause()
-                            }
-                            WorkoutMode.WARM_UP, WorkoutMode.COOL_DOWN -> if (detectedDeviceType.isBeltBased) beltHasRun = true
-                            WorkoutMode.RUNNING -> {
-                                beltHasRun = true
-                                accumulator.resume()
-                                accumulator.startTimer()
-                            }
-                            else -> {}
+                        } else {
+                            // V1 WORKOUT_MODE values are the WorkoutPhase codes; an unlisted one
+                            // has no latch/clock reaction.
+                            WorkoutPhase.fromCode(mode)?.let(::onWorkoutPhaseEntered)
                         }
                     }
                     if (detectedDeviceType.isBeltBased && mode == WorkoutMode.RESULTS.raw.toInt()) {
