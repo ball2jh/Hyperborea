@@ -1,6 +1,8 @@
 # Changelog
 
 ## [Unreleased]
+
+## [1.5.0] - 2026-11-17
 - **Programmed treadmill sessions.** Choose a ready-made program or build your own from timed speed/incline blocks with graphs, drag reordering, repeats and gradual ramps, and an optional **Loop program** toggle that repeats until you stop. Programs start from the library; the physical console Start key still gates the belt, and a manual warm-up can hand off into a program (after confirmation) without losing the recording. Contributed by Curtis Searle.
 - **Audible 3–2–1 warnings before every automatic change, even in the background.** Speed/incline changes and the end of a single-pass program get a visible and audible countdown. Block progress, current → next targets and manual-axis status appear in the dashboard strip and in both floating overlay styles, which also carry Pause/Resume and Stop. Adjusting speed or incline yourself holds just that axis until the next block. Pausing freezes the program clock; a missing countdown tone or a lost connection hands control back to you until you resume the program, but never skips a scheduled stop.
 - **Smoother treadmill incline.** Ramps keep fine command precision between block endpoints, a held incline button sends one final destination after release, and Pause/Stop cancel queued incline writes. Bike, elliptical and rower controls are unchanged.
