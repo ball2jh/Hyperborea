@@ -23,7 +23,9 @@ class WifiAdapterTest {
     @Before
     fun setUp() {
         nsdRegistrar = mockk(relaxed = true)
-        adapter = WifiAdapter(nsdRegistrar, logger)
+        // Port 0 = OS-assigned. The production port (36866) sits in the ephemeral range, so any
+        // unrelated outbound connection on the build machine can hold it and fail the bind.
+        adapter = WifiAdapter(nsdRegistrar, logger, port = 0)
     }
 
     @After
@@ -106,7 +108,7 @@ class WifiAdapterTest {
     @Test
     fun `start registers mDNS`() = runTest {
         adapter.start(emptyFlow(), buildDeviceInfo())
-        verify { nsdRegistrar.register(WifiServer.PORT, "Test Device", DeviceType.BIKE) }
+        verify { nsdRegistrar.register(0, "Test Device", DeviceType.BIKE) }
     }
 
     @Test
