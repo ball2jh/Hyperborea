@@ -28,8 +28,10 @@ import com.nettarion.hyperborea.ui.theme.LocalHyperboreaColors
 import com.nettarion.hyperborea.ui.util.UnitFormatter
 
 /**
- * Stadium-shaped 400 m running track with a live position marker: the accent arc sweeps one
- * full circuit per 400 m of belt distance, with a lap counter and total distance in the infield.
+ * Stadium-shaped running track with a live position marker: the accent arc sweeps one full
+ * circuit per lap of belt distance — 400 m in metric, a quarter mile in imperial, so the lap
+ * counter always lines up with the distance shown under it — with the lap counter and total
+ * distance in the infield.
  *
  * The sweep animates on [TrackMath.continuousLaps] (a monotonic laps-plus-fraction value) so the
  * lap boundary doesn't animate backwards; only the drawn fraction wraps.
@@ -41,10 +43,10 @@ fun RunningTrackWidget(
     modifier: Modifier = Modifier,
 ) {
     val colors = LocalHyperboreaColors.current
-    val laps = TrackMath.completedLaps(distanceKm)
+    val laps = TrackMath.completedLaps(distanceKm, useImperial)
 
     val animatedLaps by animateFloatAsState(
-        targetValue = TrackMath.continuousLaps(distanceKm),
+        targetValue = TrackMath.continuousLaps(distanceKm, useImperial),
         animationSpec = tween(durationMillis = 900),
         label = "trackProgress",
     )
@@ -118,7 +120,7 @@ fun RunningTrackWidget(
             )
             Spacer(Modifier.height(2.dp))
             Text(
-                text = "400 m track",
+                text = if (useImperial) "¼ mi track" else "400 m track",
                 style = MaterialTheme.typography.labelSmall,
                 color = colors.textLow,
             )
