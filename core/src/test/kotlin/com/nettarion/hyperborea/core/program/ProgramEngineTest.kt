@@ -103,10 +103,93 @@ class ProgramEngineTest {
         assertThat(e.state.blockIndex).isEqualTo(0)
         assertThat(e.state.active).isTrue()
     }
-    private fun program(ramp: Boolean = false) = WorkoutProgram(name = "Test", blocks = listOf(
+    // easeToStop is off so these exercise the bare schedule; the taper has its own tests below.
+    private fun program(ramp: Boolean = false) = WorkoutProgram(name = "Test", easeToStop = false, blocks = listOf(
         ProgramBlock(name = "Easy", durationSeconds = 10, speedKph = 5f),
         ProgramBlock(name = "Effort", durationSeconds = 10, speedKph = 10f, inclinePercent = 5f, ramp = ramp),
     ))
+
+    @Test fun `a fast finish gets a taper sized to its speed and keeps its incline`() {
+        val taper = program().copy(easeToStop = true).windDownBlock()!!
+        // 10 → 3.2 km/h at 0.2 km/h per second is 34 s, rounded up to a 5 s step.
+        assertThat(taper.durationSeconds).isEqualTo(35)
+        assertThat(taper.speedKph).isEqualTo(WorkoutProgram.WIND_DOWN_KPH)
+        assertThat(taper.inclinePercent).isEqualTo(5f)
+        assertThat(taper.ramp).isTrue()
+        val sprint = WorkoutProgram(blocks = listOf(ProgramBlock(speedKph = 30f))).windDownBlock()!!
+        assertThat(sprint.durationSeconds).isEqualTo(120)
+    }
+
+    @Test fun `no taper when it is switched off, the program loops or the finish is already a walk`() {
+        assertThat(program().windDownBlock()).isNull()
+        assertThat(program().copy(easeToStop = true, loop = true).windDownBlock()).isNull()
+        val walkOut = program().copy(easeToStop = true, blocks = program().blocks + ProgramBlock(name = "Cool-down", durationSeconds = 10, speedKph = 4f))
+        assertThat(walkOut.windDownBlock()).isNull()
+        assertThat(walkOut.runPlan()).isEqualTo(walkOut)
+        // The plan is stable: planning a plan must not stack a second taper.
+        val plan = program().copy(easeToStop = true).runPlan()
+        assertThat(plan.runPlan()).isEqualTo(plan)
+    }
+
+    @Test fun `the belt eases down to a walk before the automatic stop`() {
+        val source = program().copy(easeToStop = true)
+        val e = ProgramEngine(source).apply { begin(); repeat(3) { advance(1000) } }
+        assertThat(e.state.source).isEqualTo(source)
+        assertThat(e.state.program.blocks).hasSize(3)
+        // The programmed blocks end without stopping: the change into the taper is announced.
+        val intoTaper = (1..20).flatMap { e.advance(1000) }
+        assertThat(intoTaper.filterIsInstance<ProgramEvent.Finished>()).isEmpty()
+        assertThat(e.state.status).isEqualTo(ProgramStatus.RUNNING)
+        assertThat(e.state.easingToStop).isTrue()
+        assertThat(intoTaper.filterIsInstance<ProgramEvent.Cue>().takeLast(4)).containsExactly(ProgramEvent.Cue(3), ProgramEvent.Cue(2), ProgramEvent.Cue(1), ProgramEvent.Cue(0)).inOrder()
+
+        val taper = (1..35).flatMap { e.advance(1000) }
+        val speeds = taper.filterIsInstance<ProgramEvent.Target>().map { it.target.speedKph }
+        assertThat(speeds).isNotEmpty()
+        assertThat(speeds.zipWithNext().all { (a, b) -> b < a }).isTrue()
+        assertThat(speeds.first()).isLessThan(10f)
+        assertThat(speeds.last()).isGreaterThan(WorkoutProgram.WIND_DOWN_KPH)
+        assertThat(speeds.last()).isLessThan(WorkoutProgram.WIND_DOWN_KPH + .5f)
+        assertThat(taper.filterIsInstance<ProgramEvent.Target>().all { it.target.inclinePercent == 5f }).isTrue()
+        // …and the stop itself still gets its three warnings and acknowledgement.
+        assertThat(taper.filterIsInstance<ProgramEvent.Cue>()).containsExactly(ProgramEvent.Cue(3), ProgramEvent.Cue(2), ProgramEvent.Cue(1), ProgramEvent.Cue(0)).inOrder()
+        assertThat(taper.takeLast(2)).containsExactly(ProgramEvent.Cue(0), ProgramEvent.Finished).inOrder()
+        assertThat(e.state.status).isEqualTo(ProgramStatus.COMPLETE)
+    }
+
+    @Test fun `shifting every block keeps the shape and reverses exactly`() {
+        val p = program()
+        val faster = p.shiftedBy(speedKph = 1.5f, inclinePercent = .5f)!!
+        assertThat(faster.blocks.map { it.speedKph }).containsExactly(6.5f, 11.5f).inOrder()
+        assertThat(faster.blocks.map { it.inclinePercent }).containsExactly(.5f, 5.5f).inOrder()
+        assertThat(faster.blocks.map { it.id to it.durationSeconds }).isEqualTo(p.blocks.map { it.id to it.durationSeconds })
+        assertThat(faster.shiftedBy(speedKph = -1.5f, inclinePercent = -.5f)).isEqualTo(p)
+    }
+
+    @Test fun `a shift that would push any block past a limit is refused rather than flattened`() {
+        val p = program()
+        assertThat(p.shiftedBy(speedKph = 2.5f, speedRange = .5f..12f)).isNull()
+        assertThat(p.shiftedBy(speedKph = 2f, speedRange = .5f..12f)!!.blocks.last().speedKph).isEqualTo(12f)
+        assertThat(p.shiftedBy(speedKph = -5f)).isNull()
+        assertThat(p.shiftedBy(inclinePercent = -.5f, inclineRange = 0f..12f)).isNull()
+        assertThat(p.shiftedBy(inclinePercent = 8f, inclineRange = 0f..12f)).isNull()
+    }
+
+    @Test fun `a program built for a faster treadmill can still be shifted down into range`() {
+        val p = program()
+        // 10 km/h is over this treadmill's 9 km/h limit: stepping up is refused, stepping down is not.
+        assertThat(p.shiftedBy(speedKph = .5f, speedRange = .5f..9f)).isNull()
+        assertThat(p.shiftedBy(speedKph = -.5f, speedRange = .5f..9f)!!.blocks.last().speedKph).isEqualTo(9.5f)
+    }
+
+    @Test fun `repeated tenth-of-a-mph steps reach a limit without float noise refusing the last one`() {
+        val step = .1f / .621371f
+        var p = WorkoutProgram(blocks = listOf(ProgramBlock(speedKph = 11.5f * 1.609344f)))
+        repeat(5) { p = p.shiftedBy(speedKph = step, speedRange = .5f..12f * 1.609344f)!! }
+        assertThat(p.blocks.single().speedKph).isAtMost(12f * 1.609344f)
+        assertThat(p.shiftedBy(speedKph = step, speedRange = .5f..12f * 1.609344f)).isNull()
+        assertThat(p.validationError()).isNull()
+    }
     private fun started(ramp: Boolean = false) = ProgramEngine(program(ramp)).apply { begin(); repeat(3) { advance(1000) } }
 
     @Test fun `arming never commands the belt before the physical start`() {

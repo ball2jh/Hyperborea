@@ -2,6 +2,7 @@ package com.nettarion.hyperborea.ui.program
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.gestures.detectDragGestures
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.itemsIndexed
@@ -81,8 +82,15 @@ fun ProgramsScreen(onBack: () -> Unit, onStarted: () -> Unit, viewModel: Program
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp), verticalAlignment = Alignment.CenterVertically) {
                 FilterChip(selected = !savedTab, onClick = { viewModel.savedTab.value = false }, label = { Text("Ready-made") })
                 FilterChip(selected = savedTab, onClick = { viewModel.savedTab.value = true }, label = { Text("My programs (${saved.size})") })
+                if (savedTab) {
+                    OutlinedButton(onClick = { viewModel.importFiles() }) { Text("Import files") }
+                    OutlinedButton(enabled = saved.isNotEmpty(), onClick = { viewModel.exportFiles() }) { Text("Export files") }
+                }
                 Spacer(Modifier.weight(1f))
                 ProgramOverlayToggle()
+            }
+            if (savedTab) viewModel.filesPath?.let { path ->
+                Text("Program files are JSON, one per program, in $path — copy them with adb push / adb pull, then Import.", color = colors.textMedium, style = MaterialTheme.typography.bodySmall)
             }
             if (savedTab && saved.isEmpty()) Text("Save a custom program to run it again later.", color = colors.textMedium)
             LazyVerticalGrid(GridCells.Adaptive(480.dp), horizontalArrangement = Arrangement.spacedBy(16.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
@@ -124,6 +132,13 @@ fun ProgramsScreen(onBack: () -> Unit, onStarted: () -> Unit, viewModel: Program
                         OutlinedButton(onClick = { viewModel.add(true) }) { Text("Repeat block") }
                         Text("Drag ⠿ to reorder", color = colors.textMedium, modifier = Modifier.align(Alignment.CenterVertically))
                     }
+                    WholeProgramShift(
+                        draft, imperial,
+                        // The connected treadmill's limits, else the widest a program may hold.
+                        speedRange = WorkoutProgram.MIN_SPEED_KPH..maxOf(WorkoutProgram.MIN_SPEED_KPH, device?.maxSpeed?.takeIf { it > 0f } ?: WorkoutProgram.MAX_SPEED_KPH),
+                        inclineRange = device?.takeIf { it.maxIncline > it.minIncline }?.let { it.minIncline..it.maxIncline } ?: WorkoutProgram.MIN_INCLINE_PERCENT..WorkoutProgram.MAX_INCLINE_PERCENT,
+                        onShift = viewModel::update,
+                    )
                 }
                 Column(Modifier.width(340.dp).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(12.dp)) {
                     Row(Modifier.fillMaxWidth().toggleable(value = draft.loop, role = androidx.compose.ui.semantics.Role.Switch, onValueChange = { viewModel.update(draft.copy(loop = it)) }), verticalAlignment = Alignment.CenterVertically) {
@@ -131,6 +146,18 @@ fun ProgramsScreen(onBack: () -> Unit, onStarted: () -> Unit, viewModel: Program
                         Switch(checked = draft.loop, onCheckedChange = null)
                     }
                     if (draft.loop) Text("Repeat all blocks until you press Stop.", color = colors.textMedium)
+                    if (!draft.loop) {
+                        Row(Modifier.fillMaxWidth().toggleable(value = draft.easeToStop, role = androidx.compose.ui.semantics.Role.Switch, onValueChange = { viewModel.update(draft.copy(easeToStop = it)) }), verticalAlignment = Alignment.CenterVertically) {
+                            Text("Ease to a stop", modifier = Modifier.weight(1f), style = MaterialTheme.typography.titleMedium)
+                            Switch(checked = draft.easeToStop, onCheckedChange = null)
+                        }
+                        val windDown = draft.windDownBlock()
+                        if (draft.easeToStop) Text(
+                            if (windDown != null) "After the last block the belt slows to ${"%.1f".format(windDown.speedKph * if (imperial) .621371f else 1f)} ${if (imperial) "mph" else "km/h"} over ${programTime(windDown.durationSeconds)}, then stops."
+                            else "The last block is already at walking pace, so the belt stops when it ends.",
+                            color = colors.textMedium,
+                        )
+                    }
                     Text("Block ${index + 1}", style = MaterialTheme.typography.titleLarge)
                     OutlinedTextField(value = block.name, onValueChange = { viewModel.updateBlock(index, block.copy(name = it.take(40))) }, label = { Text("Block name") }, singleLine = true)
                     Text("Duration", style = MaterialTheme.typography.titleSmall)
@@ -177,7 +204,8 @@ fun ProgramsScreen(onBack: () -> Unit, onStarted: () -> Unit, viewModel: Program
             }
             draft.validationError(device)?.let { Text(it, color = colors.accentWarm) }
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End, verticalAlignment = Alignment.CenterVertically) {
-                Text("${programTime(draft.totalSeconds)} ${if (draft.loop) "per loop · repeats until stopped" else "total · draft kept on this console"}", color = colors.textMedium, modifier = Modifier.weight(1f))
+                val easeSeconds = draft.windDownBlock()?.durationSeconds
+                Text("${programTime(draft.totalSeconds)} ${if (draft.loop) "per loop · repeats until stopped" else "total${easeSeconds?.let { " + ${programTime(it)} easing to a stop" } ?: ""} · draft kept on this console"}", color = colors.textMedium, modifier = Modifier.weight(1f))
                 OutlinedButton(enabled = enteredDuration != null, onClick = viewModel::save, modifier = Modifier.padding(end = 12.dp)) { Text("Save program") }
                 Button(enabled = startMode != null && device != null && enteredDuration != null && draft.validationError(device) == null, onClick = { requestStart(draft) }) { Text("Start session") }
             }
@@ -192,6 +220,47 @@ fun ProgramsScreen(onBack: () -> Unit, onStarted: () -> Unit, viewModel: Program
             confirmButton = { TextButton(enabled = startMode == ProgramStartMode.AFTER_WARMUP, onClick = { warmupProgram = null; viewModel.start(program, onStarted) }) { Text("Start program") } },
             dismissButton = { TextButton(onClick = { warmupProgram = null }) { Text("Keep walking") } },
         )
+    }
+}
+
+/**
+ * Moves every block at once — the whole workout a notch faster/slower or steeper/flatter. A step
+ * is disabled when it would push any block past the treadmill's limits, so the profile keeps its
+ * shape and stepping back always restores it.
+ */
+@Composable
+private fun WholeProgramShift(
+    draft: WorkoutProgram,
+    imperial: Boolean,
+    speedRange: ClosedFloatingPointRange<Float>,
+    inclineRange: ClosedFloatingPointRange<Float>,
+    onShift: (WorkoutProgram) -> Unit,
+) {
+    val colors = LocalHyperboreaColors.current
+    // Steps are in the rider's display unit; blocks are stored in km/h.
+    val toKph = if (imperial) 1f / .621371f else 1f
+    @Composable
+    fun StepButtons(what: String, steps: List<Float>, shifted: (Float) -> WorkoutProgram?) {
+        for (step in steps) {
+            val result = shifted(step)
+            val label = "${if (step > 0) "＋" else "−"} ${"%.1f".format(kotlin.math.abs(step))}"
+            OutlinedButton(
+                enabled = result != null,
+                contentPadding = PaddingValues(horizontal = 12.dp),
+                modifier = Modifier.semantics { contentDescription = "All blocks: $what $label" },
+                onClick = { result?.let(onShift) },
+            ) { Text(label, maxLines = 1) }
+        }
+    }
+    // Scrolls sideways rather than wrapping on the narrower consoles.
+    Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+        Text("All blocks", style = MaterialTheme.typography.titleSmall)
+        Text("Speed", color = colors.textMedium, modifier = Modifier.padding(start = 8.dp))
+        StepButtons("speed", listOf(-.5f, -.1f, .1f, .5f)) { draft.shiftedBy(speedKph = it * toKph, speedRange = speedRange, inclineRange = inclineRange) }
+        Text(if (imperial) "mph" else "km/h", color = colors.textMedium)
+        Text("Incline", color = colors.textMedium, modifier = Modifier.padding(start = 16.dp))
+        StepButtons("incline", listOf(-.5f, .5f)) { draft.shiftedBy(inclinePercent = it, speedRange = speedRange, inclineRange = inclineRange) }
+        Text("%", color = colors.textMedium)
     }
 }
 

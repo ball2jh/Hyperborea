@@ -9,6 +9,7 @@ import com.nettarion.hyperborea.core.orchestration.Orchestrator
 import com.nettarion.hyperborea.core.profile.UserPreferences
 import com.nettarion.hyperborea.core.program.*
 import com.nettarion.hyperborea.program.ProgramCodec
+import com.nettarion.hyperborea.program.ProgramFiles
 import com.nettarion.hyperborea.program.ProgramStore
 import com.nettarion.hyperborea.startHyperboreaService
 import dagger.hilt.android.lifecycle.HiltViewModel
@@ -23,6 +24,7 @@ import javax.inject.Inject
 @HiltViewModel
 class ProgramsViewModel @Inject constructor(
     private val store: ProgramStore,
+    private val files: ProgramFiles,
     hardware: HardwareAdapter,
     orchestrator: Orchestrator,
     controller: com.nettarion.hyperborea.program.ProgramController,
@@ -46,6 +48,29 @@ class ProgramsViewModel @Inject constructor(
     fun update(program: WorkoutProgram) { draft.value = program; store.saveDraft(program); hasDraft.value = true }
     fun updateBlock(index: Int, block: ProgramBlock) { update(draft.value.copy(blocks = draft.value.blocks.mapIndexed { i, b -> if (i == index) block else b })) }
     fun move(from: Int, to: Int) { update(draft.value.moveBlock(from, to)) }
+
+    /** Where program files live, for the on-screen hint; null without shared storage. */
+    val filesPath: String? = runCatching { files.directory()?.absolutePath }.getOrNull()
+    fun exportFiles() = viewModelScope.launch {
+        message.value = try {
+            val count = withContext(Dispatchers.IO) { files.export(imperial.value) }
+            if (count == 0) "No saved programs to export yet." else "Exported $count program file${if (count == 1) "" else "s"} to $filesPath"
+        } catch (e: kotlinx.coroutines.CancellationException) { throw e }
+        catch (e: Exception) { e.message ?: "Couldn't export programs" }
+    }
+    fun importFiles() = viewModelScope.launch {
+        message.value = try {
+            val result = withContext(Dispatchers.IO) { files.importAll() }
+            savedTab.value = true
+            val skipped = result.rejected.joinToString(" · ") { "${it.fileName}: ${it.reason}" }
+            when {
+                result.imported.isEmpty() && result.rejected.isEmpty() -> "No .json program files found in $filesPath"
+                result.rejected.isEmpty() -> "Imported ${result.imported.size} program${if (result.imported.size == 1) "" else "s"}"
+                else -> "Imported ${result.imported.size}, skipped ${result.rejected.size} — $skipped"
+            }
+        } catch (e: kotlinx.coroutines.CancellationException) { throw e }
+        catch (e: Exception) { e.message ?: "Couldn't import programs" }
+    }
     fun add(duplicate: Boolean) {
         if (draft.value.blocks.size >= 100) return
         val index = draft.value.blocks.indexOfFirst { it.id == selectedId.value }.coerceAtLeast(0)

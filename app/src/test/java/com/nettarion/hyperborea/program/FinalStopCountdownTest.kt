@@ -15,7 +15,8 @@ class FinalStopCountdownTest {
         val engine = ProgramEngine(program)
         val cues = mutableListOf<Pair<Int, Boolean>>()
         engine.begin()
-        repeat(30) {
+        // Long enough for the two blocks plus the automatic taper a single-pass program appends.
+        repeat(60) {
             engine.advance(1000).filterIsInstance<ProgramEvent.Cue>().filter { it.count > 0 }
                 .forEach { cues += it.count to isFinalStopCountdown(engine.state) }
         }
@@ -24,9 +25,17 @@ class FinalStopCountdownTest {
 
     @Test fun `only the countdown to a single pass program's end is a stop warning`() {
         val cues = cueKinds(WorkoutProgram(blocks = blocks))
-        // Cues 3-2-1 come before the lead-in ends, before the A→B change and before the stop.
+        // Cues 3-2-1 come before the lead-in ends, before the A→B change, before the belt starts
+        // easing down and before the stop. Only the last set is a stop warning.
         assertThat(cues.filter { it.second }.map { it.first }).containsExactly(3, 2, 1).inOrder()
-        assertThat(cues.count { !it.second }).isAtLeast(3) // lead-in and block change stay strict
+        assertThat(cues.takeLast(3).all { it.second }).isTrue()
+        assertThat(cues.count { !it.second }).isEqualTo(8) // lead-in (2-1 after begin), block change and taper start stay strict
+    }
+
+    @Test fun `without the taper the stop warning comes at the end of the last block`() {
+        val cues = cueKinds(WorkoutProgram(blocks = blocks, easeToStop = false))
+        assertThat(cues.filter { it.second }.map { it.first }).containsExactly(3, 2, 1).inOrder()
+        assertThat(cues.count { !it.second }).isEqualTo(5)
     }
 
     @Test fun `looping programs never treat a countdown as a stop warning`() {
