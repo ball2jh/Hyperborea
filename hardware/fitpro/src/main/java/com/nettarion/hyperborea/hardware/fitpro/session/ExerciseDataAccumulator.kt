@@ -1,6 +1,7 @@
 package com.nettarion.hyperborea.hardware.fitpro.session
 
 import com.nettarion.hyperborea.core.model.ExerciseData
+import kotlin.math.roundToInt
 
 class ExerciseDataAccumulator(
     private val clock: () -> Long = System::currentTimeMillis,
@@ -12,8 +13,8 @@ class ExerciseDataAccumulator(
     private var resistance: Int? = null
     private var incline: Float? = null
     private var heartRate: Int? = null
-    private var distance: Float? = null
-    private var calories: Int? = null
+    private val distance = WorkoutCounter()
+    private val calories = WorkoutCounter()
     private var targetSpeed: Float? = null
     // The only field written off the receive/poll loop: the session publishes a commanded incline
     // target straight from the command coroutine (see BaseFitProSession.handleInclineCommand), so
@@ -22,16 +23,18 @@ class ExerciseDataAccumulator(
     private var targetPower: Int? = null
     private var targetResistance: Int? = null
     private var workoutMode: Int? = null
-    private var verticalGain: Float? = null
+    private val verticalGain = WorkoutCounter()
     private var strokeCount: Int? = null
     private var strokeRate: Int? = null
     @Volatile private var preserveCounterContinuity = false
-    private var rawDistance = 0f
-    private var distanceOffset = 0f
-    private var rawCalories = 0
-    private var caloriesOffset = 0
-    private var rawVerticalGain = 0f
-    private var verticalGainOffset = 0f
+
+    /**
+     * Hold distance, calories and vertical gain while the ride clock is paused. Belt machines
+     * only (the session sets it once it knows the equipment type): a paused belt is stopped, so
+     * anything the console counts meanwhile is phantom. A paused bike's flywheel can still be
+     * turning under the rider, so its counters keep following the console.
+     */
+    @Volatile var holdCountersWhilePaused = false
 
     /** A paused belt controller may reset its counters when its own pause timer expires. */
     fun preserveCountersAcrossReset() { preserveCounterContinuity = true }
@@ -39,7 +42,10 @@ class ExerciseDataAccumulator(
     // Elapsed time tracking — own clock, pausable
     private var accumulatedSeconds: Long = initialElapsedSeconds
     private var runningStartTime: Long = 0L
-    private var paused: Boolean = false
+    // Read by the counter updates on the receive/poll loop, written from the command path too.
+    @Volatile private var paused: Boolean = false
+
+    private val countersHeld: Boolean get() = paused && holdCountersWhilePaused
 
     fun start() {
         // Clock starts lazily on first non-zero cadence
@@ -74,27 +80,15 @@ class ExerciseDataAccumulator(
     fun updateIncline(value: Float) { incline = value }
     /** A `null` value clears the reading — used when a grip sensor loses contact. */
     fun updateHeartRate(value: Int?) { heartRate = value }
-    fun updateDistance(value: Float) {
-        if (preserveCounterContinuity && value < rawDistance - .001f) distanceOffset += rawDistance
-        rawDistance = value
-        distance = if (preserveCounterContinuity) maxOf(distance ?: 0f, distanceOffset + value) else value
-    }
-    fun updateCalories(value: Int) {
-        if (preserveCounterContinuity && value < rawCalories) caloriesOffset += rawCalories
-        rawCalories = value
-        calories = caloriesOffset + value
-    }
+    fun updateDistance(value: Float) = distance.update(value, frozen = countersHeld, preserve = preserveCounterContinuity)
+    fun updateCalories(value: Int) = calories.update(value.toFloat(), frozen = countersHeld, preserve = preserveCounterContinuity)
     fun updateElapsedTime(seconds: Long) { /* ignored — we track our own clock */ }
     fun updateTargetSpeed(value: Float) { targetSpeed = value }
     fun updateTargetIncline(value: Float) { targetIncline = value }
     fun updateTargetPower(value: Int) { targetPower = value }
     fun updateTargetResistance(value: Int) { targetResistance = value }
     fun updateWorkoutMode(value: Int) { workoutMode = value }
-    fun updateVerticalGain(meters: Float) {
-        if (preserveCounterContinuity && meters < rawVerticalGain - .001f) verticalGainOffset += rawVerticalGain
-        rawVerticalGain = meters
-        verticalGain = if (preserveCounterContinuity) maxOf(verticalGain ?: 0f, verticalGainOffset + meters) else meters
-    }
+    fun updateVerticalGain(meters: Float) = verticalGain.update(meters, frozen = countersHeld, preserve = preserveCounterContinuity)
     fun updateStrokeCount(value: Int) { strokeCount = value }
     fun updateStrokeRate(value: Int) { strokeRate = value }
 
@@ -110,15 +104,15 @@ class ExerciseDataAccumulator(
         resistance = resistance,
         incline = incline,
         heartRate = heartRate,
-        distance = distance,
-        calories = calories,
+        distance = distance.published,
+        calories = calories.published?.roundToInt(),
         elapsedTime = elapsedSeconds(),
         targetSpeed = targetSpeed,
         targetIncline = targetIncline,
         targetPower = targetPower,
         targetResistance = targetResistance,
         workoutMode = workoutMode,
-        verticalGain = verticalGain,
+        verticalGain = verticalGain.published,
         strokeCount = strokeCount,
         strokeRate = strokeRate,
     )
@@ -130,8 +124,8 @@ class ExerciseDataAccumulator(
         resistance = null
         incline = null
         heartRate = null
-        distance = null
-        calories = null
+        distance.reset()
+        calories.reset()
         accumulatedSeconds = 0L
         runningStartTime = 0L
         paused = false
@@ -140,12 +134,60 @@ class ExerciseDataAccumulator(
         targetPower = null
         targetResistance = null
         workoutMode = null
-        verticalGain = null
+        verticalGain.reset()
         strokeCount = null
         strokeRate = null
         preserveCounterContinuity = false
-        rawDistance = 0f; distanceOffset = 0f
-        rawCalories = 0; caloriesOffset = 0
-        rawVerticalGain = 0f; verticalGainOffset = 0f
+    }
+}
+
+/**
+ * One console-owned cumulative counter (distance, calories, vertical gain), republished so it
+ * follows the ride clock instead of the console's own bookkeeping:
+ *
+ *  - **Frozen while paused.** Field treadmills keep integrating the *commanded* speed while the
+ *    belt is paused — distance and calories climb at the pre-pause pace for as long as the pause
+ *    lasts. Whatever the console adds while the ride clock is stopped is absorbed into [offset],
+ *    so the published value holds and picks up from the same number on resume.
+ *  - **Continuous across a console reset** when [update] is told to preserve (a paused belt
+ *    controller zeroes its counters when its own pause timer expires). Without that policy a
+ *    reset is followed as-is: it is the console starting a new workout.
+ */
+private class WorkoutCounter {
+    var published: Float? = null
+        private set
+    private var raw = 0f
+    private var offset = 0f
+
+    fun update(value: Float, frozen: Boolean, preserve: Boolean) {
+        val previous = published
+        val consoleReset = value < raw - RESET_EPSILON
+        raw = value
+        when {
+            // First reading, or a reset nobody asked us to bridge: follow the console.
+            previous == null || (consoleReset && !preserve) -> {
+                offset = 0f
+                published = value
+            }
+            frozen -> {
+                offset = previous - value
+                published = previous
+            }
+            else -> {
+                if (consoleReset) offset = previous
+                // A preserved counter never steps backwards on sub-epsilon console jitter.
+                published = if (preserve) maxOf(previous, offset + value) else offset + value
+            }
+        }
+    }
+
+    fun reset() {
+        published = null
+        raw = 0f
+        offset = 0f
+    }
+
+    private companion object {
+        const val RESET_EPSILON = .001f
     }
 }
