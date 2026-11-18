@@ -160,6 +160,13 @@ adds a reusable plan to **My programs**. You can also save a plan after finishin
 Enable **Loop program** on the editor’s right side to repeat all blocks until you press Stop.
 The setting is saved with the program; the last block counts down to the first block’s targets
 when they change, with no automatic workout stop between loops.
+The **All blocks** row under the block strip moves every block's speed (±0.1 / ±0.5 in your
+units) or incline (±0.5 %) together, so one program can be made a notch harder or easier without
+editing each block. A step is unavailable when it would push any block past the treadmill's limits.
+**Ease to a stop** (on by default, saved with the program) adds a taper after the last block of a
+single-pass program: the belt slows to 3.2 km/h (2.0 mph) at about 0.2 km/h per second, then stops.
+It is skipped when the last block is already at walking pace, and never speeds the belt back up if
+you had slowed it yourself.
 Completed workouts continue to use the existing profile ride history.
 
 Program timing, target changes, and audible 3–2–1 countdowns run in the foreground service.
@@ -175,7 +182,8 @@ block enough to give all three beeps. The dashboard strip shows block progress, 
 speed and incline rows, and which axis is manual. Unavailable audio and connection/timing interruptions
 still hold the whole program until **Resume program** gives a fresh countdown, rather than
 fast-forwarding through missed changes. Single-pass programs stop the workout at
-the end of the final block after a visible and audible 3–2–1 stop warning. Looping programs
+the end of the final block — or of the **Ease to a stop** taper that follows it — after a visible
+and audible 3–2–1 stop warning. Looping programs
 repeat until stopped. Programs do not
 automatically resume after process death. A treadmill workout stays paused until you explicitly
 resume or stop it. Supported V1/V2 controllers are initialized with a one-hour hardware pause timer, but if that
@@ -186,6 +194,42 @@ Unsolicited start/running reports and safety-key reinsertion cannot resume a pau
 If Resume is not confirmed within ten seconds, the app reasserts pause and keeps the workout for
 an explicit retry. A USB disconnect while a treadmill is paused still ends the session safely,
 rather than automatically reconnecting with a fresh protocol state.
+
+### Program files
+
+Saved programs live in the app's private settings, but **My programs → Export files** writes each
+one as a JSON file to the app's external files folder, and **Import files** reads every `.json`
+file in that folder back in. The folder is shown on the My programs tab:
+`/sdcard/Android/data/com.nettarion.hyperborea/files/programs/` (`…hyperborea.debug/…` for a debug
+build). That makes it reachable with ADB, so a program can be written or edited on a laptop:
+
+```bash
+adb pull /sdcard/Android/data/com.nettarion.hyperborea/files/programs/ .   # after Export files
+adb push ramps.json /sdcard/Android/data/com.nettarion.hyperborea/files/programs/
+# then My programs → Import files
+```
+
+```json
+{
+  "name": "30 s ramps",
+  "speedUnit": "mph",
+  "loop": false,
+  "easeToStop": true,
+  "blocks": [
+    { "name": "Warm-up", "seconds": 300, "speed": 4.0 },
+    { "name": "Ramp", "seconds": 30, "speed": 6.5, "incline": 1.0, "ramp": true },
+    { "name": "Hold", "seconds": 30, "speed": 6.5, "incline": 1.0 }
+  ]
+}
+```
+
+Only `blocks` with `seconds` and `speed` are required. `speedUnit` is `"kph"` (default) or `"mph"`;
+`incline` is percent (default 0); `ramp` (default false) glides from the previous block's targets
+across the block; a missing `name` falls back to the file name. Limits are the editor's: 1–100
+blocks of 10 s–60 min each. An exported file also carries an `id` — keep it and Import replaces
+that program; remove it (or copy the file under a new name without it) and Import adds a new one.
+A file that can't be used is skipped and named on screen with the reason. Import and Export never
+delete programs or files.
 
 Enable **Background widget** in Programs (or **System Overlay** in Quick Settings). The Programs
 toggle opens Android's overlay permission screen when needed. This shows

@@ -1,6 +1,11 @@
 # Changelog
 
 ## [Unreleased]
+- **Distance and calories no longer keep counting while a treadmill workout is paused.** The console goes on adding distance and calories at the speed the belt was doing when it was paused; the app now holds the totals (and elevation gain) while the workout clock is stopped and carries on from the same numbers on Resume. Recorded rides and fitness apps see the held values too.
+- **The track's laps line up with miles.** With units set to miles a lap is now a quarter mile, so four laps are exactly a mile; before, 400 m laps were counted against a mile readout and drifted further off the quarter-mile marks every lap (2.49 mi instead of 2.50 by lap 10). Metric keeps the 400 m lap.
+- **Programs ease to a stop.** A single-pass program now slows the belt to a 3.2 km/h (2.0 mph) walk after its last block before stopping, instead of braking from running speed — about 35 s from 10 km/h. It is on by default for existing programs, can be switched off per program with **Ease to a stop**, is skipped when the last block is already at walking pace, and never speeds the belt back up if you had slowed it yourself. Looping programs are unaffected.
+- **Make a whole program harder or easier.** The editor's new **All blocks** row moves every block's speed (±0.1 / ±0.5 in your units) or incline (±0.5 %) together. A step that would push any block past the treadmill's limits is unavailable, so the workout keeps its shape.
+- **Programs as files.** **My programs → Export files / Import files** writes and reads one JSON file per program in the app's external files folder, reachable with `adb push` / `adb pull`, so programs can be written or edited on a laptop (speeds in mph or km/h). See *Program files* in the README.
 
 ## [1.5.2] - 2026-11-17
 - **Stop works while a workout is still starting.** Starting holds the hardware for as long as bring-up takes — up to ten minutes when the USB-permission dialog is waiting on an answer — and Stop used to queue behind it and do nothing. It now cancels the bring-up, releases the USB connection and returns to idle. A stop that is interrupted partway (the system tearing the service down) also always finishes, instead of leaving the app stuck on "Stopping…".
