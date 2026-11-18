@@ -182,6 +182,16 @@ class ProgramEngineTest {
         assertThat(p.shiftedBy(speedKph = -.5f, speedRange = .5f..9f)!!.blocks.last().speedKph).isEqualTo(9.5f)
     }
 
+    @Test fun `a target a rounding error over the treadmill's limit can still be started`() {
+        // 10.0 km/h written to a program file as 6.214 mph reads back as 10.00047 km/h.
+        val treadmill = com.nettarion.hyperborea.core.model.DeviceInfo.DEFAULT_INDOOR_BIKE.copy(
+            type = com.nettarion.hyperborea.core.model.DeviceType.TREADMILL, maxSpeed = 10f, minIncline = 0f, maxIncline = 10f,
+        )
+        fun at(kph: Float) = WorkoutProgram(blocks = listOf(ProgramBlock(speedKph = kph)))
+        assertThat(at((6.214 / 0.621371).toFloat()).validationError(treadmill)).isNull()
+        assertThat(at(10.1f).validationError(treadmill)).isNotNull()
+    }
+
     @Test fun `repeated tenth-of-a-mph steps reach a limit without float noise refusing the last one`() {
         val step = .1f / .621371f
         var p = WorkoutProgram(blocks = listOf(ProgramBlock(speedKph = 11.5f * 1.609344f)))

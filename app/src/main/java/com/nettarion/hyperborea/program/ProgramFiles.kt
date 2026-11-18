@@ -53,42 +53,62 @@ class ProgramFiles @Inject constructor(
     /** Writes every saved program to [directory], returning how many files were written. */
     fun export(imperial: Boolean): Int {
         val dir = directory() ?: error("This console's shared storage isn't available.")
-        val names = programFileNames(store.saved.value)
-        names.forEach { (program, name) -> File(dir, name).writeText(ProgramCodec.encodeFile(program, imperial)) }
-        logger.i(TAG, "Exported ${names.size} program file(s) to $dir")
-        return names.size
+        val count = exportProgramFiles(dir, store.saved.value, imperial)
+        logger.i(TAG, "Exported $count program file(s) to $dir")
+        return count
     }
 
     /** Reads every `.json` file in [directory] into the library; unusable files are reported, not fatal. */
     fun importAll(): ProgramImportResult {
         val dir = directory() ?: error("This console's shared storage isn't available.")
-        val files = dir.listFiles { file -> file.isFile && file.name.endsWith(".json", ignoreCase = true) }
-            ?.sortedBy { it.name }.orEmpty()
-        val programs = mutableListOf<WorkoutProgram>()
-        val rejected = mutableListOf<ProgramImportResult.Rejected>()
-        for (file in files) {
-            try {
-                require(file.length() <= MAX_FILE_BYTES) { "The file is too large to be a program." }
-                programs += ProgramCodec.decode(
-                    file.readText(),
-                    fallbackId = programFileId(file.name),
-                    fallbackName = file.name.dropLast(".json".length).take(60),
-                )
-            } catch (e: Exception) {
-                logger.w(TAG, "Skipping program file ${file.name}: ${e.message}")
-                rejected += ProgramImportResult.Rejected(file.name, e.message ?: "Couldn't read the file")
-            }
-        }
-        // Two files claiming one id would silently overwrite each other; keep the first, name the rest.
-        val unique = programs.distinctBy { it.id }
-        store.saveAll(unique)
-        logger.i(TAG, "Imported ${unique.size} program file(s) from $dir, rejected ${rejected.size}")
-        return ProgramImportResult(unique.map { it.name }, rejected)
+        val (programs, rejected) = readProgramFiles(dir)
+        rejected.forEach { logger.w(TAG, "Skipping program file ${it.fileName}: ${it.reason}") }
+        store.saveAll(programs)
+        logger.i(TAG, "Imported ${programs.size} program file(s) from $dir, rejected ${rejected.size}")
+        return ProgramImportResult(programs.map { it.name }, rejected)
     }
 
     private companion object {
         const val TAG = "Programs"
         const val DIRECTORY = "programs"
-        const val MAX_FILE_BYTES = 100_000L
     }
+}
+
+private const val MAX_FILE_BYTES = 100_000L
+
+private fun programFilesIn(dir: File): List<File> =
+    dir.listFiles { file -> file.isFile && file.name.endsWith(".json", ignoreCase = true) }?.sortedBy { it.name }.orEmpty()
+
+/** Writes one file per program into [dir], returning how many were written. */
+internal fun exportProgramFiles(dir: File, programs: List<WorkoutProgram>, imperial: Boolean): Int {
+    val names = programFileNames(programs)
+    names.forEach { (program, name) -> File(dir, name).writeText(ProgramCodec.encodeFile(program, imperial)) }
+    return names.size
+}
+
+/** Decodes every `.json` file in [dir]: the usable programs, and each unusable file with its reason. */
+internal fun readProgramFiles(dir: File): Pair<List<WorkoutProgram>, List<ProgramImportResult.Rejected>> {
+    val decoded = mutableListOf<Pair<File, WorkoutProgram>>()
+    val rejected = mutableListOf<ProgramImportResult.Rejected>()
+    for (file in programFilesIn(dir)) {
+        try {
+            require(file.length() <= MAX_FILE_BYTES) { "The file is too large to be a program." }
+            decoded += file to ProgramCodec.decode(
+                file.readText(),
+                fallbackId = programFileId(file.name),
+                fallbackName = file.name.dropLast(".json".length).take(60),
+            )
+        } catch (e: Exception) {
+            rejected += ProgramImportResult.Rejected(file.name, e.message ?: "Couldn't read the file")
+        }
+    }
+    // Files sharing an id — a copy that kept its "id", or a renamed program's earlier export —
+    // would overwrite one another, and nothing here can tell which the user means. Import none
+    // of them and say so, rather than guess or delete.
+    val (unique, clashing) = decoded.groupBy { it.second.id }.values.partition { it.size == 1 }
+    for (group in clashing) for ((file, _) in group) {
+        val others = group.map { it.first.name }.filter { it != file.name }.joinToString(", ")
+        rejected += ProgramImportResult.Rejected(file.name, "Same \"id\" as $others — delete the one you don't want, or remove its \"id\" line to import it as a new program.")
+    }
+    return unique.map { it.single().second } to rejected.sortedBy { it.fileName }
 }

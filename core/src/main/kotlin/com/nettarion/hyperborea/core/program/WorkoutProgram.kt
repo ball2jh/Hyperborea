@@ -70,8 +70,8 @@ data class WorkoutProgram(
             // Only the limit being approached can refuse the move, so a program built for a
             // faster or steeper treadmill can still be brought down into this one's range.
             return when {
-                delta > 0f && moved > range.endInclusive + SHIFT_TOLERANCE -> null
-                delta < 0f && moved < range.start - SHIFT_TOLERANCE -> null
+                delta > 0f && moved > range.endInclusive + LIMIT_TOLERANCE -> null
+                delta < 0f && moved < range.start - LIMIT_TOLERANCE -> null
                 delta > 0f -> minOf(moved, maxOf(value, range.endInclusive))
                 delta < 0f -> maxOf(moved, minOf(value, range.start))
                 else -> value
@@ -93,7 +93,9 @@ data class WorkoutProgram(
         blocks.any { it.durationSeconds !in 10..3600 } -> "Each block must last 10 seconds to 60 minutes."
         blocks.any { !it.speedKph.isFinite() || it.speedKph !in MIN_SPEED_KPH..MAX_SPEED_KPH || !it.inclinePercent.isFinite() || it.inclinePercent !in MIN_INCLINE_PERCENT..MAX_INCLINE_PERCENT } -> "Speed or incline is outside the supported range."
         device != null && device.type != DeviceType.TREADMILL -> "Programs require a treadmill."
-        device != null && blocks.any { it.speedKph > device.maxSpeed || it.inclinePercent !in device.minIncline..device.maxIncline } -> "This program exceeds the connected treadmill's speed or incline limits. Edit it before starting."
+        // Tolerant by a hair: a target sitting exactly on the treadmill's limit comes back from a
+        // unit-converted program file a fraction over it, and the controller clamps what it sends.
+        device != null && blocks.any { it.speedKph > device.maxSpeed + LIMIT_TOLERANCE || it.inclinePercent !in device.minIncline..device.maxIncline } -> "This program exceeds the connected treadmill's speed or incline limits. Edit it before starting."
         else -> null
     }
 
@@ -122,8 +124,11 @@ data class WorkoutProgram(
         /** Taper rate: a 10 km/h finish takes about 35 s to reach walking pace. */
         const val WIND_DOWN_KPH_PER_SECOND = .2f
 
-        /** Absorbs float error from repeated unit-converted steps (0.1 mph is 0.1609… km/h). */
-        private const val SHIFT_TOLERANCE = 1e-3f
+        /**
+         * Absorbs unit-conversion error at a limit: repeated 0.1 mph steps (0.1609… km/h) and
+         * the three decimals a program file keeps (0.0005 mph is 0.0008 km/h).
+         */
+        private const val LIMIT_TOLERANCE = 1e-3f
     }
 }
 

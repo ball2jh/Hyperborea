@@ -228,8 +228,10 @@ Only `blocks` with `seconds` and `speed` are required. `speedUnit` is `"kph"` (d
 across the block; a missing `name` falls back to the file name. Limits are the editor's: 1–100
 blocks of 10 s–60 min each. An exported file also carries an `id` — keep it and Import replaces
 that program; remove it (or copy the file under a new name without it) and Import adds a new one.
-A file that can't be used is skipped and named on screen with the reason. Import and Export never
-delete programs or files.
+A file that can't be used is skipped and named on screen with the reason. So are files that share
+an `id` (a copy that kept it, or the earlier export of a program you have since renamed): none of
+them is imported until you delete the one you don't want, or remove its `id` so it imports as a
+new program. Import and Export never delete programs or files.
 
 Enable **Background widget** in Programs (or **System Overlay** in Quick Settings). The Programs
 toggle opens Android's overlay permission screen when needed. This shows
