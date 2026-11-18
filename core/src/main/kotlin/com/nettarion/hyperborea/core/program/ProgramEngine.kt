@@ -12,7 +12,7 @@ sealed interface ProgramEvent {
 /** Deterministic session clock. Only its owner may advance it, after verifying hardware is ready. */
 class ProgramEngine(program: WorkoutProgram) {
     init { require(program.validationError() == null) }
-    var state = ProgramRunState(program)
+    var state = ProgramRunState(program.runPlan(), source = program)
         private set
     private var leadInMillis = 3000L
     private var boundaryPaddingMillis = 0L

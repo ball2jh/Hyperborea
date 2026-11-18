@@ -57,10 +57,18 @@ class V2SessionTest {
         transport.emitIncoming(buildEventPacket(V2FeatureId.CURRENT_CALORIES, 0f))
         transport.emitIncoming(buildEventPacket(V2FeatureId.DISTANCE, 500f))
         transport.emitIncoming(buildEventPacket(V2FeatureId.CURRENT_CALORIES, 25f)); runCurrent()
-        assertThat(session.exerciseData.value?.distance).isEqualTo(2.5f)
-        assertThat(session.exerciseData.value?.calories).isEqualTo(125)
+        // Still paused: the totals hold through the controller's reset and whatever it counts after it.
+        assertThat(session.exerciseData.value?.distance).isEqualTo(2f)
+        assertThat(session.exerciseData.value?.calories).isEqualTo(100)
         assertThat(transport.writtenPackets.drop(baseline).mapNotNull { it.workoutStateWriteValue() }).containsExactly(V2WorkoutMode.NONE.raw)
         assertThat(transport.writtenPackets.drop(baseline).none { it.isFeatureWrite(V2FeatureId.TARGET_KPH) }).isTrue()
+        // Once the belt runs again the workout carries on from the held totals.
+        session.writeFeature(DeviceCommand.ResumeWorkout); runCurrent()
+        transport.emitIncoming(buildEventPacket(V2FeatureId.WORKOUT_STATE, V2WorkoutMode.RUNNING.raw))
+        transport.emitIncoming(buildEventPacket(V2FeatureId.DISTANCE, 700f))
+        transport.emitIncoming(buildEventPacket(V2FeatureId.CURRENT_CALORIES, 40f)); runCurrent()
+        assertThat(session.exerciseData.value?.distance).isWithin(1e-4f).of(2.2f)
+        assertThat(session.exerciseData.value?.calories).isEqualTo(115)
     }
 
     @Test fun `explicit V2 Resume after expiry performs start sequence and restores commanded speed`() = runTest {

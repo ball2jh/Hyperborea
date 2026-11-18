@@ -32,6 +32,74 @@ class ExerciseDataAccumulatorTest {
         assertThat(accumulator.snapshot().calories).isEqualTo(10)
     }
 
+    @Test fun `counters hold while paused even though the console keeps counting`() {
+        accumulator.holdCountersWhilePaused = true
+        // Field report: a paused treadmill console keeps integrating its commanded speed.
+        accumulator.updateDistance(1f); accumulator.updateCalories(80); accumulator.updateVerticalGain(10f)
+        accumulator.pause()
+        accumulator.updateDistance(1.4f); accumulator.updateCalories(110); accumulator.updateVerticalGain(14f)
+        accumulator.updateDistance(1.9f); accumulator.updateCalories(150); accumulator.updateVerticalGain(19f)
+        assertThat(accumulator.snapshot().distance).isEqualTo(1f)
+        assertThat(accumulator.snapshot().calories).isEqualTo(80)
+        assertThat(accumulator.snapshot().verticalGain).isEqualTo(10f)
+
+        // Resuming carries on from the held value, not from the console's inflated one.
+        accumulator.resume()
+        accumulator.updateDistance(2.0f); accumulator.updateCalories(158); accumulator.updateVerticalGain(20f)
+        assertThat(accumulator.snapshot().distance).isWithin(1e-4f).of(1.1f)
+        assertThat(accumulator.snapshot().calories).isEqualTo(88)
+        assertThat(accumulator.snapshot().verticalGain).isWithin(1e-4f).of(11f)
+    }
+
+    @Test fun `a second pause holds again and the paused drift never accumulates`() {
+        accumulator.holdCountersWhilePaused = true
+        accumulator.updateDistance(1f)
+        accumulator.pause(); accumulator.updateDistance(1.5f); accumulator.resume()
+        accumulator.updateDistance(1.7f)
+        accumulator.pause(); accumulator.updateDistance(2.7f); accumulator.resume()
+        accumulator.updateDistance(2.8f)
+        assertThat(accumulator.snapshot().distance).isWithin(1e-4f).of(1.3f)
+    }
+
+    @Test fun `paused counters survive the controller zeroing them and resume from the held value`() {
+        accumulator.holdCountersWhilePaused = true
+        accumulator.updateDistance(2f); accumulator.updateCalories(100)
+        accumulator.preserveCountersAcrossReset(); accumulator.pause()
+        accumulator.updateDistance(2.6f); accumulator.updateCalories(140)
+        // The controller's own pause timer expires: counters restart from zero and keep climbing.
+        accumulator.updateDistance(0f); accumulator.updateCalories(0)
+        accumulator.updateDistance(.3f); accumulator.updateCalories(20)
+        assertThat(accumulator.snapshot().distance).isEqualTo(2f)
+        assertThat(accumulator.snapshot().calories).isEqualTo(100)
+        accumulator.resume()
+        accumulator.updateDistance(.5f); accumulator.updateCalories(35)
+        assertThat(accumulator.snapshot().distance).isWithin(1e-4f).of(2.2f)
+        assertThat(accumulator.snapshot().calories).isEqualTo(115)
+    }
+
+    @Test fun `a parked console's stale counters are still dropped when a new workout starts`() {
+        accumulator.holdCountersWhilePaused = true
+        // DMK while merely parked pauses the clock without the continuity policy: the previous
+        // console workout's totals must not be frozen into the new one.
+        accumulator.pause()
+        accumulator.updateDistance(3f); accumulator.updateCalories(250)
+        assertThat(accumulator.snapshot().distance).isEqualTo(3f)
+        accumulator.updateDistance(0f); accumulator.updateCalories(0)
+        accumulator.resume()
+        accumulator.updateDistance(.2f); accumulator.updateCalories(12)
+        assertThat(accumulator.snapshot().distance).isEqualTo(.2f)
+        assertThat(accumulator.snapshot().calories).isEqualTo(12)
+    }
+
+    @Test fun `other equipment keeps following the console while paused`() {
+        // A paused bike's flywheel can still be turning: its distance is real, not phantom.
+        accumulator.updateDistance(1f); accumulator.updateCalories(80)
+        accumulator.pause()
+        accumulator.updateDistance(1.4f); accumulator.updateCalories(110)
+        assertThat(accumulator.snapshot().distance).isEqualTo(1.4f)
+        assertThat(accumulator.snapshot().calories).isEqualTo(110)
+    }
+
     @Test fun `other equipment counters retain raw reset behaviour without belt pause policy`() {
         accumulator.updateDistance(2f); accumulator.updateCalories(100); accumulator.updateVerticalGain(20f)
         accumulator.updateDistance(0f); accumulator.updateCalories(0); accumulator.updateVerticalGain(0f)

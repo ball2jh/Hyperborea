@@ -197,8 +197,12 @@ class ProgramController @Inject constructor(
                 val info = hardware.deviceInfo.value ?: return false
                 fun quantize(value: Float, step: Float): Float = if (step > 0f) (value / step).roundToInt() * step else value
                 val ramping = engine?.state?.let { it.block.ramp && it.blockIndex > 0 } == true
+                // The taper ramps down from the last block's *programmed* speed. A rider who had
+                // already slowed the belt by hand must never be sped back up on the way to a stop:
+                // hold their speed until the ramp comes down to meet it.
+                val easingCeiling = if (engine?.state?.easingToStop == true) hardware.exerciseData.value?.speed?.takeIf { it >= .5f } else null
                 val target = ProgramTarget(
-                    event.target.speedKph.coerceIn(.5f, info.maxSpeed),
+                    event.target.speedKph.coerceIn(.5f, info.maxSpeed).let { if (easingCeiling != null) minOf(it, easingCeiling) else it },
                     quantize(event.target.inclinePercent, if (ramping) .01f else info.inclineStep).coerceIn(info.minIncline, info.maxIncline),
                 )
                 if (event.controlSpeed && target.speedKph != sentSpeed) {

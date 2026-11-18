@@ -52,7 +52,8 @@ class ProgramSessionViewModel @Inject constructor(private val controller: Progra
     }
     fun resume() { viewModelScope.launch { controller.resumeProgram() } }
     fun save(name: String) {
-        val program = state.value?.program?.copy(name = name) ?: return
+        // The run plan carries the automatic "Ease to a stop" block; save what the user built.
+        val program = state.value?.source?.copy(name = name) ?: return
         viewModelScope.launch {
             try { withContext(Dispatchers.IO) { store.save(program) }; message.value = "Program saved to My programs" }
             catch (e: kotlinx.coroutines.CancellationException) { throw e }

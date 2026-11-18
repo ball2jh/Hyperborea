@@ -73,6 +73,27 @@ class TrackMathTest {
     }
 
     @Test
+    fun `imperial laps are quarter miles and stay aligned with the mile readout`() {
+        // The field report: set to miles, laps drifted off the quarter-mile marks by lap 10.
+        val kmPerMile = 1.609344f
+        for (lap in 1..40) {
+            val boundaryKm = lap * 0.25f * kmPerMile
+            assertThat(TrackMath.completedLaps(boundaryKm - 0.002f, imperial = true)).isEqualTo(lap - 1)
+            assertThat(TrackMath.completedLaps(boundaryKm + 0.002f, imperial = true)).isEqualTo(lap)
+        }
+        // Ten 400 m laps are only 2.485 mi — the drift a mile-reading rider saw.
+        assertThat(TrackMath.completedLaps(4.0f, imperial = true)).isEqualTo(9)
+        assertThat(TrackMath.completedLaps(4.0f, imperial = false)).isEqualTo(10)
+    }
+
+    @Test
+    fun `imperial progress and continuous laps use the quarter-mile lap`() {
+        // 0.201168 km = an eighth of a mile = half a quarter-mile lap.
+        assertThat(TrackMath.lapProgress(0.201168f, imperial = true)).isWithin(1e-3f).of(0.5f)
+        assertThat(TrackMath.continuousLaps(1.609344f, imperial = true)).isWithin(1e-3f).of(4f)
+    }
+
+    @Test
     fun `progress stays below one across float-precision edges`() {
         // Sweep values near lap boundaries — float rounding must never produce progress >= 1.
         var km = 0.3999f

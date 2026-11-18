@@ -101,7 +101,11 @@ internal abstract class BaseFitProSession(
      * The adapter reads this back after [start] to refine the public DeviceInfo.
      */
     final override var detectedDeviceType: DeviceType = DeviceType.BIKE
-        protected set
+        protected set(value) {
+            field = value
+            // A paused belt is stopped: whatever its console counts meanwhile is not the rider's.
+            accumulator.holdCountersWhilePaused = value.isBeltBased
+        }
 
     // Accumulated absolute targets behind the relative Adjust± commands: one press = one step from
     // the last value WE sent (not the console's read-back, which may self-step on some units).
